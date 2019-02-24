@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from typing import List, Dict, Tuple
 
-from utils.ast import AbstractSyntaxTree, AbstractSyntaxNode, TerminalNode
+from utils.ast import AbstractSyntaxTree, SyntaxNode, TerminalNode
 from model.gnn import GatedGraphNeuralNetwork, main, AdjacencyList
 
 
@@ -85,7 +85,7 @@ class GraphASTEncoder(Encoder):
         for i, (batch_node_id, (tree_id, tree_node_id)) in enumerate(batch_graph_node2tree_node.items()):
             node = asts[tree_id].id2node[tree_node_id]
 
-            if isinstance(node, AbstractSyntaxNode):
+            if isinstance(node, SyntaxNode):
                 idx = self.grammar.type2id[node.type] + len(self.vocab)
 
             elif isinstance(node, TerminalNode):

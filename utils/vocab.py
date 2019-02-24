@@ -6,7 +6,7 @@ Usage:
 Options:
     -h --help                  Show this screen.
     --size=<int>               vocab size [default: 10000]
-    --freq_cutoff=<int>        frequency cutoff [default: 2]
+    --freq-cutoff=<int>        frequency cutoff [default: 2]
 """
 
 from collections import Counter
@@ -15,6 +15,8 @@ from itertools import chain
 import torch
 from docopt import docopt
 import json
+
+from utils.grammar import Grammar
 
 
 class VocabEntry:
@@ -27,10 +29,6 @@ class VocabEntry:
         self.word2id['<unk>'] = 3
 
         self.id2word = {v: k for k, v in self.word2id.items()}
-
-        # insert 100 indexed unks
-        for i in range(100):
-            self.add('UNK_%d' % i)
 
     def __getitem__(self, word):
         return self.word2id.get(word, self.unk_id)
@@ -87,7 +85,7 @@ class VocabEntry:
                                                                                        len(freq_words)))
 
         top_k_words = sorted(word_freq, key=lambda x: (-word_freq[x], x))[:size]
-        print('top 10 words: %s' % ', '.join(top_k_words[:10]))
+        print('top 30 words: %s' % ', '.join(top_k_words[:30]))
 
         for word in top_k_words:
             if len(vocab_entry) < size:
@@ -118,9 +116,35 @@ if __name__ == '__main__':
 
     args = docopt(__doc__)
     train_set = DataSet.load_from_jsonl(args['TRAIN_FILE'])
-    corpus = [change.previous_code_chunk + change.updated_code_chunk + change.context for change in train_set]
 
-    vocab_entry = VocabEntry.from_corpus(corpus, size=int(args['--size']), freq_cutoff=int(args['--freq_cutoff']))
-    print('built vocabulary %s' % vocab_entry)
+    # extract vocab and node types
+    node_types = set()
+    var_types = set()
+    src_words = []
+    tgt_words = []
+    for example in train_set:
+        for node in example.tree:
+            node_types.add(node.node_type)
 
-    torch.save(vocab_entry, open(args['VOCAB_FILE'], 'wb'))
+            if node.is_variable_node:
+                old_var_name = node.old_name
+                new_var_name = node.new_name
+
+                src_words.append(old_var_name)
+                tgt_words.append(new_var_name)
+                var_types.add(node.type)
+
+    print('building source words vocabulary')
+    src_var_vocab_entry = VocabEntry.from_corpus(src_words, size=int(args['--size']),
+                                                 freq_cutoff=int(args['--freq_cutoff']))
+    print('building target words vocabulary')
+    tgt_var_vocab_entry = VocabEntry.from_corpus(tgt_words, size=int(args['--size']),
+                                                 freq_cutoff=int(args['--freq_cutoff']))
+    print('init node types and variable types')
+    grammar = Grammar(node_types, var_types)
+
+    vocab = Vocab(source=src_var_vocab_entry,
+                  target=tgt_var_vocab_entry,
+                  grammar=grammar)
+
+    torch.save(vocab, open(args['VOCAB_FILE'], 'wb'))
