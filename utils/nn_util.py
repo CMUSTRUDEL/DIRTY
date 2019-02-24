@@ -6,7 +6,7 @@ import torch
 def glorot_init(params):
     for p in params:
         if len(p.data.size()) > 1:
-            torch.nn.init.xavier_normal(p.data)
+            torch.nn.init.xavier_normal_(p.data)
 
 
 def batch_iter(data, batch_size, shuffle=False):

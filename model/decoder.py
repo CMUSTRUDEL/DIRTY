@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from utils import nn_util
+
 
 class Decoder(nn.Module):
     def __init__(self):
@@ -18,4 +20,7 @@ class SimpleDecoder(Decoder):
         Given a batch of encoded ASTs, compute the log-likelihood of generating all possible renamings
         """
 
-        return self.state2names(src_ast_encoding)
+        logits = self.state2names(src_ast_encoding)
+        p = torch.log_softmax(logits, dim=-1)
+
+        return p

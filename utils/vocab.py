@@ -102,7 +102,6 @@ class Vocab(object):
     def __init__(self, **kwargs):
         self.entries = []
         for key, item in kwargs.items():
-            assert isinstance(item, VocabEntry)
             self.__setattr__(key, item)
 
             self.entries.append(key)
@@ -112,10 +111,10 @@ class Vocab(object):
 
 
 if __name__ == '__main__':
-    from utils.dataset import DataSet
+    from utils.dataset import Dataset
 
     args = docopt(__doc__)
-    train_set = DataSet.load_from_jsonl(args['TRAIN_FILE'])
+    train_set = Dataset.iter_from_compressed_file(args['TRAIN_FILE'], progress=True)
 
     # extract vocab and node types
     node_types = set()
@@ -123,7 +122,7 @@ if __name__ == '__main__':
     src_words = []
     tgt_words = []
     for example in train_set:
-        for node in example.tree:
+        for node in example.ast:
             node_types.add(node.node_type)
 
             if node.is_variable_node:
@@ -136,12 +135,15 @@ if __name__ == '__main__':
 
     print('building source words vocabulary')
     src_var_vocab_entry = VocabEntry.from_corpus(src_words, size=int(args['--size']),
-                                                 freq_cutoff=int(args['--freq_cutoff']))
+                                                 freq_cutoff=int(args['--freq-cutoff']))
     print('building target words vocabulary')
     tgt_var_vocab_entry = VocabEntry.from_corpus(tgt_words, size=int(args['--size']),
-                                                 freq_cutoff=int(args['--freq_cutoff']))
+                                                 freq_cutoff=int(args['--freq-cutoff']))
     print('init node types and variable types')
     grammar = Grammar(node_types, var_types)
+
+    print('Node types:', node_types)
+    print('Variable types:', var_types)
 
     vocab = Vocab(source=src_var_vocab_entry,
                   target=tgt_var_vocab_entry,

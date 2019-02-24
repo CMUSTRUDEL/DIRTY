@@ -1,7 +1,13 @@
 from collections import OrderedDict
 from io import StringIO
-import json
+import ujson as json
 from typing import Dict, List
+import numpy as np
+
+import torch
+
+from utils.util import cached_property
+from utils.vocab import VocabEntry
 
 
 class SyntaxNode(object):
@@ -29,18 +35,21 @@ class SyntaxNode(object):
 
     @classmethod
     def from_json_dict(cls, json_dict: Dict) -> 'SyntaxNode':
-        named_fields = {k: v for k, v in json_dict.items() if k not in {'node_id', 'node_type', 'children', 'address'}}
+        named_fields = {k: v for k, v in json_dict.items() if k not in {'node_id', 'node_type', 'children', 'address', 'x', 'y'}}
+
+        if 'x' in json_dict:
+            named_fields['x'] = SyntaxNode.from_json_dict(json_dict['x'])
+        if 'y' in json_dict:
+            named_fields['y'] = SyntaxNode.from_json_dict(json_dict['y'])
+
         node = cls(json_dict['node_id'],
                    json_dict['node_type'],
                    json_dict['address'],
                    named_fields=named_fields)
 
+        children_list = []
         if 'children' in json_dict:
-            children_list = json_dict['children']
-        else:
-            children_list = []
-            if 'x' in json_dict: children_list.append(json_dict['x'])
-            if 'y' in json_dict: children_list.append(json_dict['y'])
+            children_list.extend(json_dict['children'])
 
         for child_dict in children_list:
             child_node = SyntaxNode.from_json_dict(child_dict)
@@ -49,12 +58,43 @@ class SyntaxNode(object):
         return node
 
     @property
+    def is_variable_node(self):
+        return self.node_type == 'var'
+
+    @cached_property
+    def size(self):
+        size = 1
+        for member in self.member_nodes:
+            size += member.size
+
+        return size
+
+    @property
+    def member_nodes(self):
+        if hasattr(self, 'x'):
+            yield self.x
+        if hasattr(self, 'y'):
+            yield self.y
+
+        for child in self.children:
+            yield child
+
+    @property
+    def named_succeeding_fields(self):
+        if hasattr(self, 'x'):
+            yield 'x', self.x
+        if hasattr(self, 'y'):
+            yield 'y', self.y
+
+        yield 'children', self.children
+
+    @property
     def descendant_nodes(self):
         def _visit(node):
             yield node
 
-            for child_node in self.children:
-                yield from _visit(child_node)
+            for member_node in node.member_nodes:
+                yield from _visit(member_node)
         yield from _visit(self)
 
     def __iter__(self):
@@ -62,8 +102,8 @@ class SyntaxNode(object):
 
     def __hash__(self):
         code = hash(self.node_id, self.node_type, self.address)
-        for child in self.children:
-            code = code + 37 * hash(child)
+        for member_node in self.member_nodes:
+            code = code + 37 * hash(member_node)
 
         return code
 
@@ -95,9 +135,17 @@ class SyntaxNode(object):
         sb.write('(')
         sb.write(f'Node_{self.node_id}-{self.node_type}')
 
-        for child in self.children:
-            sb.write(' ')
-            child.to_string(sb)
+        for field_name, node in self.named_succeeding_fields:
+            if field_name in ('x', 'y'):
+                sb.write(f' ({field_name} ')
+                node.to_string(sb)
+                sb.write(')')  # of x
+            else:
+                sb.write(' (children ')
+                for child in self.children:
+                    sb.write(' ')
+                    child.to_string(sb)
+                sb.write(')')  # of children field
 
         sb.write(')')  # of node
 
@@ -116,10 +164,12 @@ class TerminalNode(SyntaxNode):
 
 
 class AbstractSyntaxTree(object):
-    def __init__(self, ast: SyntaxNode, compilation_unit: str = None, code: str = None):
-        self.ast = ast
+    def __init__(self, root: SyntaxNode, compilation_unit: str = None, code: str = None):
+        self.root = root
         self.compilation_unit = compilation_unit
         self.code = code
+
+        self._init_index()
 
     @classmethod
     def from_json_dict(cls, json_dict: Dict) -> 'AbstractSyntaxTree':
@@ -128,13 +178,70 @@ class AbstractSyntaxTree(object):
 
         return tree
 
+    @property
+    def size(self):
+        return self.root.size
+
+    def _init_index(self):
+        adj_list = []
+        variable_nodes = []
+        id2node = OrderedDict()
+
+        def _index_sub_tree(node: SyntaxNode, parent_node: SyntaxNode):
+            if parent_node:
+                adj_list.append((parent_node, node))
+
+            id2node[node.node_id] = node
+            for member_node in node.member_nodes:
+                _index_sub_tree(member_node, node)
+
+            if node.is_variable_node:
+                variable_nodes.append(node)
+
+        _index_sub_tree(self.root, None)
+
+        setattr(self, 'adjacency_list', adj_list)
+        setattr(self, 'id_to_node', id2node)
+        setattr(self, 'adjacent_terminal_nodes', [])  # TODO: implement this!
+        setattr(self, 'variable_nodes', variable_nodes)
+
+    def __iter__(self):
+        return self.root.__iter__()
+
+    @staticmethod
+    def to_batched_prediction_target(source_asts: List['AbstractSyntaxTree'], variable_name_maps: List[Dict[int, str]], vocab: VocabEntry):
+        batch_size = len(source_asts)
+        max_node_size = max(len(tree.variable_nodes) for tree in source_asts)
+        tgt_var_node_ids = np.zeros((batch_size, max_node_size), dtype=np.int64)
+        tgt_name_ids = np.zeros((batch_size, max_node_size), dtype=np.int64)
+        tgt_var_node_mask = torch.zeros(batch_size, max_node_size)
+
+        for e_id, (ast, var_name_map) in enumerate(zip(source_asts, variable_name_maps)):
+            _var_node_ids = []
+            _tgt_name_ids = []
+            for node_id, new_name in var_name_map.items():
+                _var_node_ids.append(node_id)
+                new_name_id = vocab[new_name]
+                _tgt_name_ids.append(new_name_id)
+
+            tgt_var_node_ids[e_id, :len(_var_node_ids)] = _var_node_ids
+            tgt_name_ids[e_id, :len(_var_node_ids)] = _tgt_name_ids
+            tgt_var_node_mask[e_id, :len(_var_node_ids)] = 1.
+
+        tgt_var_node_ids = torch.from_numpy(tgt_var_node_ids)
+        tgt_name_ids = torch.from_numpy(tgt_name_ids)
+
+        return dict(tgt_variable_node_ids=tgt_var_node_ids,
+                    tgt_name_ids=tgt_name_ids,
+                    tgt_variable_node_mask=tgt_var_node_mask)
+
 
 if __name__ == '__main__':
     json_str = """
 {
     "function": "ft_strncat",
     "raw_code": "__int64 __fastcall ft_strncat(__int64 @@VAR_2@@a1@@s1, __int64 @@VAR_3@@a2@@s2, unsigned __int64 @@VAR_4@@a3@@n)\n{\n  __int64 @@VAR_0@@v4@@i; // [rsp+18h] [rbp-10h]\n  unsigned __int64 @@VAR_1@@v5@@j; // [rsp+20h] [rbp-8h]\n\n  @@VAR_0@@v4@@i = 0LL;\n  @@VAR_1@@v5@@j = 0LL;\n  while ( *(_BYTE *)(@@VAR_2@@a1@@s1 + @@VAR_0@@v4@@i) )\n    ++@@VAR_0@@v4@@i;\n  while ( *(_BYTE *)(@@VAR_3@@a2@@s2 + @@VAR_1@@v5@@j) && @@VAR_1@@v5@@j < @@VAR_4@@a3@@n )\n    *(_BYTE *)(@@VAR_0@@v4@@i++ + @@VAR_2@@a1@@s1) = *(_BYTE *)(@@VAR_3@@a2@@s2 + @@VAR_1@@v5@@j++);\n  *(_BYTE *)(@@VAR_2@@a1@@s1 + @@VAR_0@@v4@@i) = 0;\n  return @@VAR_2@@a1@@s1;\n}\n",
-    "ast": {
+    "root": {
         "node_type": "block",
         "node_id": 0,
         "children": [
