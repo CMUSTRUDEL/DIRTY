@@ -30,6 +30,7 @@ from model.model import RenamingModel
 from utils import nn_util
 from utils.ast import AbstractSyntaxTree
 from utils.dataset import Dataset, Example
+from utils.evaluation import Evaluator
 from utils.vocab import Vocab, VocabEntry
 
 
@@ -56,19 +57,23 @@ def train(args):
     optimizer = torch.optim.Adam(params, lr=0.001)
     nn_util.glorot_init(params)
 
+    train_set = Dataset(config['data']['train_file'])
+    dev_set = Dataset(config['data']['dev_file'])
+
+    print(f'Training set size {len(train_set)}, dev set size {len(dev_set)}', file=sys.stderr)
+
     # training loop
-    train_iter = 0.
+    train_iter = epoch = 0.
     log_every = 10
     cum_loss = cum_examples = 0.
     t1 = time.time()
 
     while True:
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
-        train_set_iter: Iterable[Example] = Dataset.batch_iter_from_compressed_file('data/0-trees.tar.gz',
-                                                                                    batch_size=32,
-                                                                                    shuffle=True)
+        train_set_iter = train_set.batch_iter_from_compressed_file(batch_size=config['train']['batch_size'], shuffle=True)
+        epoch += 1
 
-        for batch_examples in tqdm(train_set_iter, file=sys.stdout):
+        for batch_examples in train_set_iter:
             train_iter += 1
             optimizer.zero_grad()
 
@@ -95,6 +100,12 @@ def train(args):
 
             cum_loss = cum_examples = 0.
             t1 = time.time()
+
+        print(f'Epoch {epoch} finished', file=sys.stderr)
+        t1 = time.time()
+        eval_results = Evaluator.decode_and_evaluate(model, dev_set)
+        print(f'Evaluation result {eval_results} (took {time.time() - t1}s)')
+        t1 = time.time()
 
 
 if __name__ == '__main__':

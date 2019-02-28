@@ -41,6 +41,8 @@ class SyntaxNode(object):
             named_fields['x'] = SyntaxNode.from_json_dict(json_dict['x'])
         if 'y' in json_dict:
             named_fields['y'] = SyntaxNode.from_json_dict(json_dict['y'])
+        if 'z' in json_dict:
+            named_fields['z'] = SyntaxNode.from_json_dict(json_dict['z'])
 
         node = cls(json_dict['node_id'],
                    json_dict['node_type'],
@@ -75,6 +77,8 @@ class SyntaxNode(object):
             yield self.x
         if hasattr(self, 'y'):
             yield self.y
+        if hasattr(self, 'z'):
+            yield self.z
 
         for child in self.children:
             yield child
@@ -85,6 +89,8 @@ class SyntaxNode(object):
             yield 'x', self.x
         if hasattr(self, 'y'):
             yield 'y', self.y
+        if hasattr(self, 'z'):
+            yield 'z', self.z
 
         yield 'children', self.children
 
@@ -169,6 +175,11 @@ class AbstractSyntaxTree(object):
         self.compilation_unit = compilation_unit
         self.code = code
 
+        self.adjacency_list = None
+        self.id_to_node = None
+        self.adjacent_terminal_nodes = None
+        self.variable_nodes = None
+        self.variables = None
         self._init_index()
 
     @classmethod
@@ -185,6 +196,7 @@ class AbstractSyntaxTree(object):
     def _init_index(self):
         adj_list = []
         variable_nodes = []
+        variables = OrderedDict()
         id2node = OrderedDict()
 
         def _index_sub_tree(node: SyntaxNode, parent_node: SyntaxNode):
@@ -197,6 +209,7 @@ class AbstractSyntaxTree(object):
 
             if node.is_variable_node:
                 variable_nodes.append(node)
+                variables.setdefault(node.old_name, []).append(node)
 
         _index_sub_tree(self.root, None)
 
@@ -204,36 +217,10 @@ class AbstractSyntaxTree(object):
         setattr(self, 'id_to_node', id2node)
         setattr(self, 'adjacent_terminal_nodes', [])  # TODO: implement this!
         setattr(self, 'variable_nodes', variable_nodes)
+        setattr(self, 'variables', variables)
 
     def __iter__(self):
         return self.root.__iter__()
-
-    @staticmethod
-    def to_batched_prediction_target(source_asts: List['AbstractSyntaxTree'], variable_name_maps: List[Dict[int, str]], vocab: VocabEntry):
-        batch_size = len(source_asts)
-        max_node_size = max(len(tree.variable_nodes) for tree in source_asts)
-        tgt_var_node_ids = np.zeros((batch_size, max_node_size), dtype=np.int64)
-        tgt_name_ids = np.zeros((batch_size, max_node_size), dtype=np.int64)
-        tgt_var_node_mask = torch.zeros(batch_size, max_node_size)
-
-        for e_id, (ast, var_name_map) in enumerate(zip(source_asts, variable_name_maps)):
-            _var_node_ids = []
-            _tgt_name_ids = []
-            for node_id, new_name in var_name_map.items():
-                _var_node_ids.append(node_id)
-                new_name_id = vocab[new_name]
-                _tgt_name_ids.append(new_name_id)
-
-            tgt_var_node_ids[e_id, :len(_var_node_ids)] = _var_node_ids
-            tgt_name_ids[e_id, :len(_var_node_ids)] = _tgt_name_ids
-            tgt_var_node_mask[e_id, :len(_var_node_ids)] = 1.
-
-        tgt_var_node_ids = torch.from_numpy(tgt_var_node_ids)
-        tgt_name_ids = torch.from_numpy(tgt_name_ids)
-
-        return dict(tgt_variable_node_ids=tgt_var_node_ids,
-                    tgt_name_ids=tgt_name_ids,
-                    tgt_variable_node_mask=tgt_var_node_mask)
 
 
 if __name__ == '__main__':

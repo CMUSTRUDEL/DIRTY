@@ -19,6 +19,9 @@ import json
 from utils.grammar import Grammar
 
 
+SAME_VARIABLE_TOKEN = '<same>'
+
+
 class VocabEntry:
     def __init__(self):
         self.word2id = dict()
@@ -76,7 +79,7 @@ class VocabEntry:
         return entry
 
     @staticmethod
-    def from_corpus(corpus, size, freq_cutoff=0):
+    def from_corpus(corpus, size, freq_cutoff=0, predefined_tokens=None):
         vocab_entry = VocabEntry()
 
         word_freq = Counter(chain(*corpus))
@@ -86,6 +89,10 @@ class VocabEntry:
 
         top_k_words = sorted(word_freq, key=lambda x: (-word_freq[x], x))[:size]
         print('top 30 words: %s' % ', '.join(top_k_words[:30]))
+
+        if predefined_tokens:
+            for token in predefined_tokens:
+                vocab_entry.add(token)
 
         for word in top_k_words:
             if len(vocab_entry) < size:
@@ -138,7 +145,8 @@ if __name__ == '__main__':
                                                  freq_cutoff=int(args['--freq-cutoff']))
     print('building target words vocabulary')
     tgt_var_vocab_entry = VocabEntry.from_corpus(tgt_words, size=int(args['--size']),
-                                                 freq_cutoff=int(args['--freq-cutoff']))
+                                                 freq_cutoff=int(args['--freq-cutoff']),
+                                                 predefined_tokens=[SAME_VARIABLE_TOKEN])
     print('init node types and variable types')
     grammar = Grammar(node_types, var_types)
 
