@@ -12,6 +12,7 @@ Options:
     --work-dir=<dir>                            work dir [default: data/exp_runs/]
 """
 
+import random
 import time
 from typing import List, Tuple, Dict, Iterable
 import sys
@@ -20,6 +21,7 @@ import os
 import json
 from docopt import docopt
 from tqdm import tqdm
+import psutil, gc
 
 import torch
 
@@ -32,6 +34,12 @@ from utils.ast import AbstractSyntaxTree
 from utils.dataset import Dataset, Example
 from utils.evaluation import Evaluator
 from utils.vocab import Vocab, VocabEntry
+
+
+import os
+# os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+# os.environ['GPU_DEBUG'] = '2'
+# from gpu_profile import gpu_profile
 
 
 def train(args):
@@ -51,7 +59,10 @@ def train(args):
     encoder = GraphASTEncoder(ast_node_encoding_size=128, grammar=vocab.grammar, vocab=vocab)
     decoder = SimpleDecoder(ast_node_encoding_size=128,
                             tgt_name_vocab_size=len(vocab.target))
-    model = RenamingModel(encoder, decoder)
+    model = RenamingModel(encoder, decoder, config)
+
+    if args['--cuda']:
+        model = model.cuda()
 
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.Adam(params, lr=0.001)
@@ -59,18 +70,19 @@ def train(args):
 
     train_set = Dataset(config['data']['train_file'])
     dev_set = Dataset(config['data']['dev_file'])
+    batch_size = config['train']['batch_size']
 
     print(f'Training set size {len(train_set)}, dev set size {len(dev_set)}', file=sys.stderr)
 
     # training loop
     train_iter = epoch = 0.
-    log_every = 10
+    log_every = config['train']['log_every']
     cum_loss = cum_examples = 0.
     t1 = time.time()
 
     while True:
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
-        train_set_iter = train_set.batch_iter_from_compressed_file(batch_size=config['train']['batch_size'], shuffle=True)
+        train_set_iter = train_set.batch_iterator(batch_size=batch_size, progress=True, shuffle=True, num_workers=5)
         epoch += 1
 
         for batch_examples in train_set_iter:
@@ -78,6 +90,7 @@ def train(args):
             optimizer.zero_grad()
 
             src_asts = [e.ast for e in batch_examples]
+            # print([ast.size for ast in src_asts], file=sys.stderr)
             rename_maps = [e.variable_name_map for e in batch_examples]
 
             tgt_log_probs = model(src_asts, rename_maps)
@@ -88,23 +101,27 @@ def train(args):
             cum_examples += len(batch_examples)
 
             loss.backward()
+            # print(loss.item())
+            # cpuStats()
+            # memReport()
 
             # clip gradient
             grad_norm = torch.nn.utils.clip_grad_norm_(params, 5.)
 
             optimizer.step()
+            del loss
 
-        if train_iter % log_every == 0:
-            print(f'[Learner] train_iter={train_iter} avg. loss={cum_loss / cum_examples}, '
-                  f'{cum_examples} batch_examples ({cum_examples / (time.time() - t1)} batch_examples/s)', file=sys.stderr)
+            if train_iter % log_every == 0:
+                print(f'[Learner] train_iter={train_iter} avg. loss={cum_loss / cum_examples}, '
+                      f'{cum_examples} batch_examples ({cum_examples / (time.time() - t1)} examples/s)', file=sys.stderr)
 
-            cum_loss = cum_examples = 0.
-            t1 = time.time()
+                cum_loss = cum_examples = 0.
+                t1 = time.time()
 
         print(f'Epoch {epoch} finished', file=sys.stderr)
         t1 = time.time()
         eval_results = Evaluator.decode_and_evaluate(model, dev_set)
-        print(f'Evaluation result {eval_results} (took {time.time() - t1}s)')
+        print(f'Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
         t1 = time.time()
 
 
@@ -120,5 +137,7 @@ if __name__ == '__main__':
     if use_cuda:
         torch.cuda.manual_seed(seed)
     np.random.seed(seed * 13 // 7)
+    random.seed(seed * 17 // 7)
 
+    #sys.settrace(gpu_profile)
     train(cmd_args)

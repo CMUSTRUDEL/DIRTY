@@ -19,8 +19,14 @@ class SimpleDecoder(Decoder):
         """
         Given a batch of encoded ASTs, compute the log-likelihood of generating all possible renamings
         """
-
-        logits = self.state2names(src_ast_encoding)
-        p = torch.log_softmax(logits, dim=-1)
-
-        return p
+        # (all_var_node_num, tgt_vocab_size)
+        logits = self.state2names(src_ast_encoding['prediction_node_encoding'])
+        batched_p_names = torch.log_softmax(logits, dim=-1)
+        # logits = self.state2names(src_ast_encoding)
+        # p = torch.log_softmax(logits, dim=-1)
+        
+        # idx = src_ast_encoding.unpacked_variable_node_ids
+        # (batch_size, max_variable_node_num, tgt_vocab_size)
+        # batched_p_names.unsqueeze(-1).expand_as(src_ast_encoding.batch_size, -1, -1).scatter(idx, dim=1)
+        
+        return batched_p_names

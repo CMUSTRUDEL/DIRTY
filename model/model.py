@@ -3,6 +3,7 @@ from typing import List, Dict
 import torch
 import torch.nn as nn
 
+from utils import nn_util
 from utils.ast import AbstractSyntaxTree
 from model.decoder import Decoder
 from model.encoder import Encoder
@@ -11,7 +12,7 @@ from utils.vocab import SAME_VARIABLE_TOKEN
 
 
 class RenamingModel(nn.Module):
-    def __init__(self, encoder: Encoder, decoder: Decoder):
+    def __init__(self, encoder: Encoder, decoder: Decoder, config: Dict):
         super(RenamingModel, self).__init__()
 
         self.encoder = encoder
@@ -41,26 +42,21 @@ class RenamingModel(nn.Module):
         # src_ast_encoding: (batch_size, max_ast_node_num, node_encoding_size)
         # src_ast_mask: (batch_size, max_ast_node_num)
         context_encoding = self.encoder(source_asts)
-        src_ast_encoding = context_encoding['batch_tree_node_encoding']
-        src_ast_mask = context_encoding['batch_tree_node_masks']
 
-        prediction_target = BatchUtil.to_batched_prediction_target(source_asts, variable_name_maps, vocab=self.vocab.target)
-        # (batch_size, max_variable_node_num)
-        tgt_var_node_ids = prediction_target['tgt_variable_node_ids'].to(self.device)
-        # (batch_size, max_variable_node_num)
-        tgt_var_node_mask = prediction_target['tgt_variable_node_mask'].to(self.device)
-        # (batch_size, max_variable_node_num)
-        tgt_name_ids = prediction_target['tgt_name_ids'].to(self.device)
+        prediction_target = BatchUtil.to_batched_prediction_target(source_asts, variable_name_maps,
+                                                                   context_encoding,
+                                                                   vocab=self.vocab.target)
+        prediction_target = nn_util.to(prediction_target, self.device)
 
-        # (batch_size, max_ast_node_num, tgt_vocab_size)
-        var_name_log_probs = self.decoder(src_ast_encoding)
-
-        # (batch_size, max_variable_node_num, tgt_vocab_size)
-        tgt_var_node_name_log_probs = torch.gather(var_name_log_probs, dim=1, index=tgt_var_node_ids.unsqueeze(-1).expand(-1, -1, var_name_log_probs.size(-1)))
+        # (batch_var_node_num, tgt_vocab_size)
+        packed_var_name_log_probs = self.decoder(context_encoding)
+        # (batch_var_node_num)
+        packed_tgt_var_node_name_log_probs = torch.gather(packed_var_name_log_probs,
+                                                          dim=-1,
+                                                          index=prediction_target['packed_variable_tgt_name_id'].unsqueeze(-1)).squeeze(-1)
         # (batch_size, max_variable_node_num)
-        tgt_name_log_probs = torch.gather(tgt_var_node_name_log_probs, dim=-1, index=tgt_name_ids.unsqueeze(-1)).squeeze(-1)
-        # mask out unused probability entries
-        tgt_name_log_probs = tgt_name_log_probs * tgt_var_node_mask
+        tgt_name_log_probs = packed_tgt_var_node_name_log_probs[context_encoding['prediction_node_restoration_indices']]
+        tgt_name_log_probs = tgt_name_log_probs * context_encoding['prediction_node_restoration_indices_mask']
 
         # (batch_size)
         ast_log_probs = tgt_name_log_probs.sum(dim=-1)
@@ -73,31 +69,44 @@ class RenamingModel(nn.Module):
         """
 
         context_encoding = self.encoder(source_asts)
-        # src_ast_encoding: (batch_size, max_ast_node_num, node_encoding_size)
-        src_ast_encoding = context_encoding['batch_tree_node_encoding']
-
-        # (batch_size, max_ast_node_num, tgt_vocab_size)
-        var_name_log_probs = self.decoder(src_ast_encoding)
+        # (prediction_size, tgt_vocab_size)
+        packed_var_name_log_probs = self.decoder(context_encoding)
+        best_var_name_log_probs, best_var_name_ids = torch.max(packed_var_name_log_probs, dim=-1)
 
         variable_rename_results = []
+        pred_node_ptr = 0
         for ast_id, ast in enumerate(source_asts):
             variable_rename_result = dict()
             for var_name, var_nodes in ast.variables.items():
-                var_node_ids = [node.id for node in var_nodes]
-
-                # (node_num, tgt_vocab_size)
-                tgt_var_name_log_probs = var_name_log_probs[ast_id, torch.tensor(var_node_ids).to(self.device)]
-                # (tgt_vocab_size)
-                marginal_log_prob = torch.logsumexp(tgt_var_name_log_probs, dim=0)
-                best_log_prob, token_id = torch.max(marginal_log_prob, dim=0)
-                new_var_name = self.vocab.target.id2word[token_id.item()]
+                var_name_prob = best_var_name_log_probs[pred_node_ptr].item()
+                token_id = best_var_name_ids[pred_node_ptr].item()
+                new_var_name = self.vocab.target.id2word[token_id]
 
                 if new_var_name == SAME_VARIABLE_TOKEN:
                     new_var_name = var_name
 
                 variable_rename_result[var_name] = {'new_name': new_var_name,
-                                                    'prob': best_log_prob.item()}
+                                                    'prob': var_name_prob}
+
+                pred_node_ptr += 1
 
             variable_rename_results.append(variable_rename_result)
 
         return variable_rename_results
+
+    @classmethod
+    def build(cls, config):
+        encoder = Encoder.build(config['encoder'])
+        decoder = Decoder.build(config['decoder'])
+
+        model = cls(encoder, decoder, config).eval()
+        return model
+
+    def save(self, model_path, **kwargs):
+        params = {
+            'config': self.config,
+            'state_dict': self.state_dict(),
+            'kwargs': kwargs
+        }
+
+        torch.save(params, model_path)

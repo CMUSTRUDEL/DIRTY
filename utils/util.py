@@ -1,3 +1,7 @@
+import psutil, gc, sys, os
+import torch
+
+
 class cached_property(object):
     """
     A property that is only computed once per instance and then replaces
@@ -16,3 +20,19 @@ class cached_property(object):
             return self
         value = obj.__dict__[self.func.__name__] = self.func(obj)
         return value
+
+
+def memReport():
+    for obj in gc.get_objects():
+        if torch.is_tensor(obj):
+            print(type(obj), obj.size(), obj.element_size() * obj.nelement() / 1024 / 1024, file=sys.stderr)
+
+
+def cpuStats():
+    print(sys.version)
+    print(psutil.cpu_percent())
+    print(psutil.virtual_memory())  # physical memory usage
+    pid = os.getpid()
+    py = psutil.Process(pid)
+    memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
+    print('memory GB:', memoryUse, file=sys.stderr)

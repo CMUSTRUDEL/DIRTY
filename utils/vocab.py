@@ -19,7 +19,7 @@ import json
 from utils.grammar import Grammar
 
 
-SAME_VARIABLE_TOKEN = '<same>'
+SAME_VARIABLE_TOKEN = '<IDENTITY>'
 
 
 class VocabEntry:
@@ -121,14 +121,14 @@ if __name__ == '__main__':
     from utils.dataset import Dataset
 
     args = docopt(__doc__)
-    train_set = Dataset.iter_from_compressed_file(args['TRAIN_FILE'], progress=True)
+    train_set = Dataset(args['TRAIN_FILE'])
 
     # extract vocab and node types
     node_types = set()
     var_types = set()
     src_words = []
     tgt_words = []
-    for example in train_set:
+    for example in train_set.get_iterator(progress=True, num_workers=5):
         for node in example.ast:
             node_types.add(node.node_type)
 
@@ -137,21 +137,23 @@ if __name__ == '__main__':
                 new_var_name = node.new_name
 
                 src_words.append(old_var_name)
-                tgt_words.append(new_var_name)
+
+                if old_var_name != new_var_name:
+                    tgt_words.append(new_var_name)
                 var_types.add(node.type)
 
     print('building source words vocabulary')
-    src_var_vocab_entry = VocabEntry.from_corpus(src_words, size=int(args['--size']),
+    src_var_vocab_entry = VocabEntry.from_corpus([src_words], size=int(args['--size']),
                                                  freq_cutoff=int(args['--freq-cutoff']))
     print('building target words vocabulary')
-    tgt_var_vocab_entry = VocabEntry.from_corpus(tgt_words, size=int(args['--size']),
+    tgt_var_vocab_entry = VocabEntry.from_corpus([tgt_words], size=int(args['--size']),
                                                  freq_cutoff=int(args['--freq-cutoff']),
                                                  predefined_tokens=[SAME_VARIABLE_TOKEN])
     print('init node types and variable types')
     grammar = Grammar(node_types, var_types)
 
     print('Node types:', node_types)
-    print('Variable types:', var_types)
+    # print('Variable types:', var_types)
 
     vocab = Vocab(source=src_var_vocab_entry,
                   target=tgt_var_vocab_entry,

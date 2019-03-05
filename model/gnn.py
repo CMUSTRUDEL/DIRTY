@@ -6,14 +6,20 @@ from torch import nn as nn
 
 class AdjacencyList:
     """represent the topology of a graph"""
-    def __init__(self, node_num: int, adj_list: List, device: torch.device):
+    def __init__(self, node_num: int, adj_list: List, device: torch.device = None):
         self.node_num = node_num
+        if device is None:
+            device = torch.device('cpu')
         self.data = torch.tensor(adj_list, dtype=torch.long, device=device)
         self.edge_num = len(adj_list)
 
     @property
     def device(self):
         return self.data.device
+
+    def to(self, device: torch.device) -> 'AdjacencyList':
+        self.data = self.data.to(device)
+        return self
 
     def __getitem__(self, item):
         return self.data[item]
@@ -48,7 +54,7 @@ class GatedGraphNeuralNetwork(nn.Module):
                 self.state_to_message_linears[layer_name] = state_to_msg_linear_layer_i_type_j
 
             layer_residual_connections = self.residual_connections.get(layer_idx, [])
-            rnn_cell_layer_i = nn.GRUCell(self.hidden_size * (1 + len(layer_residual_connections)), self.hidden_size)
+            rnn_cell_layer_i = nn.LSTMCell(self.hidden_size * (1 + len(layer_residual_connections)), self.hidden_size)
             self.rnn_cells.append(rnn_cell_layer_i)
 
         self.state_to_message_dropout_layer = nn.Dropout(self.state_to_message_dropout)

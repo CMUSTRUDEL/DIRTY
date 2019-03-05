@@ -9,6 +9,22 @@ def glorot_init(params):
             torch.nn.init.xavier_normal_(p.data)
 
 
+def to(data, device: torch.device):
+    if isinstance(data, dict):
+        for key, val in data.items():
+            if torch.is_tensor(val):
+                data[key] = val.to(device)
+    elif isinstance(data, list):
+        for i in range(len(data)):
+            val = data[i]
+            if torch.is_tensor(val):
+                data[i] = val.to(device)
+    else:
+        raise ValueError()
+
+    return data
+
+
 def batch_iter(data, batch_size, shuffle=False):
     batch_num = math.ceil(len(data) / batch_size)
     index_array = list(range(len(data)))
