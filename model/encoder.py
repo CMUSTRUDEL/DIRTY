@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 import numpy as np
 from typing import List, Dict, Tuple
 
@@ -16,7 +16,62 @@ class Encoder(nn.Module):
 
 
 class PackedGraph(object):
-    pass
+    def __init__(self, asts: List[AbstractSyntaxTree]):
+        self.trees = []
+        self.node_groups: List[Dict] = []
+        self._group_node_count = defaultdict(int)
+        self.ast_node_to_packed_node: List[Dict] = []
+        self.packed_node_to_ast_node: Dict = OrderedDict()
+        self._nodes = OrderedDict()
+
+        for ast in asts:
+            self.register_tree(ast)
+
+    def register_tree(self, ast: AbstractSyntaxTree):
+        ast_id = self.tree_num
+        self.trees.append(ast)
+        self.node_groups.append(dict())
+
+        for node in ast:
+            self.register_node(ast_id, node.node_id)
+
+    def register_node(self, tree_id, node, group='ast_nodes', return_node_index_in_group=False):
+        if group not in self.node_groups[tree_id]:
+            self.node_groups[tree_id][group] = OrderedDict()
+
+        node_group = self.node_groups[tree_id][group]
+        packed_node_id = self.size
+        node_group[node] = packed_node_id
+        self._group_node_count[group] += 1
+        self._nodes[packed_node_id] = (tree_id, group, node)
+
+        if return_node_index_in_group:
+            node_index_in_group = self._group_node_count[group] - 1
+            return packed_node_id, node_index_in_group
+
+        return packed_node_id
+
+    def get_packed_node_id(self, tree_id, node, group='ast_nodes'):
+        if isinstance(node, SyntaxNode):
+            node = node.node_id
+        return self.node_groups[tree_id][group][node]
+
+    @property
+    def size(self):
+        return len(self._nodes)
+
+    @property
+    def nodes(self):
+        return self._nodes
+
+    def get_nodes_by_group(self, group):
+        for i in range(self.tree_num):
+            for node, packed_node_id in self.node_groups[i][group].items():
+                yield node, packed_node_id
+
+    @property
+    def tree_num(self):
+        return len(self.trees)
 
 
 class GraphASTEncoder(Encoder):
@@ -27,12 +82,15 @@ class GraphASTEncoder(Encoder):
                  vocab: Vocab):
         super(GraphASTEncoder, self).__init__()
 
+        self.connections = ['master_node']
+
         self.gnn = GatedGraphNeuralNetwork(hidden_size=ast_node_encoding_size,
                                            layer_timesteps=[5, 2, 5, 2],
                                            residual_connections={1: [0], 3: [1]},
-                                           num_edge_types=4)
+                                           num_edge_types=8)
 
-        self.src_node_embedding = nn.Embedding(len(vocab.source) + len(grammar.syntax_types), ast_node_encoding_size)
+        self.src_node_embedding = nn.Embedding(len(vocab.source) + len(grammar.syntax_types) + 1, ast_node_encoding_size)
+        self.master_node_embed_idx = self.src_node_embedding.num_embeddings - 1
         self.vocab = vocab
         self.grammar = grammar
 
@@ -43,160 +101,121 @@ class GraphASTEncoder(Encoder):
     def forward(self, asts: List[AbstractSyntaxTree]):
         batch_size = len(asts)
 
-        # packed_graph = self.to_packed_graph(asts)
-        #
-        # graph_node_init_encoding = self.get_init_node_encoding(packed_graph)
+        packed_graph = self.to_packed_graph(asts)
 
-        adj_lists, \
-        tree_node2batch_graph_node, batch_graph_node2tree_node, \
-        variable_master_node_maps = self.get_batched_adjacency_lists(asts)
-
-        tree_node_init_encoding = self.get_batched_tree_init_encoding(asts,
-                                                                      tree_node2batch_graph_node, batch_graph_node2tree_node,
-                                                                      variable_master_node_maps,
-                                                                      adj_lists[0].node_num)
+        tree_node_init_encoding = self.get_batched_tree_init_encoding(packed_graph)
 
         # (batch_size, node_encoding_size)
         tree_node_encoding = self.gnn.compute_node_representations(initial_node_representation=tree_node_init_encoding,
-                                                                   adjacency_lists=adj_lists)
+                                                                   adjacency_lists=packed_graph.adj_lists)
 
-        prediction_node_packed_id = []
-        var_node_packed_pos_list = []
-        max_var_node_size = max(len(ast.variable_nodes) for ast in asts)
-        max_variable_num = max(len(ast.variables) for ast in asts)
-        unpacked_variable_to_packed_map = torch.zeros(batch_size, max_var_node_size, dtype=torch.long)
-        unpacked_variable_to_packed_mask = torch.zeros(batch_size, max_var_node_size)
-        prediction_node_restoration_indices = torch.zeros(batch_size, max_variable_num, dtype=torch.long)
-        prediction_node_restoration_indices_mask = torch.zeros(batch_size, max_variable_num)
-        var_node_to_packed_pos_map = dict()
-        pred_node_ptr = 0
-        for ast_id, ast in enumerate(asts):
-            var_node_to_packed_pos_map[ast_id] = OrderedDict()
+        variable_master_node_ids = [_id for node, _id in packed_graph.get_nodes_by_group('variable_master_nodes')]
 
-            for i, node in enumerate(ast.variable_nodes):
-                batched_node_id = tree_node2batch_graph_node[(ast_id, node.node_id)]
-
-                var_node_packed_pos = len(var_node_packed_pos_list)
-                var_node_to_packed_pos_map[ast_id][node.node_id] = var_node_packed_pos
-                var_node_packed_pos_list.append(batched_node_id)
-
-                unpacked_variable_to_packed_map[ast_id][i] = var_node_packed_pos
-
-            for i, (var_name, var_nodes) in enumerate(ast.variables.items()):
-                prediction_node = variable_master_node_maps[ast_id][var_name]
-                pred_node_id = prediction_node['node_id']
-                prediction_node_packed_id.append(pred_node_id)
-
-                prediction_node_restoration_indices[ast_id][i] = pred_node_ptr
-                pred_node_ptr += 1
-
-            prediction_node_restoration_indices_mask[ast_id, :len(ast.variables)] = 1.
-            unpacked_variable_to_packed_mask[ast_id, :len(ast.variable_nodes)] = 1.
-
-        packed_variable_encoding = tree_node_encoding[var_node_packed_pos_list]
-        prediction_node_encoding = tree_node_encoding[prediction_node_packed_id]
+        variable_master_node_encoding = tree_node_encoding[variable_master_node_ids]
 
         context_encoding = dict(
             packed_tree_node_encoding=tree_node_encoding,
-            packed_variable_pos=var_node_packed_pos_list,
-            packed_variable_encoding=packed_variable_encoding,
-            unpacked_variable_to_packed_map=unpacked_variable_to_packed_map.to(self.device),
-            unpacked_variable_to_packed_mask=unpacked_variable_to_packed_mask.to(self.device),
-            var_node_to_packed_pos_map=var_node_to_packed_pos_map,
-            prediction_node_encoding=prediction_node_encoding,
-            prediction_node_restoration_indices=prediction_node_restoration_indices.to(self.device),
-            prediction_node_restoration_indices_mask=prediction_node_restoration_indices_mask.to(self.device),
-            variable_master_node_maps=variable_master_node_maps
+            variable_master_node_encoding=variable_master_node_encoding,
+            packed_graph=packed_graph
         )
-
-        # unpacked_tree_node_encoding = self.unpack_batch_encoding(tree_node_encoding, asts, tree_node2batch_graph_node)
 
         return context_encoding
 
-    def get_batched_adjacency_lists(self, asts: List[AbstractSyntaxTree]):
-        tree_node2batch_graph_node = OrderedDict()
-        variable_master_node_maps: List[Dict] = []
+    def to_packed_graph(self, asts: List[AbstractSyntaxTree]) -> PackedGraph:
+        packed_graph = PackedGraph(asts)
 
-        ast_adj_list = []
-        reversed_ast_adj_list = []
+        node_adj_list = []
         terminal_nodes_adj_list = []
-        reversed_terminal_nodes_adj_list = []
-
-        for ast_id, syntax_tree in enumerate(asts):
-            for prev_node, succ_node in syntax_tree.adjacency_list:
-                prev_node_id = prev_node.node_id
-                succ_node_id = succ_node.node_id
-
-                # an edge from preceding to succeeding node
-                node_s_batch_id = tree_node2batch_graph_node.setdefault((ast_id, prev_node_id), len(tree_node2batch_graph_node))
-                node_t_batch_id = tree_node2batch_graph_node.setdefault((ast_id, succ_node_id), len(tree_node2batch_graph_node))
-
-                ast_adj_list.append((node_s_batch_id, node_t_batch_id))
-                reversed_ast_adj_list.append((node_t_batch_id, node_s_batch_id))
-
-            # add bi-directional connection between adjacent terminal nodes
-            for node_id, succ_node_id in syntax_tree.adjacent_terminal_nodes:
-                cur_token_batch_id = tree_node2batch_graph_node[(ast_id, node_id)]
-                next_token_batch_id = tree_node2batch_graph_node[(ast_id, succ_node_id)]
-
-                terminal_nodes_adj_list.append((cur_token_batch_id, next_token_batch_id))
-                reversed_terminal_nodes_adj_list.append((next_token_batch_id, cur_token_batch_id))
-
-        packed_node_num = len(tree_node2batch_graph_node)
+        master_node_adj_list = []
         var_master_nodes_adj_list = []
-        for ast_id, syntax_tree in enumerate(asts):
-            # add master node for each variable
-            var_master_node_map = OrderedDict()
-            for var_name, var_nodes in syntax_tree.variables.items():
-                var_node_packed_ids = [tree_node2batch_graph_node[(ast_id, node.node_id)] for node in var_nodes]
-                var_master_node_id = packed_node_num
-                packed_node_num += 1
 
-                var_master_node_map[var_name] = dict(node_id=var_master_node_id,
-                                                     variable_node_ids=var_node_packed_ids)
-
-                var_master_nodes_adj_list.extend([(var_node_id, var_master_node_id)
-                                                  for var_node_id in var_node_packed_ids])
-
-            variable_master_node_maps.append(var_master_node_map)
-
-        var_master_nodes_reversed_adj_list = [(n2, n1) for n1, n2 in var_master_nodes_adj_list]
-
-        adj_lists = [AdjacencyList(node_num=packed_node_num, adj_list=ast_adj_list, device=self.device),
-                     AdjacencyList(node_num=packed_node_num, adj_list=reversed_ast_adj_list, device=self.device),
-                     AdjacencyList(node_num=packed_node_num, adj_list=var_master_nodes_adj_list, device=self.device),
-                     AdjacencyList(node_num=packed_node_num, adj_list=var_master_nodes_reversed_adj_list, device=self.device)]
-
-        if terminal_nodes_adj_list:
-            adj_lists.extend([
-                AdjacencyList(node_num=packed_node_num, adj_list=terminal_nodes_adj_list),
-                AdjacencyList(node_num=packed_node_num, adj_list=reversed_terminal_nodes_adj_list)
-            ])
-
-        batch_graph_node2tree_node = OrderedDict([(v, k) for k, v in tree_node2batch_graph_node.items()])
-
-        return adj_lists, tree_node2batch_graph_node, batch_graph_node2tree_node, variable_master_node_maps
-
-    def get_batched_tree_init_encoding(self, asts: List[AbstractSyntaxTree],
-                                       tree_node2batch_graph_node: Dict[Tuple[int, int], int],
-                                       batch_graph_node2tree_node: Dict[int, Tuple[int, int]],
-                                       variable_master_node_maps: List[Dict],
-                                       graph_node_num: int) -> torch.Tensor:
-        indices = torch.zeros(graph_node_num, dtype=torch.long)
-        for i, (batch_node_id, (tree_id, tree_node_id)) in enumerate(batch_graph_node2tree_node.items()):
-            node = asts[tree_id].id_to_node[tree_node_id]
-
-            if node.is_variable_node:
-                idx = self.vocab.source[node.var_id]
-            else:
-                idx = self.grammar.syntax_type_to_id[node.node_type] + len(self.vocab.source)
-
-            indices[i] = idx
+        max_variable_num = max(len(ast.variables) for ast in asts)
+        var_master_node_restoration_indices = torch.zeros(len(asts), max_variable_num, dtype=torch.long)
+        var_master_node_restoration_indices_mask = torch.zeros(len(asts), max_variable_num)
 
         for ast_id, ast in enumerate(asts):
-            for var_name, var_nodes in ast.variables.items():
-                master_node_id = variable_master_node_maps[ast_id][var_name]['node_id']
-                indices[master_node_id] = self.grammar.syntax_type_to_id[var_nodes[0].node_type] + len(self.vocab.source)
+            for prev_node, succ_node in ast.adjacency_list:
+                prev_node_packed_id = packed_graph.get_packed_node_id(ast_id, prev_node)
+                succ_node_packed_id = packed_graph.get_packed_node_id(ast_id, succ_node)
+
+                node_adj_list.append((prev_node_packed_id, succ_node_packed_id))
+
+            for i in range(len(ast.terminal_nodes) - 1):
+                terminal_i = ast.terminal_nodes[i]
+                terminal_ip1 = ast.terminal_nodes[i + 1]
+
+                terminal_nodes_adj_list.append((
+                    packed_graph.get_packed_node_id(ast_id, terminal_i),
+                    packed_graph.get_packed_node_id(ast_id, terminal_ip1)
+                ))
+
+            # add master node
+            if 'master_node' in self.connections:
+                master_node_id = packed_graph.register_node(ast_id, 'master_nodes', group='master_nodes')
+
+                master_node_adj_list.extend([
+                    (master_node_id, packed_graph.get_packed_node_id(ast_id, node))
+                    for node in ast
+                ])
+
+            # add prediction node to packed graph
+            for i, (var_name, var_nodes) in enumerate(ast.variables.items()):
+                var_master_node_id, node_id_in_group = packed_graph.register_node(ast_id, var_name,
+                                                                                  group='variable_master_nodes',
+                                                                                  return_node_index_in_group=True)
+
+                var_master_node_restoration_indices[ast_id, i] = node_id_in_group
+
+                var_master_nodes_adj_list.extend([(
+                    var_master_node_id, packed_graph.get_packed_node_id(ast_id, node))
+                    for node in var_nodes
+                ])
+
+            var_master_node_restoration_indices_mask[ast_id, :len(ast.variables)] = 1.
+
+        reversed_node_adj_list = [(n2, n1) for n1, n2 in node_adj_list]
+        reversed_terminal_nodes_adj_list = [(n2, n1) for n1, n2 in terminal_nodes_adj_list]
+        reversed_var_master_nodes_adj_list = [(n2, n1) for n1, n2 in var_master_nodes_adj_list]
+        adj_lists = [
+            node_adj_list, reversed_node_adj_list,
+            terminal_nodes_adj_list, reversed_terminal_nodes_adj_list,
+            var_master_nodes_adj_list, reversed_var_master_nodes_adj_list
+        ]
+
+        if 'master_node' in self.connections:
+            adj_lists.append(master_node_adj_list)
+            reversed_master_node_adj_list = [(n2, n1) for n1, n2 in master_node_adj_list]
+            adj_lists.append(reversed_master_node_adj_list)
+
+        adj_lists = [
+            AdjacencyList(adj_list=adj_list, node_num=packed_graph.size, device=self.device) for adj_list in adj_lists
+        ]
+
+        packed_graph.adj_lists = adj_lists
+        packed_graph.variable_master_node_restoration_indices = var_master_node_restoration_indices.to(self.device)
+        packed_graph.variable_master_node_restoration_indices_mask = var_master_node_restoration_indices_mask.to(self.device)
+
+        return packed_graph
+
+    def get_batched_tree_init_encoding(self, packed_graph: PackedGraph) -> torch.Tensor:
+        indices = torch.zeros(packed_graph.size, dtype=torch.long)
+        for i, (ast_id, group, node_on_graph) in enumerate(packed_graph.nodes.values()):
+            ast = packed_graph.trees[ast_id]
+            if group == 'ast_nodes':
+                node = ast.id_to_node[node_on_graph]
+
+                if node.is_variable_node:
+                    idx = self.vocab.source[node.var_id]
+                else:
+                    idx = self.grammar.syntax_type_to_id[node.node_type] + len(self.vocab.source)
+            elif group == 'variable_master_nodes':
+                idx = self.grammar.syntax_type_to_id['var'] + len(self.vocab.source)
+            elif group == 'master_nodes':
+                idx = self.master_node_embed_idx
+            else:
+                raise ValueError()
+
+            indices[i] = idx
 
         tree_node_embedding = self.src_node_embedding(indices.to(self.device))
 

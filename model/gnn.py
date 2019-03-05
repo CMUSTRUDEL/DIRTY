@@ -54,7 +54,7 @@ class GatedGraphNeuralNetwork(nn.Module):
                 self.state_to_message_linears[layer_name] = state_to_msg_linear_layer_i_type_j
 
             layer_residual_connections = self.residual_connections.get(layer_idx, [])
-            rnn_cell_layer_i = nn.LSTMCell(self.hidden_size * (1 + len(layer_residual_connections)), self.hidden_size)
+            rnn_cell_layer_i = nn.GRUCell(self.hidden_size * (1 + len(layer_residual_connections)), self.hidden_size)
             self.rnn_cells.append(rnn_cell_layer_i)
 
         self.state_to_message_dropout_layer = nn.Dropout(self.state_to_message_dropout)

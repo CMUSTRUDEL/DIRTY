@@ -63,6 +63,10 @@ class SyntaxNode(object):
     def is_variable_node(self):
         return self.node_type == 'var'
 
+    @property
+    def is_terminal_node(self):
+        return not hasattr(self, 'x') and not hasattr(self, 'y') and not hasattr(self, 'z') and not self.children
+
     @cached_property
     def size(self):
         size = 1
@@ -107,7 +111,7 @@ class SyntaxNode(object):
         return iter(self.descendant_nodes)
 
     def __hash__(self):
-        code = hash(self.node_id, self.node_type, self.address)
+        code = hash((self.node_id, self.node_type, self.address))
         for member_node in self.member_nodes:
             code = code + 37 * hash(member_node)
 
@@ -180,6 +184,7 @@ class AbstractSyntaxTree(object):
         self.adjacent_terminal_nodes = None
         self.variable_nodes = None
         self.variables = None
+        self.terminal_nodes = []
         self._init_index()
 
     @classmethod
@@ -196,6 +201,7 @@ class AbstractSyntaxTree(object):
     def _init_index(self):
         adj_list = []
         variable_nodes = []
+        terminal_nodes = []
         variables = OrderedDict()
         id2node = OrderedDict()
 
@@ -211,6 +217,9 @@ class AbstractSyntaxTree(object):
                 variable_nodes.append(node)
                 variables.setdefault(node.old_name, []).append(node)
 
+            if node.is_terminal_node:
+                terminal_nodes.append(node)
+
         _index_sub_tree(self.root, None)
 
         setattr(self, 'adjacency_list', adj_list)
@@ -218,9 +227,11 @@ class AbstractSyntaxTree(object):
         setattr(self, 'adjacent_terminal_nodes', [])  # TODO: implement this!
         setattr(self, 'variable_nodes', variable_nodes)
         setattr(self, 'variables', variables)
+        terminal_nodes.sort(key=lambda n: n.node_id)  # TODO: change to address based!
+        setattr(self, 'terminal_nodes', terminal_nodes)
 
     def __iter__(self):
-        return self.root.__iter__()
+        return iter((node for node in self.id_to_node.values()))
 
 
 if __name__ == '__main__':

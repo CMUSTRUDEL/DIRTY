@@ -38,13 +38,12 @@ class BatchUtil(object):
                                      context_encoding: Dict,
                                      vocab: VocabEntry):
         batch_size = len(source_asts)
-        var_node_to_packed_pos_map: dict = context_encoding['var_node_to_packed_pos_map']
-        variable_master_node_maps = context_encoding['variable_master_node_maps']
+        packed_graph = context_encoding['packed_graph']
 
-        packed_variable_tgt_name_id = torch.zeros(context_encoding['prediction_node_encoding'].size(0), dtype=torch.long)
+        packed_variable_tgt_name_id = torch.zeros(context_encoding['variable_master_node_encoding'].size(0), dtype=torch.long)
+        packed_variable_tgt_name_weight = torch.zeros(context_encoding['variable_master_node_encoding'].size(0))
         pred_node_ptr = 0
         for e_id, (ast, var_name_map) in enumerate(zip(source_asts, variable_name_maps)):
-            variable_master_node_map = variable_master_node_maps[e_id]
             _var_node_ids = []
             _tgt_name_ids = []
             for var_name, var_nodes, in ast.variables.items():
@@ -59,9 +58,11 @@ class BatchUtil(object):
                 #     packed_variable_tgt_name_id[packed_node_id] = new_name_token_id
 
                 packed_variable_tgt_name_id[pred_node_ptr] = new_name_token_id
+                packed_variable_tgt_name_weight[pred_node_ptr] = 0.01 if var_name == new_var_name else 1.
                 pred_node_ptr += 1
 
-        return dict(packed_variable_tgt_name_id=packed_variable_tgt_name_id)
+        return dict(variable_tgt_name_id=packed_variable_tgt_name_id,
+                    variable_tgt_name_weight=packed_variable_tgt_name_weight)
 
 
 def get_json_iterator(file_path, shuffle=False, progress=False) -> Iterable:
@@ -170,21 +171,21 @@ class Dataset(object):
 
         return it_func(self._get_iterator(shuffle, num_workers))
 
-    def batch_iterator(self, batch_size=1024, num_workers=1, shuffle=False, progress=True) -> Iterable[List[Example]]:
+    def batch_iterator(self, batch_size=1024, num_workers=1, filter_func=lambda x: True, shuffle=False, progress=True) -> Iterable[List[Example]]:
         example_iter = self.get_iterator(shuffle=shuffle, progress=progress, num_workers=num_workers)
         batch = []
         batch_node_num = 0
 
-        for example in example_iter:
-            if example.ast.size < 300 and len(example.variable_name_map) > 0:
-                batch.append(example)
-                batch_node_num += example.ast.size
+        # if example.ast.size < 300 and len(example.variable_name_map) > 0:
+        for example in filter(filter_func, example_iter):
+            batch.append(example)
+            batch_node_num += example.ast.size
 
-                if batch_node_num >= batch_size:
-                    yield batch
+            if batch_node_num >= batch_size:
+                yield batch
 
-                    batch = []
-                    batch_node_num = 0
+                batch = []
+                batch_node_num = 0
 
         if batch: yield batch
 

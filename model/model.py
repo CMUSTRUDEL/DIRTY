@@ -42,6 +42,7 @@ class RenamingModel(nn.Module):
         # src_ast_encoding: (batch_size, max_ast_node_num, node_encoding_size)
         # src_ast_mask: (batch_size, max_ast_node_num)
         context_encoding = self.encoder(source_asts)
+        packed_graph = context_encoding['packed_graph']
 
         prediction_target = BatchUtil.to_batched_prediction_target(source_asts, variable_name_maps,
                                                                    context_encoding,
@@ -53,10 +54,11 @@ class RenamingModel(nn.Module):
         # (batch_var_node_num)
         packed_tgt_var_node_name_log_probs = torch.gather(packed_var_name_log_probs,
                                                           dim=-1,
-                                                          index=prediction_target['packed_variable_tgt_name_id'].unsqueeze(-1)).squeeze(-1)
+                                                          index=prediction_target['variable_tgt_name_id'].unsqueeze(-1)).squeeze(-1)
+        packed_tgt_var_node_name_log_probs = packed_tgt_var_node_name_log_probs * prediction_target['variable_tgt_name_weight']
         # (batch_size, max_variable_node_num)
-        tgt_name_log_probs = packed_tgt_var_node_name_log_probs[context_encoding['prediction_node_restoration_indices']]
-        tgt_name_log_probs = tgt_name_log_probs * context_encoding['prediction_node_restoration_indices_mask']
+        tgt_name_log_probs = packed_tgt_var_node_name_log_probs[packed_graph.variable_master_node_restoration_indices]
+        tgt_name_log_probs = tgt_name_log_probs * packed_graph.variable_master_node_restoration_indices_mask
 
         # (batch_size)
         ast_log_probs = tgt_name_log_probs.sum(dim=-1)
