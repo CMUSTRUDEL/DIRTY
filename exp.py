@@ -56,7 +56,8 @@ def train(args):
     # a grammar defines the syntax types of nodes on ASTs
     # a vocabulary defines the collection of all source and target variable names
     vocab = torch.load(config['data']['vocab_file'])
-    encoder = GraphASTEncoder(ast_node_encoding_size=128, grammar=vocab.grammar, vocab=vocab)
+    encoder = GraphASTEncoder(ast_node_encoding_size=128, grammar=vocab.grammar, vocab=vocab,
+                              bpe_model_path=config['data']['bpe_model_path'])
     decoder = SimpleDecoder(ast_node_encoding_size=128,
                             tgt_name_vocab_size=len(vocab.target))
     model = RenamingModel(encoder, decoder, config)
@@ -68,8 +69,8 @@ def train(args):
     optimizer = torch.optim.Adam(params, lr=0.001)
     nn_util.glorot_init(params)
 
-    train_set = Dataset(config['data']['train_file'])
-    dev_set = Dataset(config['data']['dev_file'])
+    train_set = Dataset(config['data']['train_file'], bpe_model_path=config['data']['bpe_model_path'])
+    dev_set = Dataset(config['data']['dev_file'], bpe_model_path=config['data']['bpe_model_path'])
     batch_size = config['train']['batch_size']
 
     print(f'Training set size {len(train_set)}, dev set size {len(dev_set)}', file=sys.stderr)
@@ -94,7 +95,8 @@ def train(args):
             # print([ast.size for ast in src_asts], file=sys.stderr)
             rename_maps = [e.variable_name_map for e in batch_examples]
 
-            tgt_log_probs = model(src_asts, rename_maps)
+            tgt_log_probs, info = model(src_asts, rename_maps)
+            print(info, file=sys.stderr)
 
             loss = -tgt_log_probs.mean()
 

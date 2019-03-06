@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 import torch
 import torch.nn as nn
@@ -26,7 +26,7 @@ class RenamingModel(nn.Module):
     def device(self):
         return self.encoder.device
 
-    def forward(self, source_asts: List[AbstractSyntaxTree], variable_name_maps: List[Dict[int, str]]) -> torch.Tensor:
+    def forward(self, source_asts: List[AbstractSyntaxTree], variable_name_maps: List[Dict[int, str]]) -> Tuple[torch.Tensor, Dict]:
         """
         Given a batch of decompiled abstract syntax trees, and the gold-standard renaming of variable nodes,
         compute the log-likelihood of the gold-standard renaming for training
@@ -55,6 +55,17 @@ class RenamingModel(nn.Module):
         packed_tgt_var_node_name_log_probs = torch.gather(packed_var_name_log_probs,
                                                           dim=-1,
                                                           index=prediction_target['variable_tgt_name_id'].unsqueeze(-1)).squeeze(-1)
+
+        info = dict()
+        with torch.no_grad():
+            # compute ppl over renamed variables
+            renamed_var_mask = torch.eq(prediction_target['variable_tgt_name_weight'], 1.).float()
+            unchanged_var_mask = 1 - renamed_var_mask
+            renamed_var_avg_ll = (packed_tgt_var_node_name_log_probs * renamed_var_mask).sum(-1) / renamed_var_mask.sum()
+            unchanged_var_avg_ll = (packed_tgt_var_node_name_log_probs * unchanged_var_mask).sum(-1) / unchanged_var_mask.sum()
+            info['rename_ppl'] = torch.exp(-renamed_var_avg_ll).item()
+            info['unchange_ppl'] = torch.exp(-unchanged_var_avg_ll).item()
+
         packed_tgt_var_node_name_log_probs = packed_tgt_var_node_name_log_probs * prediction_target['variable_tgt_name_weight']
         # (batch_size, max_variable_node_num)
         tgt_name_log_probs = packed_tgt_var_node_name_log_probs[packed_graph.variable_master_node_restoration_indices]
@@ -63,7 +74,7 @@ class RenamingModel(nn.Module):
         # (batch_size)
         ast_log_probs = tgt_name_log_probs.sum(dim=-1)
 
-        return ast_log_probs
+        return ast_log_probs, info
 
     def decode(self, source_asts: List[AbstractSyntaxTree]):
         """

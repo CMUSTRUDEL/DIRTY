@@ -8,6 +8,7 @@ from tqdm import tqdm
 import numpy as np
 from utils.ast import AbstractSyntaxTree, SyntaxNode
 from utils.vocab import VocabEntry, SAME_VARIABLE_TOKEN
+import sentencepiece as spm
 
 import torch
 
@@ -58,7 +59,7 @@ class BatchUtil(object):
                 #     packed_variable_tgt_name_id[packed_node_id] = new_name_token_id
 
                 packed_variable_tgt_name_id[pred_node_ptr] = new_name_token_id
-                packed_variable_tgt_name_weight[pred_node_ptr] = 0.01 if var_name == new_var_name else 1.
+                packed_variable_tgt_name_weight[pred_node_ptr] = 0.1 if var_name == new_var_name else 1.
                 pred_node_ptr += 1
 
         return dict(variable_tgt_name_id=packed_variable_tgt_name_id,
@@ -91,7 +92,10 @@ def json_line_reader(file_path, queue, worker_num, shuffle, progress):
         queue.put(None)
 
 
-def example_generator(json_queue, example_queue):
+def example_generator(json_queue, example_queue, bpe_model_path=None):
+    if bpe_model_path:
+        sp = spm.SentencePieceProcessor()
+        sp.Load(bpe_model_path)
     while True:
         payload = json_queue.get()
         if payload is None: break
@@ -103,14 +107,20 @@ def example_generator(json_queue, example_queue):
         if example.ast.size != max(node.node_id for node in example.ast) + 1:
             continue
 
+        if bpe_model_path:
+            for node in example.ast:
+                if node.node_type == 'obj':
+                    setattr(node, 'sub_tokens', sp.EncodeAsPieces(node.name))
+
         example_queue.put(example)
 
     example_queue.put(None)
 
 
 class Dataset(object):
-    def __init__(self, dataset_file_path):
+    def __init__(self, dataset_file_path, bpe_model_path=None):
         self.file_path = dataset_file_path
+        self.bpe_model_path = bpe_model_path
 
         print(f'reading dataset {dataset_file_path}', file=sys.stderr)
         example_num = 0
@@ -144,7 +154,8 @@ class Dataset(object):
         json_loader.daemon = True
         example_generators = []
         for i in range(num_workers):
-            p = multiprocessing.Process(target=example_generator, args=(json_enc_queue, example_queue))
+            p = multiprocessing.Process(target=example_generator,
+                                        args=(json_enc_queue, example_queue, self.bpe_model_path))
             p.daemon = True
             example_generators.append(p)
 

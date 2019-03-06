@@ -5,6 +5,7 @@ from typing import List, Dict, Tuple
 import torch
 import torch.nn as nn
 
+from model.embedding import SubTokenEmbedder
 from utils.ast import AbstractSyntaxTree, SyntaxNode, TerminalNode
 from model.gnn import GatedGraphNeuralNetwork, main, AdjacencyList
 from utils.grammar import Grammar
@@ -79,7 +80,8 @@ class GraphASTEncoder(Encoder):
     def __init__(self,
                  ast_node_encoding_size: int,
                  grammar: Grammar,
-                 vocab: Vocab):
+                 vocab: Vocab,
+                 bpe_model_path: str):
         super(GraphASTEncoder, self).__init__()
 
         self.connections = ['master_node']
@@ -91,6 +93,7 @@ class GraphASTEncoder(Encoder):
 
         self.src_node_embedding = nn.Embedding(len(vocab.source) + len(grammar.syntax_types) + 1, ast_node_encoding_size)
         self.master_node_embed_idx = self.src_node_embedding.num_embeddings - 1
+        self.sub_token_embedder = SubTokenEmbedder(bpe_model_path, ast_node_encoding_size)
         self.vocab = vocab
         self.grammar = grammar
 
@@ -199,8 +202,11 @@ class GraphASTEncoder(Encoder):
 
     def get_batched_tree_init_encoding(self, packed_graph: PackedGraph) -> torch.Tensor:
         indices = torch.zeros(packed_graph.size, dtype=torch.long)
+        sub_tokens_list = []
+        sub_tokens_indices = []
         for i, (ast_id, group, node_on_graph) in enumerate(packed_graph.nodes.values()):
             ast = packed_graph.trees[ast_id]
+            idx = 0
             if group == 'ast_nodes':
                 node = ast.id_to_node[node_on_graph]
 
@@ -208,6 +214,11 @@ class GraphASTEncoder(Encoder):
                     idx = self.vocab.source[node.var_id]
                 else:
                     idx = self.grammar.syntax_type_to_id[node.node_type] + len(self.vocab.source)
+
+                if node.node_type == 'obj':
+                    # compute variable embedding
+                    sub_tokens_list.append(node.sub_tokens)
+                    sub_tokens_indices.append(i)
             elif group == 'variable_master_nodes':
                 idx = self.grammar.syntax_type_to_id['var'] + len(self.vocab.source)
             elif group == 'master_nodes':
@@ -218,6 +229,9 @@ class GraphASTEncoder(Encoder):
             indices[i] = idx
 
         tree_node_embedding = self.src_node_embedding(indices.to(self.device))
+        if sub_tokens_indices:
+            obj_tokens_embedding = self.sub_token_embedder(sub_tokens_list)
+            tree_node_embedding[sub_tokens_indices] = obj_tokens_embedding
 
         return tree_node_embedding
 
