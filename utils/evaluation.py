@@ -7,7 +7,8 @@ from model.model import RenamingModel
 class Evaluator(object):
     @staticmethod
     def decode_and_evaluate(model: RenamingModel, dataset: Dataset, batch_size=2048):
-        data_iter = dataset.batch_iterator(batch_size=batch_size, shuffle=False)
+        data_iter = dataset.batch_iterator(batch_size=batch_size, shuffle=False,
+                                           filter_func=lambda e:len(e.variable_name_map) > 0 and e.ast.size < 300)
 
         was_training = model.training
         model.eval()

@@ -128,6 +128,7 @@ if __name__ == '__main__':
     var_types = set()
     src_words = []
     tgt_words = []
+    identifier_names = []
     for example in train_set.get_iterator(progress=True, num_workers=5):
         for node in example.ast:
             node_types.add(node.node_type)
@@ -141,6 +142,9 @@ if __name__ == '__main__':
                 if old_var_name != new_var_name:
                     tgt_words.append(new_var_name)
                 var_types.add(node.type)
+
+            if node.node_type == 'obj':
+                identifier_names.append(node.name)
 
     print('building source words vocabulary')
     src_var_vocab_entry = VocabEntry.from_corpus([src_words], size=int(args['--size']),
@@ -158,5 +162,10 @@ if __name__ == '__main__':
     vocab = Vocab(source=src_var_vocab_entry,
                   target=tgt_var_vocab_entry,
                   grammar=grammar)
+
+    id_names_file = args['VOCAB_FILE'] + '.id_names.txt'
+    with open(id_names_file, 'w') as f:
+        for name in identifier_names:
+            f.write(name + '\n')
 
     torch.save(vocab, open(args['VOCAB_FILE'], 'wb'))

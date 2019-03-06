@@ -82,7 +82,8 @@ def train(args):
 
     while True:
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
-        train_set_iter = train_set.batch_iterator(batch_size=batch_size, progress=True, shuffle=True, num_workers=5)
+        train_set_iter = train_set.batch_iterator(batch_size=batch_size, progress=True, shuffle=True, num_workers=5,
+                                                  filter_func=lambda e:len(e.variable_name_map) > 0 and e.ast.size < 300)
         epoch += 1
 
         for batch_examples in train_set_iter:

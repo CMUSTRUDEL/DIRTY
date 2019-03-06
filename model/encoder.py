@@ -85,8 +85,8 @@ class GraphASTEncoder(Encoder):
         self.connections = ['master_node']
 
         self.gnn = GatedGraphNeuralNetwork(hidden_size=ast_node_encoding_size,
-                                           layer_timesteps=[5, 2, 5, 2],
-                                           residual_connections={1: [0], 3: [1]},
+                                           layer_timesteps=[8, 2, 8, 2],
+                                           residual_connections={1: [0], 3: [2]},
                                            num_edge_types=8)
 
         self.src_node_embedding = nn.Embedding(len(vocab.source) + len(grammar.syntax_types) + 1, ast_node_encoding_size)

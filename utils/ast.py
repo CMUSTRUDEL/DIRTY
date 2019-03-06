@@ -142,15 +142,19 @@ class SyntaxNode(object):
             is_root = True
             sb = StringIO()
 
-        sb.write('(')
-        sb.write(f'Node_{self.node_id}-{self.node_type}')
+        sb.write(f'(Node{self.node_id}-{self.node_type}')
+        for key, val in self.named_fields.items():
+            if key not in ('x', 'y', 'z'):
+                sb.write('-')
+                sb.write(f'{key}:{val}'.replace(' ', '_').replace('(', '_').replace(')', '_'))
+        # sb.write(f'Node-{self.node_id}-{self.node_type}')
 
         for field_name, node in self.named_succeeding_fields:
             if field_name in ('x', 'y'):
                 sb.write(f' ({field_name} ')
                 node.to_string(sb)
                 sb.write(')')  # of x
-            else:
+            elif self.children:
                 sb.write(' (children ')
                 for child in self.children:
                     sb.write(' ')
