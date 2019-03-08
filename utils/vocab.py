@@ -13,6 +13,7 @@ from collections import Counter
 from itertools import chain
 
 import torch
+import pickle
 from docopt import docopt
 import json
 
@@ -168,4 +169,4 @@ if __name__ == '__main__':
         for name in identifier_names:
             f.write(name + '\n')
 
-    torch.save(vocab, open(args['VOCAB_FILE'], 'wb'))
+    pickle.dump(vocab, open(args['VOCAB_FILE'], 'wb'))

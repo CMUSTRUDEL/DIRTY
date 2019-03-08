@@ -10,7 +10,7 @@ Options:
     --debug                                     Debug mode
     --seed=<int>                                Seed [default: 0]
     --work-dir=<dir>                            work dir [default: data/exp_runs/]
-    --config=<str>                              extra config [default: {}]
+    --extra-config=<str>                              extra config [default: {}]
 """
 
 import random
@@ -20,6 +20,8 @@ import sys
 import numpy as np
 import os
 import json
+import _jsonnet
+import pprint
 from docopt import docopt
 from tqdm import tqdm
 import psutil, gc
@@ -45,30 +47,26 @@ import os
 
 def train(args):
     work_dir = args['--work-dir']
-    config = json.load(open(args['CONFIG_FILE']))
+    config = json.loads(_jsonnet.evaluate_file(args['CONFIG_FILE']))
     config['work_dir'] = work_dir
 
     if not os.path.exists(work_dir):
         print(f'creating work dir [{work_dir}]', file=sys.stderr)
         os.makedirs(work_dir)
 
-    if args['--config']:
-        extra_config = args['--config']
+    if args['--extra-config']:
+        extra_config = args['--extra-config']
         extra_config = json.loads(extra_config)
-        util.update(config, extra_config)
+        config = util.update(config, extra_config)
 
     json.dump(config, open(os.path.join(work_dir, 'config.json'), 'w'), indent=2)
 
-    # a grammar defines the syntax types of nodes on ASTs
-    # a vocabulary defines the collection of all source and target variable names
-    vocab = torch.load(config['data']['vocab_file'])
-    encoder = GraphASTEncoder(ast_node_encoding_size=128,
-                              grammar=vocab.grammar, vocab=vocab,
-                              bpe_model_path=config['data']['bpe_model_path'])
-    decoder = SimpleDecoder(ast_node_encoding_size=128,
-                            tgt_name_vocab_size=len(vocab.target))
-    model = RenamingModel(encoder, decoder, config)
+    model = RenamingModel.build(config)
     model.train()
+
+    print('Current Configuration:', file=sys.stderr)
+    pp = pprint.PrettyPrinter(indent=2, stream=sys.stderr)
+    pp.pprint(model.config)
 
     if args['--cuda']:
         model = model.cuda()
@@ -176,5 +174,4 @@ if __name__ == '__main__':
     np.random.seed(seed * 13 // 7)
     random.seed(seed * 17 // 7)
 
-    #sys.settrace(gpu_profile)
     train(cmd_args)

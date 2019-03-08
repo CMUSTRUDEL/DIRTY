@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from model.embedding import SubTokenEmbedder
+from utils import util
 from utils.ast import AbstractSyntaxTree, SyntaxNode, TerminalNode
 from model.gnn import GatedGraphNeuralNetwork, main, AdjacencyList
 from utils.grammar import Grammar
@@ -78,32 +79,72 @@ class PackedGraph(object):
 class GraphASTEncoder(Encoder):
     """An encoder based on gated recurrent graph neural networks"""
     def __init__(self,
-                 ast_node_encoding_size: int,
-                 grammar: Grammar,
-                 vocab: Vocab,
-                 bpe_model_path: str):
+                 gnn: GatedGraphNeuralNetwork,
+                 connections: List[str],
+                 sub_token_embedder: SubTokenEmbedder,
+                 vocab: Vocab):
         super(GraphASTEncoder, self).__init__()
 
-        self.connections = [] # ['master_node']
+        self.connections = connections
+        self.gnn = gnn
 
-        self.gnn = GatedGraphNeuralNetwork(hidden_size=ast_node_encoding_size,
-                                           layer_timesteps=[8],
-                                           residual_connections={0: [0]},
-                                           num_edge_types=8)
-
-        self.node_type_embedding = nn.Embedding(len(grammar.syntax_types) + 2, ast_node_encoding_size)
-        self.var_node_name_embedding = nn.Embedding(len(vocab.source), ast_node_encoding_size, padding_idx=0)
+        self.vocab = vocab
+        self.grammar = grammar = vocab.grammar
+        self.node_type_embedding = nn.Embedding(len(grammar.syntax_types) + 2, gnn.hidden_size)
+        self.var_node_name_embedding = nn.Embedding(len(vocab.source), gnn.hidden_size, padding_idx=0)
         self.variable_master_node_type_idx = len(grammar.syntax_types)
         self.master_node_type_idx = len(grammar.syntax_types) + 1
-        self.type_and_content_hybrid = nn.Linear(2 * ast_node_encoding_size, ast_node_encoding_size)
+        self.type_and_content_hybrid = nn.Linear(2 * gnn.hidden_size, gnn.hidden_size)
 
-        self.sub_token_embedder = SubTokenEmbedder(bpe_model_path, ast_node_encoding_size)
-        self.vocab = vocab
-        self.grammar = grammar
+        self.sub_token_embedder = sub_token_embedder
+
+        self.config: Dict = None
 
     @property
     def device(self):
         return self.node_type_embedding.weight.device
+
+    @classmethod
+    def default_params(cls):
+        return {
+            'gnn': {
+                'hidden_size': 128,
+                'layer_timesteps': [8],
+                'residual_connections': {0: [0]}
+            },
+            'connections': {'top_down', 'bottom_up', 'variable_master_nodes', 'terminals', 'master_node'},
+            'vocab_file': None,
+            'bpe_model_path': None
+        }
+
+    @classmethod
+    def build(cls, config):
+        params = util.update(GraphASTEncoder.default_params(), config)
+
+        connections = params['connections']
+        connection2edge_type = {
+            'top_down': 1,
+            'bottom_up': 1,
+            'variable_master_nodes': 2,
+            'terminals': 2,
+            'master_node': 2
+        }
+        num_edge_types = sum(connection2edge_type[key] for key in connections)
+        gnn = GatedGraphNeuralNetwork(hidden_size=params['gnn']['hidden_size'],
+                                      layer_timesteps=params['gnn']['layer_timesteps'],
+                                      residual_connections=params['gnn']['residual_connections'],
+                                      num_edge_types=num_edge_types)
+
+        vocab = torch.load(params['vocab_file'])
+        sub_token_embedder = SubTokenEmbedder(params['bpe_model_path'], gnn.hidden_size)
+
+        model = cls(gnn,
+                    params['connections'],
+                    sub_token_embedder,
+                    vocab)
+        model.config = params
+
+        return model
 
     def forward(self, asts: List[AbstractSyntaxTree]):
         batch_size = len(asts)
@@ -182,22 +223,23 @@ class GraphASTEncoder(Encoder):
 
             var_master_node_restoration_indices_mask[ast_id, :len(ast.variables)] = 1.
 
-        reversed_node_adj_list = [(n2, n1) for n1, n2 in node_adj_list]
-
-        reversed_var_master_nodes_adj_list = [(n2, n1) for n1, n2 in var_master_nodes_adj_list]
-        adj_lists = [
-            node_adj_list, reversed_node_adj_list,
-            var_master_nodes_adj_list, reversed_var_master_nodes_adj_list
-        ]
-
+        adj_lists = []
+        if 'top_down' in self.connections:
+            adj_lists.append(node_adj_list)
+        if 'bottom_up' in self.connections:
+            reversed_node_adj_list = [(n2, n1) for n1, n2 in node_adj_list]
+            adj_lists.append(reversed_node_adj_list)
+        if 'variable_master_nodes' in self.connections:
+            reversed_var_master_nodes_adj_list = [(n2, n1) for n1, n2 in var_master_nodes_adj_list]
+            adj_lists.append(master_node_adj_list)
+            adj_lists.append(reversed_var_master_nodes_adj_list)
         if 'terminals' in self.connections:
             reversed_terminal_nodes_adj_list = [(n2, n1) for n1, n2 in terminal_nodes_adj_list]
             adj_lists.append(terminal_nodes_adj_list)
             adj_lists.append(reversed_terminal_nodes_adj_list)
-
         if 'master_node' in self.connections:
-            adj_lists.append(master_node_adj_list)
             reversed_master_node_adj_list = [(n2, n1) for n1, n2 in master_node_adj_list]
+            adj_lists.append(master_node_adj_list)
             adj_lists.append(reversed_master_node_adj_list)
 
         adj_lists = [
@@ -276,7 +318,3 @@ class GraphASTEncoder(Encoder):
 
         return dict(batch_tree_node_encoding=batch_node_encoding,
                     batch_tree_node_masks=batch_tree_node_masks)
-
-    @classmethod
-    def build(cls, config):
-        pass

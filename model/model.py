@@ -3,21 +3,21 @@ from typing import List, Dict, Tuple
 import torch
 import torch.nn as nn
 
-from utils import nn_util
+from utils import nn_util, util
 from utils.ast import AbstractSyntaxTree
-from model.decoder import Decoder
-from model.encoder import Encoder, PackedGraph
+from model.decoder import Decoder, SimpleDecoder
+from model.encoder import Encoder, PackedGraph, GraphASTEncoder
 from utils.dataset import BatchUtil
 from utils.vocab import SAME_VARIABLE_TOKEN
 
 
 class RenamingModel(nn.Module):
-    def __init__(self, encoder: Encoder, decoder: Decoder, config: Dict):
+    def __init__(self, encoder: Encoder, decoder: Decoder):
         super(RenamingModel, self).__init__()
 
         self.encoder = encoder
         self.decoder = decoder
-        self.config = config
+        self.config: Dict = None
 
     @property
     def vocab(self):
@@ -26,6 +26,27 @@ class RenamingModel(nn.Module):
     @property
     def device(self):
         return self.encoder.device
+
+    @classmethod
+    def default_params(cls):
+        return {
+            'train': {
+                'unchanged_variable_weight': 1.0
+            }
+        }
+
+    @classmethod
+    def build(cls, config):
+        params = util.update(cls.default_params(), config)
+        encoder = GraphASTEncoder.build(config['encoder'])
+        decoder = SimpleDecoder.build(config['decoder'])
+
+        model = cls(encoder, decoder)
+        params = util.update(params, {'encoder': encoder.config,
+                                      'decoder': decoder.config})
+        model.config = params
+
+        return model
 
     def forward(self, source_asts: List[AbstractSyntaxTree], variable_name_maps: List[Dict[int, str]]) -> Tuple[torch.Tensor, Dict]:
         """
@@ -113,14 +134,6 @@ class RenamingModel(nn.Module):
 
         return variable_rename_results
 
-    @classmethod
-    def build(cls, config):
-        encoder = Encoder.build(config['encoder'])
-        decoder = Decoder.build(config['decoder'])
-
-        model = cls(encoder, decoder, config).eval()
-        return model
-
     def save(self, model_path, **kwargs):
         params = {
             'config': self.config,
@@ -129,3 +142,21 @@ class RenamingModel(nn.Module):
         }
 
         torch.save(params, model_path)
+
+    @classmethod
+    def load(cls, model_path, use_cuda=False, new_config=None) -> 'RenamingModel':
+        device = torch.device("cuda:0" if use_cuda else "cpu")
+        params = torch.load(model_path, map_location=lambda storage, loc: storage)
+        config = params['config']
+
+        if new_config:
+            config = util.update(config, new_config)
+
+        kwargs = params['kwargs'] if params['kwargs'] is not None else dict()
+
+        model = cls.build(config, **kwargs)
+        model.load_state_dict(params['state_dict'])
+        model = model.to(device)
+        model.eval()
+
+        return model

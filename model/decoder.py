@@ -1,19 +1,44 @@
+from typing import Dict
+
 import torch
 import torch.nn as nn
 
-from utils import nn_util
+from utils import nn_util, util
+from utils.vocab import Vocab
 
 
 class Decoder(nn.Module):
     def __init__(self):
         super(Decoder, self).__init__()
 
+    def forward(self, *input):
+        raise NotImplementedError
+
 
 class SimpleDecoder(Decoder):
-    def __init__(self, ast_node_encoding_size: int, tgt_name_vocab_size: int):
+    def __init__(self, ast_node_encoding_size: int, vocab: Vocab):
         super(SimpleDecoder, self).__init__()
 
-        self.state2names = nn.Linear(ast_node_encoding_size, tgt_name_vocab_size, bias=True)
+        self.vocab = vocab
+        self.state2names = nn.Linear(ast_node_encoding_size, len(vocab.target), bias=True)
+        self.config: Dict = None
+
+    @classmethod
+    def default_params(cls):
+        return {
+            'vocab_file': None,
+            'ast_node_encoding_size': 128
+        }
+
+    @classmethod
+    def build(cls, config):
+        params = util.update(cls.default_params(), config)
+
+        vocab = torch.load(params['vocab_file'])
+        model = cls(params['ast_node_encoding_size'], vocab)
+        model.config = params
+
+        return model
 
     def forward(self, src_ast_encoding):
         """

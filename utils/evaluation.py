@@ -30,7 +30,7 @@ class Evaluator(object):
                     is_correct = pred_new_name == gold_new_name
                     tree_acc.append(is_correct)
 
-                    if gold_new_name != old_name: # and gold_new_name in model.vocab.target:
+                    if gold_new_name != old_name:  # and gold_new_name in model.vocab.target:
                         need_rename_cases.append(is_correct)
 
                 variable_acc_list.extend(tree_acc)
