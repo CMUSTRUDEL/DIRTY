@@ -48,7 +48,6 @@ class GatedGraphNeuralNetwork(nn.Module):
         for layer_idx in range(len(self.layer_timesteps)):
             # Initiate a linear transformation for each edge type
             for edge_type_j in range(self.num_edge_types):
-                # TODO: glorot_init?
                 state_to_msg_linear_layer_i_type_j = nn.Linear(self.hidden_size, self.hidden_size, bias=use_bias_for_message_linear)
                 layer_name = 'state_to_message_linear_layer%d_type%d' % (layer_idx, edge_type_j)
                 self.state_to_message_linears[layer_name] = state_to_msg_linear_layer_i_type_j
@@ -75,17 +74,22 @@ class GatedGraphNeuralNetwork(nn.Module):
                                      initial_node_representation: torch.Tensor,
                                      adjacency_lists: List[AdjacencyList],
                                      return_all_states=False) -> torch.Tensor:
+        """
+        V: number of nodes on the batched graph
+        E: number of edges on the batched graph
+        D: hidden size of RNNs and output
+        M: total number of messages
+        """
         # If the dimension of initial node embedding is smaller, then perform padding first
-        # one entry per layer (final state of that layer), shape: number of nodes in batch v x D
+        node_num = initial_node_representation.size(0)
         init_node_repr_size = initial_node_representation.size(1)
-        device = adjacency_lists[0].data.device
         if init_node_repr_size < self.hidden_size:
             pad_size = self.hidden_size - init_node_repr_size
-            zero_pads = torch.zeros(initial_node_representation.size(0), pad_size, dtype=torch.float, device=device)
+            zero_pads = torch.zeros(node_num, pad_size, dtype=torch.float, device=self.device)
             initial_node_representation = torch.cat([initial_node_representation, zero_pads], dim=-1)
-        node_states_per_layer = [initial_node_representation]
 
-        node_num = initial_node_representation.size(0)
+        # Shape: [V, D]
+        node_states_per_layer = [initial_node_representation]
 
         message_targets = []  # list of tensors of message targets of shape [E]
         for edge_type_idx, adjacency_list_for_edge_type in enumerate(adjacency_lists):
@@ -107,7 +111,7 @@ class GatedGraphNeuralNetwork(nn.Module):
             layer_residual_connections = self.residual_connections.get(layer_idx, [])
             # List[(V, D)]
             layer_residual_states: List[torch.Tensor] = [node_states_per_layer[residual_layer_idx]
-                                                              for residual_layer_idx in layer_residual_connections]
+                                                         for residual_layer_idx in layer_residual_connections]
 
             # Record new states for this layer. Initialised to last state, but will be updated below:
             node_states_for_this_layer = node_states_per_layer[-1]
@@ -138,11 +142,12 @@ class GatedGraphNeuralNetwork(nn.Module):
 
                 # Sum up messages that go to the same target node
                 # shape [V, D]
-                incoming_messages = torch.zeros(node_num, messages.size(1), device=device)
+                incoming_messages = torch.zeros(node_num, messages.size(1), device=self.device)
                 incoming_messages = incoming_messages.scatter_add_(0,
                                                                    message_targets.unsqueeze(-1).expand_as(messages),
                                                                    messages)
-
+                node_target_num = torch.zeros(node_num, device=self.device).scatter_add(0, message_targets, torch.ones(messages.size(0), device=self.device))
+                incoming_messages = incoming_messages / (node_target_num + 1e-7).unsqueeze(-1)
                 # shape [V, D * (1 + num of residual connections)]
                 incoming_information = torch.cat(layer_residual_states + [incoming_messages], dim=-1)
 

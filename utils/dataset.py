@@ -9,6 +9,7 @@ import numpy as np
 from utils.ast import AbstractSyntaxTree, SyntaxNode
 from utils.vocab import VocabEntry, SAME_VARIABLE_TOKEN
 import sentencepiece as spm
+import random
 
 import torch
 
@@ -37,33 +38,48 @@ class BatchUtil(object):
     def to_batched_prediction_target(source_asts: List['AbstractSyntaxTree'],
                                      variable_name_maps: List[Dict],
                                      context_encoding: Dict,
-                                     vocab: VocabEntry):
+                                     vocab: VocabEntry,
+                                     unchanged_var_weight=1.):
         batch_size = len(source_asts)
         packed_graph = context_encoding['packed_graph']
 
         packed_variable_tgt_name_id = torch.zeros(context_encoding['variable_master_node_encoding'].size(0), dtype=torch.long)
         packed_variable_tgt_name_weight = torch.zeros(context_encoding['variable_master_node_encoding'].size(0))
-        pred_node_ptr = 0
+        var_with_new_name_mask = torch.zeros(context_encoding['variable_master_node_encoding'].size(0))
+        auxiliary_var_mask = torch.zeros(context_encoding['variable_master_node_encoding'].size(0))
+
+        ptr = 0
         for e_id, (ast, var_name_map) in enumerate(zip(source_asts, variable_name_maps)):
             _var_node_ids = []
             _tgt_name_ids = []
-            for var_name, var_nodes, in ast.variables.items():
+            for var_name in packed_graph.node_groups[e_id]['variable_master_nodes']:
                 new_var_name = var_name_map[var_name]
+                var_nodes = ast.variables[var_name]
+
                 if var_name == new_var_name:
                     new_name_token_id = vocab[SAME_VARIABLE_TOKEN]
+                    auxiliary_var_mask[ptr] = 1.
                 else:
                     new_name_token_id = vocab[new_var_name]
+                    var_with_new_name_mask[ptr] = 1.
 
-                # for node in var_nodes:
-                #     packed_node_id = var_node_to_packed_pos_map[e_id][node.node_id]
-                #     packed_variable_tgt_name_id[packed_node_id] = new_name_token_id
+                # if var_name.startswith('v'):
+                #     new_name_token_id = int(var_name[1:])
+                # else:
+                #     new_name_token_id = ord(var_name[0])
+                # auxiliary_var_mask[ptr] = 1.
+                # var_with_new_name_mask[ptr] = 1.
 
-                packed_variable_tgt_name_id[pred_node_ptr] = new_name_token_id
-                packed_variable_tgt_name_weight[pred_node_ptr] = 0.1 if var_name == new_var_name else 1.
-                pred_node_ptr += 1
+                packed_variable_tgt_name_id[ptr] = new_name_token_id
+                packed_variable_tgt_name_weight[ptr] = unchanged_var_weight if var_name == new_var_name else 1.
+                ptr += 1
+
+        assert torch.eq(packed_variable_tgt_name_id, 0).sum().item() == 0
 
         return dict(variable_tgt_name_id=packed_variable_tgt_name_id,
-                    variable_tgt_name_weight=packed_variable_tgt_name_weight)
+                    variable_tgt_name_weight=packed_variable_tgt_name_weight,
+                    var_with_new_name_mask=var_with_new_name_mask,
+                    auxiliary_var_mask=auxiliary_var_mask)
 
 
 def get_json_iterator(file_path, shuffle=False, progress=False) -> Iterable:

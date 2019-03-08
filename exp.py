@@ -10,6 +10,7 @@ Options:
     --debug                                     Debug mode
     --seed=<int>                                Seed [default: 0]
     --work-dir=<dir>                            work dir [default: data/exp_runs/]
+    --config=<str>                              extra config [default: {}]
 """
 
 import random
@@ -29,7 +30,7 @@ from model.decoder import SimpleDecoder
 from model.encoder import GraphASTEncoder
 from model.gnn import AdjacencyList, GatedGraphNeuralNetwork
 from model.model import RenamingModel
-from utils import nn_util
+from utils import nn_util, util
 from utils.ast import AbstractSyntaxTree
 from utils.dataset import Dataset, Example
 from utils.evaluation import Evaluator
@@ -51,16 +52,23 @@ def train(args):
         print(f'creating work dir [{work_dir}]', file=sys.stderr)
         os.makedirs(work_dir)
 
+    if args['--config']:
+        extra_config = args['--config']
+        extra_config = json.loads(extra_config)
+        util.update(config, extra_config)
+
     json.dump(config, open(os.path.join(work_dir, 'config.json'), 'w'), indent=2)
 
     # a grammar defines the syntax types of nodes on ASTs
     # a vocabulary defines the collection of all source and target variable names
     vocab = torch.load(config['data']['vocab_file'])
-    encoder = GraphASTEncoder(ast_node_encoding_size=128, grammar=vocab.grammar, vocab=vocab,
+    encoder = GraphASTEncoder(ast_node_encoding_size=128,
+                              grammar=vocab.grammar, vocab=vocab,
                               bpe_model_path=config['data']['bpe_model_path'])
     decoder = SimpleDecoder(ast_node_encoding_size=128,
                             tgt_name_vocab_size=len(vocab.target))
     model = RenamingModel(encoder, decoder, config)
+    model.train()
 
     if args['--cuda']:
         model = model.cuda()
@@ -69,6 +77,9 @@ def train(args):
     optimizer = torch.optim.Adam(params, lr=0.001)
     nn_util.glorot_init(params)
 
+    # set the padding index for embedding layers to zeros
+    # model.encoder.var_node_name_embedding.weight[0].fill_(0.)
+
     train_set = Dataset(config['data']['train_file'], bpe_model_path=config['data']['bpe_model_path'])
     dev_set = Dataset(config['data']['dev_file'], bpe_model_path=config['data']['bpe_model_path'])
     batch_size = config['train']['batch_size']
@@ -76,7 +87,7 @@ def train(args):
     print(f'Training set size {len(train_set)}, dev set size {len(dev_set)}', file=sys.stderr)
 
     # training loop
-    train_iter = epoch = 0.
+    train_iter = epoch = 0
     log_every = config['train']['log_every']
     cum_loss = cum_examples = 0.
     t1 = time.time()
@@ -84,7 +95,9 @@ def train(args):
     while True:
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
         train_set_iter = train_set.batch_iterator(batch_size=batch_size, progress=True, shuffle=True, num_workers=5,
-                                                  filter_func=lambda e:len(e.variable_name_map) > 0 and e.ast.size < 300)
+                                                  filter_func=lambda e: len(e.variable_name_map) > 0 and
+                                                                        any(k != v for k, v in e.variable_name_map.items()) and
+                                                                        e.ast.size < 300)
         epoch += 1
 
         for batch_examples in train_set_iter:
@@ -96,7 +109,28 @@ def train(args):
             rename_maps = [e.variable_name_map for e in batch_examples]
 
             tgt_log_probs, info = model(src_asts, rename_maps)
+            # for i in tgt_log_probs:
+            #     print(i)
             print(info, file=sys.stderr)
+
+            # for i, (src_ast, rename_map) in enumerate(zip(src_asts, rename_maps)):
+            #     log_probs, _info = model([src_ast], [rename_map])
+            #
+            #     tree_node_encoding_1 = info['context_encoding']['packed_tree_node_encoding']
+            #     tree_node_encoding_2 = _info['context_encoding']['packed_tree_node_encoding']
+            #
+            #     packed_graph_1 = info['context_encoding']['packed_graph']
+            #     packed_graph_2 = _info['context_encoding']['packed_graph']
+            #
+            #     for node_group, nodes in packed_graph_1.node_groups[i].items():
+            #         for ast_node, packed_node_id in nodes.items():
+            #             encoding1 = tree_node_encoding_1[packed_node_id]
+            #             encoding2 = tree_node_encoding_2[packed_graph_2.node_groups[0][node_group][ast_node]]
+            #
+            #             diff_sum = torch.abs(encoding1 - encoding2).mean()
+            #             print(diff_sum.item())
+            #             if diff_sum.item() > 1e-6:
+            #                 pass
 
             loss = -tgt_log_probs.mean()
 
@@ -121,10 +155,10 @@ def train(args):
                 cum_loss = cum_examples = 0.
                 t1 = time.time()
 
-        print(f'Epoch {epoch} finished', file=sys.stderr)
+        print(f'[Learner] Epoch {epoch} finished', file=sys.stderr)
         t1 = time.time()
         eval_results = Evaluator.decode_and_evaluate(model, dev_set)
-        print(f'Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
+        print(f'[Learner] Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
         t1 = time.time()
 
 

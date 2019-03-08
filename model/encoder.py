@@ -84,22 +84,26 @@ class GraphASTEncoder(Encoder):
                  bpe_model_path: str):
         super(GraphASTEncoder, self).__init__()
 
-        self.connections = ['master_node']
+        self.connections = [] # ['master_node']
 
         self.gnn = GatedGraphNeuralNetwork(hidden_size=ast_node_encoding_size,
-                                           layer_timesteps=[8, 2, 8, 2],
-                                           residual_connections={1: [0], 3: [2]},
+                                           layer_timesteps=[8],
+                                           residual_connections={0: [0]},
                                            num_edge_types=8)
 
-        self.src_node_embedding = nn.Embedding(len(vocab.source) + len(grammar.syntax_types) + 1, ast_node_encoding_size)
-        self.master_node_embed_idx = self.src_node_embedding.num_embeddings - 1
+        self.node_type_embedding = nn.Embedding(len(grammar.syntax_types) + 2, ast_node_encoding_size)
+        self.var_node_name_embedding = nn.Embedding(len(vocab.source), ast_node_encoding_size, padding_idx=0)
+        self.variable_master_node_type_idx = len(grammar.syntax_types)
+        self.master_node_type_idx = len(grammar.syntax_types) + 1
+        self.type_and_content_hybrid = nn.Linear(2 * ast_node_encoding_size, ast_node_encoding_size)
+
         self.sub_token_embedder = SubTokenEmbedder(bpe_model_path, ast_node_encoding_size)
         self.vocab = vocab
         self.grammar = grammar
 
     @property
     def device(self):
-        return self.src_node_embedding.weight.device
+        return self.node_type_embedding.weight.device
 
     def forward(self, asts: List[AbstractSyntaxTree]):
         batch_size = len(asts)
@@ -117,6 +121,7 @@ class GraphASTEncoder(Encoder):
         variable_master_node_encoding = tree_node_encoding[variable_master_node_ids]
 
         context_encoding = dict(
+            tree_node_init_encoding=tree_node_init_encoding,
             packed_tree_node_encoding=tree_node_encoding,
             variable_master_node_encoding=variable_master_node_encoding,
             packed_graph=packed_graph
@@ -143,18 +148,19 @@ class GraphASTEncoder(Encoder):
 
                 node_adj_list.append((prev_node_packed_id, succ_node_packed_id))
 
-            for i in range(len(ast.terminal_nodes) - 1):
-                terminal_i = ast.terminal_nodes[i]
-                terminal_ip1 = ast.terminal_nodes[i + 1]
+            if 'terminals' in self.connections:
+                for i in range(len(ast.terminal_nodes) - 1):
+                    terminal_i = ast.terminal_nodes[i]
+                    terminal_ip1 = ast.terminal_nodes[i + 1]
 
-                terminal_nodes_adj_list.append((
-                    packed_graph.get_packed_node_id(ast_id, terminal_i),
-                    packed_graph.get_packed_node_id(ast_id, terminal_ip1)
-                ))
+                    terminal_nodes_adj_list.append((
+                        packed_graph.get_packed_node_id(ast_id, terminal_i),
+                        packed_graph.get_packed_node_id(ast_id, terminal_ip1)
+                    ))
 
             # add master node
             if 'master_node' in self.connections:
-                master_node_id = packed_graph.register_node(ast_id, 'master_nodes', group='master_nodes')
+                master_node_id = packed_graph.register_node(ast_id, 'master_node', group='master_nodes')
 
                 master_node_adj_list.extend([
                     (master_node_id, packed_graph.get_packed_node_id(ast_id, node))
@@ -177,13 +183,17 @@ class GraphASTEncoder(Encoder):
             var_master_node_restoration_indices_mask[ast_id, :len(ast.variables)] = 1.
 
         reversed_node_adj_list = [(n2, n1) for n1, n2 in node_adj_list]
-        reversed_terminal_nodes_adj_list = [(n2, n1) for n1, n2 in terminal_nodes_adj_list]
+
         reversed_var_master_nodes_adj_list = [(n2, n1) for n1, n2 in var_master_nodes_adj_list]
         adj_lists = [
             node_adj_list, reversed_node_adj_list,
-            terminal_nodes_adj_list, reversed_terminal_nodes_adj_list,
             var_master_nodes_adj_list, reversed_var_master_nodes_adj_list
         ]
+
+        if 'terminals' in self.connections:
+            reversed_terminal_nodes_adj_list = [(n2, n1) for n1, n2 in terminal_nodes_adj_list]
+            adj_lists.append(terminal_nodes_adj_list)
+            adj_lists.append(reversed_terminal_nodes_adj_list)
 
         if 'master_node' in self.connections:
             adj_lists.append(master_node_adj_list)
@@ -201,37 +211,42 @@ class GraphASTEncoder(Encoder):
         return packed_graph
 
     def get_batched_tree_init_encoding(self, packed_graph: PackedGraph) -> torch.Tensor:
-        indices = torch.zeros(packed_graph.size, dtype=torch.long)
+        node_type_indices = torch.zeros(packed_graph.size, dtype=torch.long)
+        var_node_name_indices = torch.zeros(packed_graph.size, dtype=torch.long)
         sub_tokens_list = []
         sub_tokens_indices = []
         for i, (ast_id, group, node_on_graph) in enumerate(packed_graph.nodes.values()):
             ast = packed_graph.trees[ast_id]
-            idx = 0
             if group == 'ast_nodes':
                 node = ast.id_to_node[node_on_graph]
-
+                type_idx = self.grammar.syntax_type_to_id[node.node_type]
                 if node.is_variable_node:
-                    idx = self.vocab.source[node.var_id]
-                else:
-                    idx = self.grammar.syntax_type_to_id[node.node_type] + len(self.vocab.source)
+                    var_node_name_indices[i] = self.vocab.source[node.old_name]
 
                 if node.node_type == 'obj':
                     # compute variable embedding
                     sub_tokens_list.append(node.sub_tokens)
                     sub_tokens_indices.append(i)
             elif group == 'variable_master_nodes':
-                idx = self.grammar.syntax_type_to_id['var'] + len(self.vocab.source)
+                type_idx = self.variable_master_node_type_idx
+                var_node_name_indices[i] = self.vocab.source[node_on_graph]
             elif group == 'master_nodes':
-                idx = self.master_node_embed_idx
+                type_idx = self.master_node_type_idx
             else:
                 raise ValueError()
 
-            indices[i] = idx
+            node_type_indices[i] = type_idx
 
-        tree_node_embedding = self.src_node_embedding(indices.to(self.device))
+        node_type_embedding = self.node_type_embedding(node_type_indices.to(self.device))
+        var_node_name_indices = var_node_name_indices.to(self.device)
+        node_content_embedding = self.var_node_name_embedding(var_node_name_indices) * torch.ne(var_node_name_indices, 0.).float().unsqueeze(-1)
+
         if sub_tokens_indices:
-            obj_tokens_embedding = self.sub_token_embedder(sub_tokens_list)
-            tree_node_embedding[sub_tokens_indices] = obj_tokens_embedding
+            obj_node_content_embedding = self.sub_token_embedder(sub_tokens_list)
+            node_content_embedding = node_content_embedding.scatter(0, torch.tensor(sub_tokens_indices, device=self.device).unsqueeze(-1).expand_as(obj_node_content_embedding),
+                                                                    obj_node_content_embedding)
+
+        tree_node_embedding = self.type_and_content_hybrid(torch.cat([node_type_embedding, node_content_embedding], dim=-1))
 
         return tree_node_embedding
 
@@ -261,3 +276,7 @@ class GraphASTEncoder(Encoder):
 
         return dict(batch_tree_node_encoding=batch_node_encoding,
                     batch_tree_node_masks=batch_tree_node_masks)
+
+    @classmethod
+    def build(cls, config):
+        pass

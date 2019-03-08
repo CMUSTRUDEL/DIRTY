@@ -6,7 +6,7 @@ import torch.nn as nn
 from utils import nn_util
 from utils.ast import AbstractSyntaxTree
 from model.decoder import Decoder
-from model.encoder import Encoder
+from model.encoder import Encoder, PackedGraph
 from utils.dataset import BatchUtil
 from utils.vocab import SAME_VARIABLE_TOKEN
 
@@ -17,6 +17,7 @@ class RenamingModel(nn.Module):
 
         self.encoder = encoder
         self.decoder = decoder
+        self.config = config
 
     @property
     def vocab(self):
@@ -46,7 +47,8 @@ class RenamingModel(nn.Module):
 
         prediction_target = BatchUtil.to_batched_prediction_target(source_asts, variable_name_maps,
                                                                    context_encoding,
-                                                                   vocab=self.vocab.target)
+                                                                   vocab=self.vocab.target,
+                                                                   unchanged_var_weight=self.config['train']['unchanged_variable_weight'])
         prediction_target = nn_util.to(prediction_target, self.device)
 
         # (batch_var_node_num, tgt_vocab_size)
@@ -56,11 +58,12 @@ class RenamingModel(nn.Module):
                                                           dim=-1,
                                                           index=prediction_target['variable_tgt_name_id'].unsqueeze(-1)).squeeze(-1)
 
+        # info = dict(context_encoding=context_encoding)
         info = dict()
         with torch.no_grad():
             # compute ppl over renamed variables
-            renamed_var_mask = torch.eq(prediction_target['variable_tgt_name_weight'], 1.).float()
-            unchanged_var_mask = 1 - renamed_var_mask
+            renamed_var_mask = prediction_target['var_with_new_name_mask']
+            unchanged_var_mask = prediction_target['auxiliary_var_mask']
             renamed_var_avg_ll = (packed_tgt_var_node_name_log_probs * renamed_var_mask).sum(-1) / renamed_var_mask.sum()
             unchanged_var_avg_ll = (packed_tgt_var_node_name_log_probs * unchanged_var_mask).sum(-1) / unchanged_var_mask.sum()
             info['rename_ppl'] = torch.exp(-renamed_var_avg_ll).item()
@@ -72,7 +75,7 @@ class RenamingModel(nn.Module):
         tgt_name_log_probs = tgt_name_log_probs * packed_graph.variable_master_node_restoration_indices_mask
 
         # (batch_size)
-        ast_log_probs = tgt_name_log_probs.sum(dim=-1)
+        ast_log_probs = tgt_name_log_probs.sum(dim=-1) / packed_graph.variable_master_node_restoration_indices_mask.sum(-1)
 
         return ast_log_probs, info
 
@@ -84,13 +87,14 @@ class RenamingModel(nn.Module):
         context_encoding = self.encoder(source_asts)
         # (prediction_size, tgt_vocab_size)
         packed_var_name_log_probs = self.decoder(context_encoding)
+        packed_graph: PackedGraph = context_encoding['packed_graph']
         best_var_name_log_probs, best_var_name_ids = torch.max(packed_var_name_log_probs, dim=-1)
 
         variable_rename_results = []
         pred_node_ptr = 0
         for ast_id, ast in enumerate(source_asts):
             variable_rename_result = dict()
-            for var_name, var_nodes in ast.variables.items():
+            for var_name in packed_graph.node_groups[ast_id]['variable_master_nodes']:
                 var_name_prob = best_var_name_log_probs[pred_node_ptr].item()
                 token_id = best_var_name_ids[pred_node_ptr].item()
                 new_var_name = self.vocab.target.id2word[token_id]
@@ -104,6 +108,8 @@ class RenamingModel(nn.Module):
                 pred_node_ptr += 1
 
             variable_rename_results.append(variable_rename_result)
+
+        assert pred_node_ptr == packed_var_name_log_probs.size(0)
 
         return variable_rename_results
 

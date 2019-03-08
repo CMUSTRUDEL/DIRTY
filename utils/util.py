@@ -1,4 +1,5 @@
 import psutil, gc, sys, os
+import collections
 import torch
 
 
@@ -36,3 +37,12 @@ def cpuStats():
     py = psutil.Process(pid)
     memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
     print('memory GB:', memoryUse, file=sys.stderr)
+
+
+def update(d, u):
+    for k, v in u.items():
+        if isinstance(v, collections.Mapping):
+            d[k] = update(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
