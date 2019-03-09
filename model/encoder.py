@@ -1,79 +1,21 @@
-from collections import OrderedDict, defaultdict
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict
+import pickle
 
 import torch
 import torch.nn as nn
 
 from model.embedding import SubTokenEmbedder
 from utils import util
-from utils.ast import AbstractSyntaxTree, SyntaxNode, TerminalNode
-from model.gnn import GatedGraphNeuralNetwork, main, AdjacencyList
+from utils.ast import AbstractSyntaxTree
+from model.gnn import GatedGraphNeuralNetwork, AdjacencyList
 from utils.grammar import Grammar
+from utils.graph import PackedGraph
 from utils.vocab import Vocab
 
 
 class Encoder(nn.Module):
     pass
-
-
-class PackedGraph(object):
-    def __init__(self, asts: List[AbstractSyntaxTree]):
-        self.trees = []
-        self.node_groups: List[Dict] = []
-        self._group_node_count = defaultdict(int)
-        self.ast_node_to_packed_node: List[Dict] = []
-        self.packed_node_to_ast_node: Dict = OrderedDict()
-        self._nodes = OrderedDict()
-
-        for ast in asts:
-            self.register_tree(ast)
-
-    def register_tree(self, ast: AbstractSyntaxTree):
-        ast_id = self.tree_num
-        self.trees.append(ast)
-        self.node_groups.append(dict())
-
-        for node in ast:
-            self.register_node(ast_id, node.node_id)
-
-    def register_node(self, tree_id, node, group='ast_nodes', return_node_index_in_group=False):
-        if group not in self.node_groups[tree_id]:
-            self.node_groups[tree_id][group] = OrderedDict()
-
-        node_group = self.node_groups[tree_id][group]
-        packed_node_id = self.size
-        node_group[node] = packed_node_id
-        self._group_node_count[group] += 1
-        self._nodes[packed_node_id] = (tree_id, group, node)
-
-        if return_node_index_in_group:
-            node_index_in_group = self._group_node_count[group] - 1
-            return packed_node_id, node_index_in_group
-
-        return packed_node_id
-
-    def get_packed_node_id(self, tree_id, node, group='ast_nodes'):
-        if isinstance(node, SyntaxNode):
-            node = node.node_id
-        return self.node_groups[tree_id][group][node]
-
-    @property
-    def size(self):
-        return len(self._nodes)
-
-    @property
-    def nodes(self):
-        return self._nodes
-
-    def get_nodes_by_group(self, group):
-        for i in range(self.tree_num):
-            for node, packed_node_id in self.node_groups[i][group].items():
-                yield node, packed_node_id
-
-    @property
-    def tree_num(self):
-        return len(self.trees)
 
 
 class GraphASTEncoder(Encoder):
@@ -93,7 +35,7 @@ class GraphASTEncoder(Encoder):
         self.node_type_embedding = nn.Embedding(len(grammar.syntax_types) + 2, gnn.hidden_size)
         self.var_node_name_embedding = nn.Embedding(len(vocab.source), gnn.hidden_size, padding_idx=0)
         self.variable_master_node_type_idx = len(grammar.syntax_types)
-        self.master_node_type_idx = len(grammar.syntax_types) + 1
+        self.master_node_type_idx = self.variable_master_node_type_idx + 1
         self.type_and_content_hybrid = nn.Linear(2 * gnn.hidden_size, gnn.hidden_size)
 
         self.sub_token_embedder = sub_token_embedder
@@ -146,18 +88,14 @@ class GraphASTEncoder(Encoder):
 
         return model
 
-    def forward(self, asts: List[AbstractSyntaxTree]):
-        batch_size = len(asts)
-
-        packed_graph = self.to_packed_graph(asts)
-
-        tree_node_init_encoding = self.get_batched_tree_init_encoding(packed_graph)
+    def forward(self, tensor_dict: Dict[str, torch.Tensor]):
+        tree_node_init_encoding = self.get_batched_tree_init_encoding(tensor_dict)
 
         # (batch_size, node_encoding_size)
         tree_node_encoding = self.gnn.compute_node_representations(initial_node_representation=tree_node_init_encoding,
-                                                                   adjacency_lists=packed_graph.adj_lists)
+                                                                   adjacency_lists=tensor_dict['adj_lists'])
 
-        variable_master_node_ids = [_id for node, _id in packed_graph.get_nodes_by_group('variable_master_nodes')]
+        variable_master_node_ids = tensor_dict['variable_master_node_ids']
 
         variable_master_node_encoding = tree_node_encoding[variable_master_node_ids]
 
@@ -165,12 +103,12 @@ class GraphASTEncoder(Encoder):
             tree_node_init_encoding=tree_node_init_encoding,
             packed_tree_node_encoding=tree_node_encoding,
             variable_master_node_encoding=variable_master_node_encoding,
-            packed_graph=packed_graph
         )
 
         return context_encoding
 
-    def to_packed_graph(self, asts: List[AbstractSyntaxTree]) -> PackedGraph:
+    @classmethod
+    def to_packed_graph(cls, asts: List[AbstractSyntaxTree], connections: List) -> PackedGraph:
         packed_graph = PackedGraph(asts)
 
         node_adj_list = []
@@ -189,7 +127,7 @@ class GraphASTEncoder(Encoder):
 
                 node_adj_list.append((prev_node_packed_id, succ_node_packed_id))
 
-            if 'terminals' in self.connections:
+            if 'terminals' in connections:
                 for i in range(len(ast.terminal_nodes) - 1):
                     terminal_i = ast.terminal_nodes[i]
                     terminal_ip1 = ast.terminal_nodes[i + 1]
@@ -200,7 +138,7 @@ class GraphASTEncoder(Encoder):
                     ))
 
             # add master node
-            if 'master_node' in self.connections:
+            if 'master_node' in connections:
                 master_node_id = packed_graph.register_node(ast_id, 'master_node', group='master_nodes')
 
                 master_node_adj_list.extend([
@@ -224,68 +162,85 @@ class GraphASTEncoder(Encoder):
             var_master_node_restoration_indices_mask[ast_id, :len(ast.variables)] = 1.
 
         adj_lists = []
-        if 'top_down' in self.connections:
+        if 'top_down' in connections:
             adj_lists.append(node_adj_list)
-        if 'bottom_up' in self.connections:
+        if 'bottom_up' in connections:
             reversed_node_adj_list = [(n2, n1) for n1, n2 in node_adj_list]
             adj_lists.append(reversed_node_adj_list)
-        if 'variable_master_nodes' in self.connections:
+        if 'variable_master_nodes' in connections:
             reversed_var_master_nodes_adj_list = [(n2, n1) for n1, n2 in var_master_nodes_adj_list]
             adj_lists.append(master_node_adj_list)
             adj_lists.append(reversed_var_master_nodes_adj_list)
-        if 'terminals' in self.connections:
+        if 'terminals' in connections:
             reversed_terminal_nodes_adj_list = [(n2, n1) for n1, n2 in terminal_nodes_adj_list]
             adj_lists.append(terminal_nodes_adj_list)
             adj_lists.append(reversed_terminal_nodes_adj_list)
-        if 'master_node' in self.connections:
+        if 'master_node' in connections:
             reversed_master_node_adj_list = [(n2, n1) for n1, n2 in master_node_adj_list]
             adj_lists.append(master_node_adj_list)
             adj_lists.append(reversed_master_node_adj_list)
 
         adj_lists = [
-            AdjacencyList(adj_list=adj_list, node_num=packed_graph.size, device=self.device) for adj_list in adj_lists
+            AdjacencyList(adj_list=adj_list, node_num=packed_graph.size) for adj_list in adj_lists
         ]
 
         packed_graph.adj_lists = adj_lists
-        packed_graph.variable_master_node_restoration_indices = var_master_node_restoration_indices.to(self.device)
-        packed_graph.variable_master_node_restoration_indices_mask = var_master_node_restoration_indices_mask.to(self.device)
+        packed_graph.variable_master_node_restoration_indices = var_master_node_restoration_indices
+        packed_graph.variable_master_node_restoration_indices_mask = var_master_node_restoration_indices_mask
 
         return packed_graph
 
-    def get_batched_tree_init_encoding(self, packed_graph: PackedGraph) -> torch.Tensor:
+    @classmethod
+    def to_tensor_dict(cls, packed_graph: PackedGraph,
+                       grammar: Grammar,
+                       vocab: Vocab) -> Dict[str, torch.Tensor]:
+        # predefined index
+        variable_master_node_type_idx = len(grammar.syntax_types)
+        master_node_type_idx = variable_master_node_type_idx + 1
+
         node_type_indices = torch.zeros(packed_graph.size, dtype=torch.long)
         var_node_name_indices = torch.zeros(packed_graph.size, dtype=torch.long)
+
         sub_tokens_list = []
         sub_tokens_indices = []
-        for i, (ast_id, group, node_on_graph) in enumerate(packed_graph.nodes.values()):
+
+        for i, (ast_id, group, node_key) in enumerate(packed_graph.nodes.values()):
             ast = packed_graph.trees[ast_id]
             if group == 'ast_nodes':
-                node = ast.id_to_node[node_on_graph]
-                type_idx = self.grammar.syntax_type_to_id[node.node_type]
+                node = ast.id_to_node[node_key]
+                type_idx = grammar.syntax_type_to_id[node.node_type]
                 if node.is_variable_node:
-                    var_node_name_indices[i] = self.vocab.source[node.old_name]
+                    var_node_name_indices[i] = vocab.source[node.old_name]
 
                 if node.node_type == 'obj':
                     # compute variable embedding
                     sub_tokens_list.append(node.sub_tokens)
                     sub_tokens_indices.append(i)
             elif group == 'variable_master_nodes':
-                type_idx = self.variable_master_node_type_idx
-                var_node_name_indices[i] = self.vocab.source[node_on_graph]
+                type_idx = variable_master_node_type_idx
+                var_node_name_indices[i] = vocab.source[node_key]
             elif group == 'master_nodes':
-                type_idx = self.master_node_type_idx
+                type_idx = master_node_type_idx
             else:
                 raise ValueError()
 
             node_type_indices[i] = type_idx
 
-        node_type_embedding = self.node_type_embedding(node_type_indices.to(self.device))
-        var_node_name_indices = var_node_name_indices.to(self.device)
-        node_content_embedding = self.var_node_name_embedding(var_node_name_indices) * torch.ne(var_node_name_indices, 0.).float().unsqueeze(-1)
+        return dict(
+            node_type_indices=torch.tensor(node_type_indices, dtype=torch.long),
+            var_node_name_indices=torch.tensor(var_node_name_indices, dtype=torch.long),
+            sub_tokens_indices=torch.tensor(sub_tokens_indices, dtype=torch.long),
+            sub_tokens_list=sub_tokens_list
+        )
 
-        if sub_tokens_indices:
-            obj_node_content_embedding = self.sub_token_embedder(sub_tokens_list)
-            node_content_embedding = node_content_embedding.scatter(0, torch.tensor(sub_tokens_indices, device=self.device).unsqueeze(-1).expand_as(obj_node_content_embedding),
+    def get_batched_tree_init_encoding(self, tensor_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
+        node_type_embedding = self.node_type_embedding(tensor_dict['node_type_indices'])
+        node_content_embedding = self.var_node_name_embedding(tensor_dict['var_node_name_indices']) * \
+            torch.ne(tensor_dict['var_node_name_indices'], 0.).float().unsqueeze(-1)
+
+        if tensor_dict['sub_tokens_indices'].size(0) > 0:
+            obj_node_content_embedding = self.sub_token_embedder(tensor_dict['sub_tokens_list'])
+            node_content_embedding = node_content_embedding.scatter(0, tensor_dict['sub_tokens_indices'].unsqueeze(-1).expand_as(obj_node_content_embedding),
                                                                     obj_node_content_embedding)
 
         tree_node_embedding = self.type_and_content_hybrid(torch.cat([node_type_embedding, node_content_embedding], dim=-1))

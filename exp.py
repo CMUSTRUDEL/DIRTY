@@ -92,23 +92,18 @@ def train(args):
 
     while True:
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
-        train_set_iter = train_set.batch_iterator(batch_size=batch_size, progress=True, shuffle=True, num_workers=5,
-                                                  filter_func=lambda e: len(e.variable_name_map) > 0 and
-                                                                        any(k != v for k, v in e.variable_name_map.items()) and
-                                                                        e.ast.size < 300)
+        train_set_iter = train_set.batch_iterator(batch_size=batch_size,
+                                                  config=config, progress=True, shuffle=True, num_readers=5,
+                                                  single_batcher=False)
         epoch += 1
 
-        for batch_examples in train_set_iter:
+        for batch in train_set_iter:
             train_iter += 1
             optimizer.zero_grad()
 
-            src_asts = [e.ast for e in batch_examples]
-            # print([ast.size for ast in src_asts], file=sys.stderr)
-            rename_maps = [e.variable_name_map for e in batch_examples]
+            nn_util.to(batch.tensor_dict, model.device)
 
-            tgt_log_probs, info = model(src_asts, rename_maps)
-            # for i in tgt_log_probs:
-            #     print(i)
+            tgt_log_probs, info = model(batch.tensor_dict, batch.tensor_dict['prediction_target'])
             print(info, file=sys.stderr)
 
             # for i, (src_ast, rename_map) in enumerate(zip(src_asts, rename_maps)):
@@ -133,12 +128,9 @@ def train(args):
             loss = -tgt_log_probs.mean()
 
             cum_loss += loss.item()
-            cum_examples += len(batch_examples)
+            cum_examples += len(batch.examples)
 
             loss.backward()
-            # print(loss.item())
-            # cpuStats()
-            # memReport()
 
             # clip gradient
             grad_norm = torch.nn.utils.clip_grad_norm_(params, 5.)
@@ -148,7 +140,7 @@ def train(args):
 
             if train_iter % log_every == 0:
                 print(f'[Learner] train_iter={train_iter} avg. loss={cum_loss / cum_examples}, '
-                      f'{cum_examples} batch_examples ({cum_examples / (time.time() - t1)} examples/s)', file=sys.stderr)
+                      f'{cum_examples} batch ({cum_examples / (time.time() - t1)} examples/s)', file=sys.stderr)
 
                 cum_loss = cum_examples = 0.
                 t1 = time.time()

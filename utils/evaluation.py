@@ -7,17 +7,15 @@ from model.model import RenamingModel
 class Evaluator(object):
     @staticmethod
     def decode_and_evaluate(model: RenamingModel, dataset: Dataset, batch_size=2048):
-        data_iter = dataset.batch_iterator(batch_size=batch_size, shuffle=False, progress=False,
-                                           filter_func=lambda e: len(e.variable_name_map) > 0 and
-                                                                 any(k != v for k, v in e.variable_name_map.items()) and
-                                                                 e.ast.size < 300)
+        data_iter = dataset.batch_iterator(batch_size=batch_size, shuffle=False, progress=False, config=model.config)
 
         was_training = model.training
         model.eval()
         example_acc_list = []
         variable_acc_list = []
         need_rename_cases = []
-        for examples in data_iter:
+        for batch in data_iter:
+            examples = batch.examples
             rename_results = model.decode([e.ast for e in examples])
             for example, rename_result in zip(examples, rename_results):
                 tree_acc = []

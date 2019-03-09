@@ -1,4 +1,6 @@
+import pickle
 import sys
+import time
 import ujson as json
 import tarfile
 from typing import Iterable, List, Dict
@@ -7,11 +9,17 @@ import multiprocessing
 from tqdm import tqdm
 import numpy as np
 from utils.ast import AbstractSyntaxTree, SyntaxNode
+from utils.graph import PackedGraph
 from utils.vocab import VocabEntry, SAME_VARIABLE_TOKEN
+from model.encoder import GraphASTEncoder
 import sentencepiece as spm
 import random
 
 import torch
+import torch.multiprocessing
+
+
+batcher_sync_msg = None
 
 
 class Example(object):
@@ -33,34 +41,82 @@ class Example(object):
         return cls(tree, variable_name_map, **kwargs)
 
 
-class BatchUtil(object):
+class Batch(object):
+    __slots__ = ('examples', 'tensor_dict')
+
+    def __init__(self, examples, tensor_dict):
+        self.examples = examples
+        self.tensor_dict = tensor_dict
+
+
+class Batcher(object):
+    def __init__(self, config):
+        self.config = config
+        self.vocab = torch.load(config['data']['vocab_file'])
+        self.grammar = self.vocab.grammar
+
+    def to_tensor_dict(self, examples: List[Example] = None, source_asts: List[AbstractSyntaxTree] = None) -> Dict[str, torch.Tensor]:
+        if examples:
+            source_asts = [e.ast for e in examples]
+
+        packed_graph = GraphASTEncoder.to_packed_graph(source_asts,
+                                                       connections=self.config['encoder']['connections'])
+
+        tensor_dict = {'adj_lists': packed_graph.adj_lists,
+                       'variable_master_node_restoration_indices': packed_graph.variable_master_node_restoration_indices,
+                       'variable_master_node_restoration_indices_mask': packed_graph.variable_master_node_restoration_indices_mask,
+                       'variable_master_node_ids': [_id for node, _id in
+                                                    packed_graph.get_nodes_by_group('variable_master_nodes')]}
+
+        packed_graph.adj_lists = None
+        packed_graph.variable_master_node_restoration_indices = None
+        packed_graph.variable_master_node_restoration_indices_mask = None
+
+        _tensors = GraphASTEncoder.to_tensor_dict(packed_graph, self.grammar, self.vocab)
+        tensor_dict.update(_tensors)
+
+        if examples:
+            prediction_target = self.to_batched_prediction_target(source_asts, [e.variable_name_map for e in examples],
+                                                                  packed_graph,
+                                                                  self.vocab,
+                                                                  self.config['train']['unchanged_variable_weight'])
+            tensor_dict['prediction_target'] = prediction_target
+
+        return tensor_dict
+
+    def to_batch(self, examples: List[Example]) -> Batch:
+        tensor_dict = self.to_tensor_dict(examples)
+        batch = Batch(examples, tensor_dict)
+
+        return batch
+
     @staticmethod
     def to_batched_prediction_target(source_asts: List['AbstractSyntaxTree'],
                                      variable_name_maps: List[Dict],
-                                     context_encoding: Dict,
+                                     packed_graph: PackedGraph,
                                      vocab: VocabEntry,
                                      unchanged_var_weight=1.):
         batch_size = len(source_asts)
-        packed_graph = context_encoding['packed_graph']
 
-        packed_variable_tgt_name_id = torch.zeros(context_encoding['variable_master_node_encoding'].size(0), dtype=torch.long)
-        packed_variable_tgt_name_weight = torch.zeros(context_encoding['variable_master_node_encoding'].size(0))
-        var_with_new_name_mask = torch.zeros(context_encoding['variable_master_node_encoding'].size(0))
-        auxiliary_var_mask = torch.zeros(context_encoding['variable_master_node_encoding'].size(0))
+        variable_master_nodes_num = packed_graph._group_node_count['variable_master_nodes']
+        packed_variable_tgt_name_id = torch.zeros(variable_master_nodes_num, dtype=torch.long)
+        packed_variable_tgt_name_weight = torch.zeros(variable_master_nodes_num)
+        var_with_new_name_mask = torch.zeros(variable_master_nodes_num)
+        auxiliary_var_mask = torch.zeros(variable_master_nodes_num)
 
         ptr = 0
         for e_id, (ast, var_name_map) in enumerate(zip(source_asts, variable_name_maps)):
             _var_node_ids = []
             _tgt_name_ids = []
-            for var_name in packed_graph.node_groups[e_id]['variable_master_nodes']:
+            for var_name in ast.variables:
                 new_var_name = var_name_map[var_name]
                 var_nodes = ast.variables[var_name]
 
                 if var_name == new_var_name:
-                    new_name_token_id = vocab[SAME_VARIABLE_TOKEN]
+                    new_name_token_id = vocab.target[SAME_VARIABLE_TOKEN]
                     auxiliary_var_mask[ptr] = 1.
                 else:
-                    new_name_token_id = vocab[new_var_name]
+                    new_name_token_id = vocab.target[new_var_name]
                     var_with_new_name_mask[ptr] = 1.
 
                 # if var_name.startswith('v'):
@@ -129,8 +185,53 @@ def example_generator(json_queue, example_queue, bpe_model_path=None):
                     setattr(node, 'sub_tokens', sp.EncodeAsPieces(node.name))
 
         example_queue.put(example)
+        # print('Push one example', file=sys.stderr)
 
     example_queue.put(None)
+
+
+def is_valid_example(example):
+    return example.ast.size < 300 and \
+           len(example.variable_name_map) > 0 and \
+           any(k != v for k, v in example.variable_name_map.items())
+
+
+def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
+    batch_examples = []
+    batch_node_num = 0
+
+    while True:
+        # print('Example queue size {}'.format(example_queue.qsize()), file=sys.stderr)
+        example = example_queue.get()
+        if example is None:
+            break
+
+        if is_valid_example(example):
+            batch_examples.append(example)
+            batch_node_num += example.ast.size
+
+        if batch_node_num >= batch_size:
+            t1 = time.time()
+            batch = batcher.to_batch(batch_examples)
+            print(f'[Batcher] {time.time() - t1}s took for tensorization', file=sys.stderr)
+
+            t1 = time.time()
+            batch_queue.put(batch)
+            print(f'[Batcher] {time.time() - t1}s took to push one batch', file=sys.stderr)
+
+            batch_examples = []
+            batch_node_num = 0
+
+    if batch_examples:
+        batch = batcher.to_batch(batch_examples)
+        batch_queue.put(batch)
+
+    batch_queue.put(None)
+    while batcher_sync_msg.value == 0:
+        time.sleep(1)
+
+    print('[Batcher] Quit current batcher', file=sys.stderr)
+    sys.stderr.flush()
 
 
 class Dataset(object):
@@ -198,23 +299,90 @@ class Dataset(object):
 
         return it_func(self._get_iterator(shuffle, num_workers))
 
-    def batch_iterator(self, batch_size=1024, num_workers=1, filter_func=lambda x: True, shuffle=False, progress=True) -> Iterable[List[Example]]:
-        example_iter = self.get_iterator(shuffle=shuffle, progress=progress, num_workers=num_workers)
-        batch = []
+    def batch_iterator(self, batch_size: int, config: Dict, num_readers=2, progress=True, shuffle=False, single_batcher=False) -> Iterable[Batch]:
+        if progress:
+            it_func = lambda x: tqdm(x, file=sys.stdout)
+        else:
+            it_func = lambda x: x
+
+        if single_batcher:
+            return it_func(self._single_process_batch_iter(batch_size, config, num_readers, shuffle))
+        else:
+            return it_func(self._batch_iterator(batch_size, config, num_readers, shuffle))
+
+    def _batch_iterator(self, batch_size: int, config: Dict, num_readers=2, shuffle=False) -> Iterable[Batch]:
+        global batcher_sync_msg
+        batcher_sync_msg = multiprocessing.Value('i', 0)
+        json_enc_queue = multiprocessing.Queue()
+        example_queue = multiprocessing.Queue()
+
+        json_loader = multiprocessing.Process(target=json_line_reader,
+                                              args=(self.file_path, json_enc_queue, num_readers,
+                                                    shuffle, False))
+        json_loader.daemon = True
+        example_generators = []
+        for i in range(num_readers):
+            p = multiprocessing.Process(target=example_generator,
+                                        args=(json_enc_queue, example_queue, self.bpe_model_path))
+            p.daemon = True
+            example_generators.append(p)
+
+        json_loader.start()
+        for p in example_generators: p.start()
+
+        batch_queue = torch.multiprocessing.Queue()
+        batcher = Batcher(config)
+        batchers = []
+        num_batchers = num_readers
+        for i in range(num_batchers):
+            p = torch.multiprocessing.Process(target=examples_to_batch,
+                                              args=(example_queue, batch_queue, batch_size, batcher))
+            p.daemon = True
+            batchers.append(p)
+
+        for p in batchers: p.start()
+
+        num_finished_batchers = 0
+        while True:
+            t1 = time.time()
+            batch = batch_queue.get()
+            print(f'{time.time() - t1} took to load a batch', file=sys.stderr)
+            if batch is not None:
+                yield batch
+            else:
+                # print('One batcher finished!', file=sys.stderr)
+                num_finished_batchers += 1
+                if num_finished_batchers == num_batchers: break
+
+        batcher_sync_msg.value = 1
+        json_loader.join()
+        for p in example_generators: p.join()
+        for p in batchers: p.join()
+
+    def _single_process_batch_iter(self, batch_size: int, config: Dict, num_readers=2, shuffle=False) -> Iterable[Batch]:
+        batcher = Batcher(config)
+        example_iter = self.get_iterator(shuffle=shuffle, progress=False, num_workers=num_readers)
+        t1 = time.time()
+        batch_examples = []
         batch_node_num = 0
 
         # if example.ast.size < 300 and len(example.variable_name_map) > 0:
-        for example in filter(filter_func, example_iter):
-            batch.append(example)
+        for example in filter(is_valid_example, example_iter):
+            batch_examples.append(example)
             batch_node_num += example.ast.size
 
             if batch_node_num >= batch_size:
+                batch = batcher.to_batch(batch_examples)
+                print(f'[Dataset] {time.time() - t1} took to load a batch', file=sys.stderr)
                 yield batch
 
-                batch = []
+                batch_examples = []
                 batch_node_num = 0
+                t1 = time.time()
 
-        if batch: yield batch
+        if batch_examples:
+            batch = batcher.to_batch(batch_examples)
+            yield batch
 
 
 if __name__ == '__main__':

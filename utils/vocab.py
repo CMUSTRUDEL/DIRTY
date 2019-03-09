@@ -169,4 +169,4 @@ if __name__ == '__main__':
         for name in identifier_names:
             f.write(name + '\n')
 
-    pickle.dump(vocab, open(args['VOCAB_FILE'], 'wb'))
+    torch.save(vocab, args['VOCAB_FILE'])

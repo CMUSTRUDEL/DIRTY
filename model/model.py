@@ -6,8 +6,9 @@ import torch.nn as nn
 from utils import nn_util, util
 from utils.ast import AbstractSyntaxTree
 from model.decoder import Decoder, SimpleDecoder
-from model.encoder import Encoder, PackedGraph, GraphASTEncoder
-from utils.dataset import BatchUtil
+from model.encoder import Encoder, GraphASTEncoder
+from utils.graph import PackedGraph
+from utils.dataset import Batcher
 from utils.vocab import SAME_VARIABLE_TOKEN
 
 
@@ -22,6 +23,10 @@ class RenamingModel(nn.Module):
     @property
     def vocab(self):
         return self.encoder.vocab
+
+    @property
+    def batcher(self):
+        return Batcher(self.config)
 
     @property
     def device(self):
@@ -48,7 +53,7 @@ class RenamingModel(nn.Module):
 
         return model
 
-    def forward(self, source_asts: List[AbstractSyntaxTree], variable_name_maps: List[Dict[int, str]]) -> Tuple[torch.Tensor, Dict]:
+    def forward(self, source_asts: Dict[str, torch.Tensor], prediction_target: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, Dict]:
         """
         Given a batch of decompiled abstract syntax trees, and the gold-standard renaming of variable nodes,
         compute the log-likelihood of the gold-standard renaming for training
@@ -64,16 +69,10 @@ class RenamingModel(nn.Module):
         # src_ast_encoding: (batch_size, max_ast_node_num, node_encoding_size)
         # src_ast_mask: (batch_size, max_ast_node_num)
         context_encoding = self.encoder(source_asts)
-        packed_graph = context_encoding['packed_graph']
-
-        prediction_target = BatchUtil.to_batched_prediction_target(source_asts, variable_name_maps,
-                                                                   context_encoding,
-                                                                   vocab=self.vocab.target,
-                                                                   unchanged_var_weight=self.config['train']['unchanged_variable_weight'])
-        prediction_target = nn_util.to(prediction_target, self.device)
 
         # (batch_var_node_num, tgt_vocab_size)
         packed_var_name_log_probs = self.decoder(context_encoding)
+
         # (batch_var_node_num)
         packed_tgt_var_node_name_log_probs = torch.gather(packed_var_name_log_probs,
                                                           dim=-1,
@@ -92,11 +91,11 @@ class RenamingModel(nn.Module):
 
         packed_tgt_var_node_name_log_probs = packed_tgt_var_node_name_log_probs * prediction_target['variable_tgt_name_weight']
         # (batch_size, max_variable_node_num)
-        tgt_name_log_probs = packed_tgt_var_node_name_log_probs[packed_graph.variable_master_node_restoration_indices]
-        tgt_name_log_probs = tgt_name_log_probs * packed_graph.variable_master_node_restoration_indices_mask
+        tgt_name_log_probs = packed_tgt_var_node_name_log_probs[source_asts['variable_master_node_restoration_indices']]
+        tgt_name_log_probs = tgt_name_log_probs * source_asts['variable_master_node_restoration_indices_mask']
 
         # (batch_size)
-        ast_log_probs = tgt_name_log_probs.sum(dim=-1) / packed_graph.variable_master_node_restoration_indices_mask.sum(-1)
+        ast_log_probs = tgt_name_log_probs.sum(dim=-1) / source_asts['variable_master_node_restoration_indices_mask'].sum(-1)
 
         return ast_log_probs, info
 
@@ -105,17 +104,18 @@ class RenamingModel(nn.Module):
         Given a batch of ASTs, predict their new variable names
         """
 
-        context_encoding = self.encoder(source_asts)
+        tensor_dict = self.batcher.to_tensor_dict(source_asts=source_asts)
+        nn_util.to(tensor_dict, self.device)
+        context_encoding = self.encoder(tensor_dict)
         # (prediction_size, tgt_vocab_size)
         packed_var_name_log_probs = self.decoder(context_encoding)
-        packed_graph: PackedGraph = context_encoding['packed_graph']
         best_var_name_log_probs, best_var_name_ids = torch.max(packed_var_name_log_probs, dim=-1)
 
         variable_rename_results = []
         pred_node_ptr = 0
         for ast_id, ast in enumerate(source_asts):
             variable_rename_result = dict()
-            for var_name in packed_graph.node_groups[ast_id]['variable_master_nodes']:
+            for var_name in ast.variables:
                 var_name_prob = best_var_name_log_probs[pred_node_ptr].item()
                 token_id = best_var_name_ids[pred_node_ptr].item()
                 new_var_name = self.vocab.target.id2word[token_id]

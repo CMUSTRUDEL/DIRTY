@@ -1,10 +1,11 @@
 from typing import Dict
+import pickle
 
 import torch
 import torch.nn as nn
 
 from utils import nn_util, util
-from utils.vocab import Vocab
+from utils.vocab import Vocab, VocabEntry
 
 
 class Decoder(nn.Module):

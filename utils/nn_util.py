@@ -10,10 +10,16 @@ def glorot_init(params):
 
 
 def to(data, device: torch.device):
+    if 'adj_lists' in data:
+        [x.to(device) for x in data['adj_lists']]
+
     if isinstance(data, dict):
         for key, val in data.items():
             if torch.is_tensor(val):
                 data[key] = val.to(device)
+            # recursively move tensors to GPU
+            elif isinstance(val, dict):
+                data[key] = to(val, device)
     elif isinstance(data, list):
         for i in range(len(data)):
             val = data[i]

@@ -18,7 +18,8 @@ class AdjacencyList:
         return self.data.device
 
     def to(self, device: torch.device) -> 'AdjacencyList':
-        self.data = self.data.to(device)
+        if self.data.device != device:
+            self.data = self.data.to(device)
         return self
 
     def __getitem__(self, item):
