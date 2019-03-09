@@ -93,6 +93,7 @@ def train(args):
     while True:
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
         train_set_iter = train_set.batch_iterator(batch_size=batch_size,
+                                                  return_examples=False,
                                                   config=config, progress=True, shuffle=True, num_readers=5,
                                                   single_batcher=False)
         epoch += 1

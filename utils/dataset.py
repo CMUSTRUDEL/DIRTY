@@ -3,7 +3,7 @@ import sys
 import time
 import ujson as json
 import tarfile
-from typing import Iterable, List, Dict
+from typing import Iterable, List, Dict, Union
 import multiprocessing
 
 from tqdm import tqdm
@@ -16,7 +16,7 @@ import sentencepiece as spm
 import random
 
 import torch
-import torch.multiprocessing
+import torch.multiprocessing as torch_mp
 
 
 batcher_sync_msg = None
@@ -50,12 +50,14 @@ class Batch(object):
 
 
 class Batcher(object):
-    def __init__(self, config):
+    def __init__(self, config, return_examples=True):
         self.config = config
         self.vocab = torch.load(config['data']['vocab_file'])
         self.bpe_model = spm.SentencePieceProcessor()
         self.bpe_model.Load(config['data']['bpe_model_path'])
         self.grammar = self.vocab.grammar
+
+        self.return_examples = True
 
     def to_tensor_dict(self, examples: List[Example] = None, source_asts: List[AbstractSyntaxTree] = None) -> Dict[str, torch.Tensor]:
         if examples:
@@ -88,6 +90,9 @@ class Batcher(object):
 
     def to_batch(self, examples: List[Example]) -> Batch:
         tensor_dict = self.to_tensor_dict(examples)
+        if not self.return_examples:
+            examples = None
+
         batch = Batch(examples, tensor_dict)
 
         return batch
@@ -301,7 +306,10 @@ class Dataset(object):
 
         return it_func(self._get_iterator(shuffle, num_workers))
 
-    def batch_iterator(self, batch_size: int, config: Dict, num_readers=2, progress=True, shuffle=False, single_batcher=False) -> Iterable[Batch]:
+    def batch_iterator(self, batch_size: int, config: Dict,
+                       return_examples=True,
+                       num_readers=2,
+                       progress=True, shuffle=False, single_batcher=False) -> Iterable[Union[Batch, Dict[str, torch.Tensor]]]:
         if progress:
             it_func = lambda x: tqdm(x, file=sys.stdout)
         else:
@@ -310,13 +318,13 @@ class Dataset(object):
         if single_batcher:
             return it_func(self._single_process_batch_iter(batch_size, config, num_readers, shuffle))
         else:
-            return it_func(self._batch_iterator(batch_size, config, num_readers, shuffle))
+            return it_func(self._batch_iterator(batch_size, config, num_readers, shuffle, return_examples))
 
-    def _batch_iterator(self, batch_size: int, config: Dict, num_readers=2, shuffle=False) -> Iterable[Batch]:
+    def _batch_iterator(self, batch_size: int, config: Dict, num_readers=2, shuffle=False, return_examples=True) -> Iterable[Batch]:
         global batcher_sync_msg
         batcher_sync_msg = multiprocessing.Value('i', 0)
-        json_enc_queue = multiprocessing.Queue()
-        example_queue = multiprocessing.Queue()
+        json_enc_queue = multiprocessing.Queue(maxsize=30000)
+        example_queue = multiprocessing.Queue(maxsize=30000)
 
         json_loader = multiprocessing.Process(target=json_line_reader,
                                               args=(self.file_path, json_enc_queue, num_readers,
@@ -332,13 +340,13 @@ class Dataset(object):
         json_loader.start()
         for p in example_generators: p.start()
 
-        batch_queue = torch.multiprocessing.Queue()
-        batcher = Batcher(config)
+        batch_queue = torch_mp.Queue()
+        batcher = Batcher(config, return_examples=return_examples)
         batchers = []
         num_batchers = num_readers
         for i in range(num_batchers):
-            p = torch.multiprocessing.Process(target=examples_to_batch,
-                                              args=(example_queue, batch_queue, batch_size, batcher))
+            p = torch_mp.Process(target=examples_to_batch,
+                                 args=(example_queue, batch_queue, batch_size, batcher))
             p.daemon = True
             batchers.append(p)
 
