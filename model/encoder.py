@@ -4,6 +4,7 @@ import pickle
 
 import torch
 import torch.nn as nn
+from sentencepiece import SentencePieceProcessor
 
 from model.embedding import SubTokenEmbedder
 from utils import util
@@ -192,6 +193,8 @@ class GraphASTEncoder(Encoder):
 
     @classmethod
     def to_tensor_dict(cls, packed_graph: PackedGraph,
+                       bpe_model: SentencePieceProcessor,
+                       bpe_pad_idx: int,
                        grammar: Grammar,
                        vocab: Vocab) -> Dict[str, torch.Tensor]:
         # predefined index
@@ -202,7 +205,7 @@ class GraphASTEncoder(Encoder):
         var_node_name_indices = torch.zeros(packed_graph.size, dtype=torch.long)
 
         sub_tokens_list = []
-        sub_tokens_indices = []
+        node_with_subtokens_indices = []
 
         for i, (ast_id, group, node_key) in enumerate(packed_graph.nodes.values()):
             ast = packed_graph.trees[ast_id]
@@ -214,8 +217,9 @@ class GraphASTEncoder(Encoder):
 
                 if node.node_type == 'obj':
                     # compute variable embedding
-                    sub_tokens_list.append(node.sub_tokens)
-                    sub_tokens_indices.append(i)
+                    node_sub_tokes = bpe_model.encode_as_ids(node.name)
+                    sub_tokens_list.append(node_sub_tokes)
+                    node_with_subtokens_indices.append(i)
             elif group == 'variable_master_nodes':
                 type_idx = variable_master_node_type_idx
                 var_node_name_indices[i] = vocab.source[node_key]
@@ -226,11 +230,21 @@ class GraphASTEncoder(Encoder):
 
             node_type_indices[i] = type_idx
 
+        sub_tokens_indices = None
+        if node_with_subtokens_indices:
+            max_subtoken_num = max(len(x) for x in sub_tokens_list)
+            sub_tokens_indices = np.zeros((len(sub_tokens_list), max_subtoken_num), dtype=np.int64)
+            sub_tokens_indices.fill(bpe_pad_idx)
+            for i, token_ids in enumerate(sub_tokens_list):
+                sub_tokens_indices[i, :len(token_ids)] = token_ids
+
+            sub_tokens_indices = torch.from_numpy(sub_tokens_indices)
+
         return dict(
             node_type_indices=torch.tensor(node_type_indices, dtype=torch.long),
             var_node_name_indices=torch.tensor(var_node_name_indices, dtype=torch.long),
-            sub_tokens_indices=torch.tensor(sub_tokens_indices, dtype=torch.long),
-            sub_tokens_list=sub_tokens_list
+            node_with_subtokens_indices=torch.tensor(node_with_subtokens_indices, dtype=torch.long),
+            sub_tokens_indices=sub_tokens_indices
         )
 
     def get_batched_tree_init_encoding(self, tensor_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -238,9 +252,9 @@ class GraphASTEncoder(Encoder):
         node_content_embedding = self.var_node_name_embedding(tensor_dict['var_node_name_indices']) * \
             torch.ne(tensor_dict['var_node_name_indices'], 0.).float().unsqueeze(-1)
 
-        if tensor_dict['sub_tokens_indices'].size(0) > 0:
-            obj_node_content_embedding = self.sub_token_embedder(tensor_dict['sub_tokens_list'])
-            node_content_embedding = node_content_embedding.scatter(0, tensor_dict['sub_tokens_indices'].unsqueeze(-1).expand_as(obj_node_content_embedding),
+        if tensor_dict['node_with_subtokens_indices'].size(0) > 0:
+            obj_node_content_embedding = self.sub_token_embedder(tensor_dict['sub_tokens_indices'])
+            node_content_embedding = node_content_embedding.scatter(0, tensor_dict['node_with_subtokens_indices'].unsqueeze(-1).expand_as(obj_node_content_embedding),
                                                                     obj_node_content_embedding)
 
         tree_node_embedding = self.type_and_content_hybrid(torch.cat([node_type_embedding, node_content_embedding], dim=-1))

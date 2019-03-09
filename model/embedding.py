@@ -1,3 +1,5 @@
+from typing import List
+
 import sentencepiece as spm
 
 import torch
@@ -18,16 +20,28 @@ class SubTokenEmbedder(nn.Module):
     def device(self):
         return self.embeddings.weight.device
 
-    def forward(self, sub_tokens_list):
+    @classmethod
+    def to_input_tensor(cls, sub_tokens_list: List[List[str]], bpe_model: spm.SentencePieceProcessor, pad_id=0) -> torch.Tensor:
         max_subword_num = max(len(x) for x in sub_tokens_list)
         idx_tensor = torch.zeros(len(sub_tokens_list), max_subword_num, dtype=torch.long)
-        idx_tensor.fill_(self.pad_id)
+        idx_tensor.fill_(pad_id)
+
         for i, token_list in enumerate(sub_tokens_list):
             for j, token in enumerate(token_list):
-                idx_tensor[i, j] = self.bpe_model.piece_to_id(token)
+                idx_tensor[i, j] = bpe_model.piece_to_id(token)
 
-        idx_tensor = idx_tensor.to(self.device)
-        idx_mask = torch.ne(idx_tensor, self.pad_id).float()
-        embedding = self.embeddings(idx_tensor) * idx_mask.unsqueeze(-1)
-        embedding = embedding.sum(dim=1) / idx_mask.sum(-1).unsqueeze(-1)
+        return idx_tensor
+
+    def get_embedding(self, sub_tokens_list: List[List[str]]) -> torch.Tensor:
+        idx_tensor = self.to_input_tensor(sub_tokens_list, self.bpe_model, self.pad_id)
+        embedding = self.forward(idx_tensor)
+
+        return embedding
+
+    def forward(self, sub_tokens_indices: torch.Tensor) -> torch.Tensor:
+        # sub_tokens_indices: (batch_size, max_sub_token_num)
+        sub_tokens_mask = torch.ne(sub_tokens_indices, self.pad_id).float()
+        embedding = self.embeddings(sub_tokens_indices) * sub_tokens_mask.unsqueeze(-1)
+        embedding = embedding.sum(dim=1) / sub_tokens_mask.sum(-1).unsqueeze(-1)
+
         return embedding

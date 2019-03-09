@@ -53,6 +53,8 @@ class Batcher(object):
     def __init__(self, config):
         self.config = config
         self.vocab = torch.load(config['data']['vocab_file'])
+        self.bpe_model = spm.SentencePieceProcessor()
+        self.bpe_model.Load(config['data']['bpe_model_path'])
         self.grammar = self.vocab.grammar
 
     def to_tensor_dict(self, examples: List[Example] = None, source_asts: List[AbstractSyntaxTree] = None) -> Dict[str, torch.Tensor]:
@@ -72,7 +74,7 @@ class Batcher(object):
         packed_graph.variable_master_node_restoration_indices = None
         packed_graph.variable_master_node_restoration_indices_mask = None
 
-        _tensors = GraphASTEncoder.to_tensor_dict(packed_graph, self.grammar, self.vocab)
+        _tensors = GraphASTEncoder.to_tensor_dict(packed_graph, self.bpe_model, self.bpe_model.pad_id(), self.grammar, self.vocab)
         tensor_dict.update(_tensors)
 
         if examples:

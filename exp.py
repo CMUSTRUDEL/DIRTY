@@ -78,8 +78,8 @@ def train(args):
     # set the padding index for embedding layers to zeros
     # model.encoder.var_node_name_embedding.weight[0].fill_(0.)
 
-    train_set = Dataset(config['data']['train_file'], bpe_model_path=config['data']['bpe_model_path'])
-    dev_set = Dataset(config['data']['dev_file'], bpe_model_path=config['data']['bpe_model_path'])
+    train_set = Dataset(config['data']['train_file'])
+    dev_set = Dataset(config['data']['dev_file'])
     batch_size = config['train']['batch_size']
 
     print(f'Training set size {len(train_set)}, dev set size {len(dev_set)}', file=sys.stderr)
@@ -101,9 +101,13 @@ def train(args):
             train_iter += 1
             optimizer.zero_grad()
 
+            t1 = time.time()
             nn_util.to(batch.tensor_dict, model.device)
+            print(f'[Learner] {time.time() - t1}s took for moving tensors to device', file=sys.stderr)
 
+            t1 = time.time()
             tgt_log_probs, info = model(batch.tensor_dict, batch.tensor_dict['prediction_target'])
+            print(f'[Learner] {time.time() - t1}s took for computation', file=sys.stderr)
             print(info, file=sys.stderr)
 
             # for i, (src_ast, rename_map) in enumerate(zip(src_asts, rename_maps)):
@@ -147,13 +151,14 @@ def train(args):
 
         print(f'[Learner] Epoch {epoch} finished', file=sys.stderr)
         t1 = time.time()
-        eval_results = Evaluator.decode_and_evaluate(model, dev_set)
+        eval_results = Evaluator.decode_and_evaluate(model, dev_set, batch_size=batch_size)
         print(f'[Learner] Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
         t1 = time.time()
 
 
 if __name__ == '__main__':
     cmd_args = docopt(__doc__)
+    print(f'Main process id {os.getpid()}', file=sys.stderr)
 
     # seed the RNG
     seed = int(cmd_args['--seed'])
