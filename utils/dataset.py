@@ -48,6 +48,10 @@ class Batch(object):
         self.examples = examples
         self.tensor_dict = tensor_dict
 
+    @property
+    def size(self):
+        return self.tensor_dict['batch_size']
+
 
 class Batcher(object):
     def __init__(self, config, return_examples=True):
@@ -85,6 +89,9 @@ class Batcher(object):
                                                                   self.vocab,
                                                                   self.config['train']['unchanged_variable_weight'])
             tensor_dict['prediction_target'] = prediction_target
+
+        tensor_dict['batch_size'] = len(source_asts)
+        tensor_dict['packed_graph_size'] = packed_graph.size
 
         return tensor_dict
 

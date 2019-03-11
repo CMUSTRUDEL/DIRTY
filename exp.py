@@ -87,6 +87,7 @@ def train(args):
     # training loop
     train_iter = epoch = 0
     log_every = config['train']['log_every']
+    evaluate_every_nepoch = config['train']['evaluate_every_nepoch']
     cum_loss = cum_examples = 0.
     t1 = time.time()
 
@@ -151,9 +152,16 @@ def train(args):
                 t1 = time.time()
 
         print(f'[Learner] Epoch {epoch} finished', file=sys.stderr)
-        t1 = time.time()
-        eval_results = Evaluator.decode_and_evaluate(model, dev_set, batch_size=batch_size)
-        print(f'[Learner] Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
+
+        if epoch % evaluate_every_nepoch == 0:
+            print(f'[Learner] Perform evaluation', file=sys.stderr)
+            t1 = time.time()
+            eval_results = Evaluator.decode_and_evaluate(model, dev_set, batch_size=batch_size)
+            print(f'[Learner] Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
+
+        model_save_path = os.path.join(work_dir, f'model.iter{train_iter}.bin')
+        model.save(model_save_path)
+        print(f'[Learner] Saved model to {model_save_path}', file=sys.stderr)
         t1 = time.time()
 
 

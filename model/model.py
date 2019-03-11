@@ -24,6 +24,7 @@ class RenamingModel(nn.Module):
     def vocab(self):
         return self.encoder.vocab
 
+    @property
     def batcher(self):
         if not hasattr(self, '_batcher'):
             _batcher = Batcher(self.config)
