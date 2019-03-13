@@ -225,13 +225,13 @@ def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
             batch_node_num += example.ast.size
 
         if batch_node_num >= batch_size:
-            t1 = time.time()
+            # t1 = time.time()
             batch = batcher.to_batch(batch_examples)
-            print(f'[Batcher] {time.time() - t1}s took for tensorization', file=sys.stderr)
+            # print(f'[Batcher] {time.time() - t1}s took for tensorization', file=sys.stderr)
 
-            t1 = time.time()
+            # t1 = time.time()
             batch_queue.put(batch)
-            print(f'[Batcher] {time.time() - t1}s took to push one batch', file=sys.stderr)
+            # print(f'[Batcher] {time.time() - t1}s took to push one batch', file=sys.stderr)
 
             batch_examples = []
             batch_node_num = 0
@@ -244,7 +244,7 @@ def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
     while batcher_sync_msg.value == 0:
         time.sleep(1)
 
-    print('[Batcher] Quit current batcher', file=sys.stderr)
+    # print('[Batcher] Quit current batcher', file=sys.stderr)
     sys.stderr.flush()
 
 
@@ -361,9 +361,9 @@ class Dataset(object):
 
         num_finished_batchers = 0
         while True:
-            t1 = time.time()
+            # t1 = time.time()
             batch = batch_queue.get()
-            print(f'{time.time() - t1} took to load a batch', file=sys.stderr)
+            # print(f'{time.time() - t1} took to load a batch', file=sys.stderr)
             if batch is not None:
                 yield batch
             else:
@@ -379,7 +379,7 @@ class Dataset(object):
     def _single_process_batch_iter(self, batch_size: int, config: Dict, num_readers=2, shuffle=False) -> Iterable[Batch]:
         batcher = Batcher(config)
         example_iter = self.get_iterator(shuffle=shuffle, progress=False, num_workers=num_readers)
-        t1 = time.time()
+        # t1 = time.time()
         batch_examples = []
         batch_node_num = 0
 
@@ -390,12 +390,12 @@ class Dataset(object):
 
             if batch_node_num >= batch_size:
                 batch = batcher.to_batch(batch_examples)
-                print(f'[Dataset] {time.time() - t1} took to load a batch', file=sys.stderr)
+                # print(f'[Dataset] {time.time() - t1} took to load a batch', file=sys.stderr)
                 yield batch
 
                 batch_examples = []
                 batch_node_num = 0
-                t1 = time.time()
+                # t1 = time.time()
 
         if batch_examples:
             batch = batcher.to_batch(batch_examples)

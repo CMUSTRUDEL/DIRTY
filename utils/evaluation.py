@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 from utils.dataset import Dataset
 from model.model import RenamingModel
@@ -14,26 +15,28 @@ class Evaluator(object):
         example_acc_list = []
         variable_acc_list = []
         need_rename_cases = []
-        for batch in data_iter:
-            examples = batch.examples
-            rename_results = model.decode([e.ast for e in examples])
-            for example, rename_result in zip(examples, rename_results):
-                tree_acc = []
-                if len(example.variable_name_map) == 0:
-                    continue
 
-                for old_name, gold_new_name in example.variable_name_map.items():
-                    pred = rename_result[old_name]
-                    pred_new_name = pred['new_name']
-                    is_correct = pred_new_name == gold_new_name
-                    tree_acc.append(is_correct)
+        with torch.no_grad():
+            for batch in data_iter:
+                examples = batch.examples
+                rename_results = model.decoder.predict([e.ast for e in examples], model.encoder)
+                for example, rename_result in zip(examples, rename_results):
+                    tree_acc = []
+                    if len(example.variable_name_map) == 0:
+                        continue
 
-                    if gold_new_name != old_name:  # and gold_new_name in model.vocab.target:
-                        need_rename_cases.append(is_correct)
+                    for old_name, gold_new_name in example.variable_name_map.items():
+                        pred = rename_result[old_name]
+                        pred_new_name = pred['new_name']
+                        is_correct = pred_new_name == gold_new_name
+                        tree_acc.append(is_correct)
 
-                variable_acc_list.extend(tree_acc)
-                tree_acc = np.average(tree_acc)
-                example_acc_list.append(tree_acc)
+                        if gold_new_name != old_name:  # and gold_new_name in model.vocab.target:
+                            need_rename_cases.append(is_correct)
+
+                    variable_acc_list.extend(tree_acc)
+                    tree_acc = np.average(tree_acc)
+                    example_acc_list.append(tree_acc)
 
         num_variables = len(variable_acc_list)
         corpus_acc = np.average(variable_acc_list)

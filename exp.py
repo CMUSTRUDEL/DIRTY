@@ -103,14 +103,13 @@ def train(args):
             train_iter += 1
             optimizer.zero_grad()
 
-            t1 = time.time()
+            # t1 = time.time()
             nn_util.to(batch.tensor_dict, model.device)
-            print(f'[Learner] {time.time() - t1}s took for moving tensors to device', file=sys.stderr)
+            # print(f'[Learner] {time.time() - t1}s took for moving tensors to device', file=sys.stderr)
 
             t1 = time.time()
-            tgt_log_probs, info = model(batch.tensor_dict, batch.tensor_dict['prediction_target'])
+            result = model(batch.tensor_dict, batch.tensor_dict['prediction_target'])
             print(f'[Learner] {time.time() - t1}s took for computation', file=sys.stderr)
-            print(info, file=sys.stderr)
 
             # for i, (src_ast, rename_map) in enumerate(zip(src_asts, rename_maps)):
             #     log_probs, _info = model([src_ast], [rename_map])
@@ -131,7 +130,7 @@ def train(args):
             #             if diff_sum.item() > 1e-6:
             #                 pass
 
-            loss = -tgt_log_probs.mean()
+            loss = -result['batch_log_prob'].mean()
 
             cum_loss += loss.item()
             cum_examples += len(batch.examples)

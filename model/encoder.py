@@ -104,6 +104,10 @@ class GraphASTEncoder(Encoder):
             tree_node_init_encoding=tree_node_init_encoding,
             packed_tree_node_encoding=tree_node_encoding,
             variable_master_node_encoding=variable_master_node_encoding,
+            tree_num=tensor_dict['tree_num'],
+            tree_node_to_tree_id_map=tensor_dict['tree_node_to_tree_id_map'],
+            variable_master_node_restoration_indices=tensor_dict['variable_master_node_restoration_indices'],
+            variable_master_node_restoration_indices_mask=tensor_dict['variable_master_node_restoration_indices_mask']
         )
 
         return context_encoding
@@ -203,6 +207,7 @@ class GraphASTEncoder(Encoder):
 
         node_type_indices = torch.zeros(packed_graph.size, dtype=torch.long)
         var_node_name_indices = torch.zeros(packed_graph.size, dtype=torch.long)
+        tree_node_to_tree_id_map = torch.zeros(packed_graph.size, dtype=torch.long)
 
         sub_tokens_list = []
         node_with_subtokens_indices = []
@@ -228,6 +233,7 @@ class GraphASTEncoder(Encoder):
             else:
                 raise ValueError()
 
+            tree_node_to_tree_id_map[i] = ast_id
             node_type_indices[i] = type_idx
 
         sub_tokens_indices = None
@@ -241,10 +247,12 @@ class GraphASTEncoder(Encoder):
             sub_tokens_indices = torch.from_numpy(sub_tokens_indices)
 
         return dict(
+            tree_num=packed_graph.tree_num,
             node_type_indices=torch.tensor(node_type_indices, dtype=torch.long),
             var_node_name_indices=torch.tensor(var_node_name_indices, dtype=torch.long),
             node_with_subtokens_indices=torch.tensor(node_with_subtokens_indices, dtype=torch.long),
-            sub_tokens_indices=sub_tokens_indices
+            sub_tokens_indices=sub_tokens_indices,
+            tree_node_to_tree_id_map=tree_node_to_tree_id_map
         )
 
     def get_batched_tree_init_encoding(self, tensor_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
