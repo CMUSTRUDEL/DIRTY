@@ -85,11 +85,11 @@ def train(args):
     print(f'Training set size {len(train_set)}, dev set size {len(dev_set)}', file=sys.stderr)
 
     # training loop
-    train_iter = epoch = 0
+    train_iter = epoch = cum_examples = 0
     log_every = config['train']['log_every']
     evaluate_every_nepoch = config['train']['evaluate_every_nepoch']
-    cum_loss = cum_examples = 0.
-    t1 = time.time()
+    cum_loss = 0.
+    t_log = time.time()
 
     while True:
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
@@ -109,7 +109,7 @@ def train(args):
 
             t1 = time.time()
             result = model(batch.tensor_dict, batch.tensor_dict['prediction_target'])
-            print(f'[Learner] {time.time() - t1}s took for computation', file=sys.stderr)
+            print(f'[Learner] batch {train_iter}, {batch.size} examples took {time.time() - t1:4f}s', file=sys.stderr)
 
             # for i, (src_ast, rename_map) in enumerate(zip(src_asts, rename_maps)):
             #     log_probs, _info = model([src_ast], [rename_map])
@@ -133,7 +133,7 @@ def train(args):
             loss = -result['batch_log_prob'].mean()
 
             cum_loss += loss.item()
-            cum_examples += len(batch.examples)
+            cum_examples += batch.size
 
             loss.backward()
 
@@ -145,10 +145,10 @@ def train(args):
 
             if train_iter % log_every == 0:
                 print(f'[Learner] train_iter={train_iter} avg. loss={cum_loss / cum_examples}, '
-                      f'{cum_examples} batch ({cum_examples / (time.time() - t1)} examples/s)', file=sys.stderr)
+                      f'{cum_examples} examples ({cum_examples / (time.time() - t_log)} examples/s)', file=sys.stderr)
 
                 cum_loss = cum_examples = 0.
-                t1 = time.time()
+                t_log = time.time()
 
         print(f'[Learner] Epoch {epoch} finished', file=sys.stderr)
 

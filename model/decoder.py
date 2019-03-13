@@ -317,19 +317,24 @@ class RecurrentDecoder(Decoder):
             new_hyp_scores, new_hyp_position_list = torch.topk(cont_cand_hyp_scores.view(len(beams), -1), k=beam_size, dim=-1)
 
             # (live_beam_num, beam_size)
-            prev_hyp_ids = (new_hyp_position_list / tgt_vocab_size).cpu()
-            hyp_var_name_ids = (new_hyp_position_list % tgt_vocab_size).cpu()
-            new_hyp_scores = new_hyp_scores.cpu()  # move this tensor to cpu for fast indexing
+            prev_hyp_ids = (new_hyp_position_list / tgt_vocab_size)
+            hyp_var_name_ids = (new_hyp_position_list % tgt_vocab_size)
+            new_hyp_scores = new_hyp_scores
+
+            # move this tensor to cpu for fast indexing
+            _prev_hyp_ids = prev_hyp_ids.cpu()
+            _hyp_var_name_ids = hyp_var_name_ids.cpu()
+            _new_hyp_scores = new_hyp_scores.cpu()
 
             new_beams = OrderedDict()
             live_beam_ids = []
             for beam_id, (ast_id, beam) in enumerate(beams.items()):
                 new_hyps = []
                 for i in range(beam_size):
-                    prev_hyp_id = prev_hyp_ids[beam_id, i].item()
+                    prev_hyp_id = _prev_hyp_ids[beam_id, i].item()
                     prev_hyp = beam[prev_hyp_id]
-                    hyp_var_name_id = hyp_var_name_ids[beam_id, i].item()
-                    new_hyp_score = new_hyp_scores[beam_id, i].item()
+                    hyp_var_name_id = _hyp_var_name_ids[beam_id, i].item()
+                    new_hyp_score = _new_hyp_scores[beam_id, i].item()
 
                     new_hyp = self.Hypothesis(variable_list=list(prev_hyp.variable_list) + [hyp_var_name_id],
                                               score=new_hyp_score)

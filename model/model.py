@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Iterable
 
 import torch
 import torch.nn as nn
@@ -8,7 +8,7 @@ from utils.ast import AbstractSyntaxTree
 from model.decoder import Decoder, SimpleDecoder, RecurrentDecoder
 from model.encoder import Encoder, GraphASTEncoder
 from utils.graph import PackedGraph
-from utils.dataset import Batcher
+from utils.dataset import Batcher, Example
 from utils.vocab import SAME_VARIABLE_TOKEN
 
 
@@ -41,6 +41,9 @@ class RenamingModel(nn.Module):
         return {
             'train': {
                 'unchanged_variable_weight': 1.0
+            },
+            'decoder': {
+                'type': 'SimpleDecoder'
             }
         }
 
@@ -92,6 +95,18 @@ class RenamingModel(nn.Module):
         result['batch_log_prob'] = ast_log_probs
 
         return result
+
+    def decode_dataset(self, dataset, batch_size=4096) -> Iterable[Tuple[Example, Dict]]:
+        with torch.no_grad():
+            data_iter = dataset.batch_iterator(batch_size=batch_size, shuffle=False, progress=False,
+                                               config=self.config)
+            was_training = self.training
+            self.eval()
+
+            for batch in data_iter:
+                rename_results = self.decoder.predict([e.ast for e in batch.examples], self.encoder)
+                for example, rename_result in zip(batch.examples, rename_results):
+                    yield example, rename_result
 
     def save(self, model_path, **kwargs):
         params = {
