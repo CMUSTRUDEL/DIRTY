@@ -69,11 +69,11 @@ class SimpleDecoder(Decoder):
         packed_tgt_var_node_name_log_probs = packed_tgt_var_node_name_log_probs * prediction_target['variable_tgt_name_weight']
 
         # (batch_size, max_variable_node_num)
-        tgt_name_log_probs = packed_tgt_var_node_name_log_probs[src_ast_encoding['variable_master_node_restoration_indices']]
-        tgt_name_log_probs = tgt_name_log_probs * src_ast_encoding['variable_master_node_restoration_indices_mask']
+        tgt_name_log_probs = packed_tgt_var_node_name_log_probs[src_ast_encoding['variable_encoding_restoration_indices']]
+        tgt_name_log_probs = tgt_name_log_probs * src_ast_encoding['variable_encoding_restoration_indices_mask']
 
         # (batch_size)
-        ast_log_probs = tgt_name_log_probs.sum(dim=-1) / src_ast_encoding['variable_master_node_restoration_indices_mask'].sum(-1)
+        ast_log_probs = tgt_name_log_probs.sum(dim=-1) / src_ast_encoding['variable_encoding_restoration_indices_mask'].sum(-1)
 
         result['batch_log_prob'] = ast_log_probs
 

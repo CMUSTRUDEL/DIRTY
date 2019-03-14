@@ -5,6 +5,7 @@ Usage:
 
 Options:
     -h --help                  Show this screen.
+    --use-bpe                  Use bpe
     --size=<int>               vocab size [default: 10000]
     --freq-cutoff=<int>        frequency cutoff [default: 2]
 """
@@ -16,26 +17,44 @@ import torch
 import pickle
 from docopt import docopt
 import json
+import sentencepiece as spm
 
 from utils.grammar import Grammar
 
 
 SAME_VARIABLE_TOKEN = '<IDENTITY>'
+END_OF_VARIABLE_TOKEN = '</s>'
 
 
 class VocabEntry:
-    def __init__(self):
+    def __init__(self, subtoken_model_path=None):
         self.word2id = dict()
-        self.unk_id = 3
-        self.word2id['<pad>'] = 0
-        self.word2id['<s>'] = 1
-        self.word2id['</s>'] = 2
-        self.word2id['<unk>'] = 3
+
+        self.subtoken_model_path = subtoken_model_path
+        if subtoken_model_path:
+            self.subtoken_model = spm.SentencePieceProcessor()
+            self.subtoken_model.load(subtoken_model_path)
+
+            vocab_path = subtoken_model_path[: subtoken_model_path.rfind('.model')] + '.vocab'
+            for i, line in enumerate(open(vocab_path)):
+                word, prob = line.strip().split('\t')
+                self.word2id[word] = len(self.word2id)
+        else:
+            self.subtoken_model = None
+            self.word2id['<pad>'] = 0
+            self.word2id['<s>'] = 1
+            self.word2id['</s>'] = 2
+            self.word2id['<unk>'] = 3
+            self.word2id[SAME_VARIABLE_TOKEN] = 4
 
         self.id2word = {v: k for k, v in self.word2id.items()}
 
     def __getitem__(self, word):
         return self.word2id.get(word, self.unk_id)
+
+    @property
+    def unk_id(self):
+        return self.word2id['<unk>']
 
     def is_unk(self, word):
         return word not in self.word2id
@@ -63,19 +82,36 @@ class VocabEntry:
         else:
             return self[word]
 
+    @property
+    def params(self):
+        params = dict(unk_id=self.unk_id, word2id=self.word2id,
+                      subtoken_model_path=self.subtoken_model_path)
+        if 'word_freq' in self.__dict__:
+            params['word_freq'] = self.word_freq
+
+        return params
+
     def save(self, path):
-        params = dict(unk_id=self.unk_id, word2id=self.word2id, word_freq=self.word_freq)
-        json.dump(params, open(path, 'w'), indent=2)
+        json.dump(self.params, open(path, 'w'), indent=2)
 
-    @staticmethod
-    def load(path):
-        entry = VocabEntry()
-        params = json.load(open(path, 'r'))
+    @classmethod
+    def load(cls, path=None, params=None):
+        if path:
+            params = json.load(open(path, 'r'))
+        else:
+            assert params, 'Params must be given when path is None!'
 
-        setattr(entry, 'unk_id', params['unk_id'])
+        if 'subtoken_model_path' in params:
+            subtoken_model_path = params['subtoken_model_path']
+        else:
+            subtoken_model_path = None
+
+        entry = VocabEntry(subtoken_model_path)
+
         setattr(entry, 'word2id', params['word2id'])
-        setattr(entry, 'word_freq', params['word_freq'])
         setattr(entry, 'id2word', {v: k for k, v in params['word2id'].items()})
+        if 'word_freq' in params:
+            setattr(entry, 'word_freq', params['word_freq'])
 
         return entry
 
@@ -117,11 +153,36 @@ class Vocab(object):
     def __repr__(self):
         return 'Vocab(%s)' % (', '.join('%s %swords' % (entry, getattr(self, entry)) for entry in self.entries))
 
+    @property
+    def params(self):
+        params = dict()
+        for key in self.entries:
+            params[key] = getattr(self, key).params
+
+        return params
+
+    def save(self, path):
+        json.dump(self.params, open(path, 'w'), indent=2)
+
+    @classmethod
+    def load(cls, path):
+        params = json.load(open(path, 'r'))
+        entries = dict()
+        for key, val in params.items():
+            if key in ('grammar', ):
+                entry = Grammar.load(val)
+            else:
+                entry = VocabEntry.load(params=val)
+            entries[key] = entry
+        return cls(**entries)
+
 
 if __name__ == '__main__':
     from utils.dataset import Dataset
 
     args = docopt(__doc__)
+    vocab_size = int(args['--size'])
+    vocab_file = args['VOCAB_FILE']
     train_set = Dataset(args['TRAIN_FILE'])
 
     # extract vocab and node types
@@ -148,12 +209,41 @@ if __name__ == '__main__':
                 identifier_names.append(node.name)
 
     print('building source words vocabulary')
-    src_var_vocab_entry = VocabEntry.from_corpus([src_words], size=int(args['--size']),
+    src_var_vocab_entry = VocabEntry.from_corpus([src_words], size=vocab_size,
                                                  freq_cutoff=int(args['--freq-cutoff']))
     print('building target words vocabulary')
-    tgt_var_vocab_entry = VocabEntry.from_corpus([tgt_words], size=int(args['--size']),
-                                                 freq_cutoff=int(args['--freq-cutoff']),
-                                                 predefined_tokens=[SAME_VARIABLE_TOKEN])
+    if args['--use-bpe']:
+        print('use bpe for target words')
+
+        tgt_word_file = args['VOCAB_FILE'] + '.var_names.txt'
+        with open(tgt_word_file, 'w') as f:
+            for name in tgt_words:
+                f.write(name + '\n')
+
+        # train subtoken models
+        spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id=0 --bos_id=1 --eos_id=2 --unk_id=3 '
+                                       f'--control_symbols=<IDENTITY> --vocab_size={vocab_size} '
+                                       f'--model_prefix={vocab_file}.tgt --model_type=bpe '
+                                       f'--input={tgt_word_file}')
+        tgt_var_vocab_entry = VocabEntry(vocab_file + '.tgt.model')
+    else:
+        tgt_var_vocab_entry = VocabEntry.from_corpus([tgt_words], size=vocab_size,
+                                                     freq_cutoff=int(args['--freq-cutoff']),
+                                                     predefined_tokens=[SAME_VARIABLE_TOKEN])
+
+    id_names_file = vocab_file + '.id_names.txt'
+    with open(id_names_file, 'w') as f:
+        for name in identifier_names:
+            f.write(name + '\n')
+
+    print('train subtoken model for obj names')
+    # train subtoken models
+    spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id=0 --bos_id=1 --eos_id=2 --unk_id=3 '
+                                   f'--control_symbols=<IDENTITY> --vocab_size={vocab_size} '
+                                   f'--model_prefix={vocab_file}.obj_name --model_type=bpe '
+                                   f'--input={id_names_file}')
+    obj_name_vocab_entry = VocabEntry(vocab_file + '.obj_name.model')
+
     print('init node types and variable types')
     grammar = Grammar(node_types, var_types)
 
@@ -162,11 +252,7 @@ if __name__ == '__main__':
 
     vocab = Vocab(source=src_var_vocab_entry,
                   target=tgt_var_vocab_entry,
+                  obj_name=obj_name_vocab_entry,
                   grammar=grammar)
 
-    id_names_file = args['VOCAB_FILE'] + '.id_names.txt'
-    with open(id_names_file, 'w') as f:
-        for name in identifier_names:
-            f.write(name + '\n')
-
-    torch.save(vocab, args['VOCAB_FILE'])
+    vocab.save(args['VOCAB_FILE'])

@@ -78,8 +78,8 @@ class GraphASTEncoder(Encoder):
                                       residual_connections=params['gnn']['residual_connections'],
                                       num_edge_types=num_edge_types)
 
-        vocab = torch.load(params['vocab_file'])
-        sub_token_embedder = SubTokenEmbedder(params['bpe_model_path'], gnn.hidden_size)
+        vocab = Vocab.load(params['vocab_file'])
+        sub_token_embedder = SubTokenEmbedder(vocab.obj_name.subtoken_model_path, gnn.hidden_size)
 
         model = cls(gnn,
                     params['connections'],
@@ -197,10 +197,11 @@ class GraphASTEncoder(Encoder):
 
     @classmethod
     def to_tensor_dict(cls, packed_graph: PackedGraph,
-                       bpe_model: SentencePieceProcessor,
-                       bpe_pad_idx: int,
                        grammar: Grammar,
                        vocab: Vocab) -> Dict[str, torch.Tensor]:
+        obj_name_bpe_model = vocab.obj_name.subtoken_model
+        obj_name_bpe_pad_idx = vocab.obj_name.subtoken_model.pad_id()
+
         # predefined index
         variable_master_node_type_idx = len(grammar.syntax_types)
         master_node_type_idx = variable_master_node_type_idx + 1
@@ -222,7 +223,7 @@ class GraphASTEncoder(Encoder):
 
                 if node.node_type == 'obj':
                     # compute variable embedding
-                    node_sub_tokes = bpe_model.encode_as_ids(node.name)
+                    node_sub_tokes = obj_name_bpe_model.encode_as_ids(node.name)
                     sub_tokens_list.append(node_sub_tokes)
                     node_with_subtokens_indices.append(i)
             elif group == 'variable_master_nodes':
@@ -240,7 +241,7 @@ class GraphASTEncoder(Encoder):
         if node_with_subtokens_indices:
             max_subtoken_num = max(len(x) for x in sub_tokens_list)
             sub_tokens_indices = np.zeros((len(sub_tokens_list), max_subtoken_num), dtype=np.int64)
-            sub_tokens_indices.fill(bpe_pad_idx)
+            sub_tokens_indices.fill(obj_name_bpe_pad_idx)
             for i, token_ids in enumerate(sub_tokens_list):
                 sub_tokens_indices[i, :len(token_ids)] = token_ids
 

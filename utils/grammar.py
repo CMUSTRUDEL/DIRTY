@@ -5,3 +5,15 @@ class Grammar(object):
 
         self.syntax_type_to_id = {type: id for id, type in enumerate(self.syntax_types)}
         self.variable_type_to_id = {type: id for id, type in enumerate(self.variable_types)}
+
+    @property
+    def params(self):
+        return self.__dict__
+
+    @classmethod
+    def load(cls, params):
+        grammar = cls(params['syntax_types'], params['variable_types'])
+        for k, v in params.items():
+            setattr(grammar, k, v)
+
+        return grammar

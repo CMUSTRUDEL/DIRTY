@@ -131,6 +131,7 @@ def train(args):
             #                 pass
 
             loss = -result['batch_log_prob'].mean()
+            print(loss.item())
 
             cum_loss += loss.item()
             cum_examples += batch.size

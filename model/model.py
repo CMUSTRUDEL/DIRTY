@@ -6,6 +6,7 @@ import torch.nn as nn
 from utils import nn_util, util
 from utils.ast import AbstractSyntaxTree
 from model.decoder import Decoder
+from model.recurrent_subtoken_decoder import RecurrentSubtokenDecoder
 from model.recurrent_decoder import RecurrentDecoder
 from model.simple_decoder import SimpleDecoder
 from model.encoder import Encoder, GraphASTEncoder
@@ -89,11 +90,10 @@ class RenamingModel(nn.Module):
         result = self.decoder.get_target_log_prob(var_name_log_probs, prediction_target, context_encoding)
 
         tgt_var_name_log_prob = result['tgt_var_name_log_prob']
-        tgt_weight = prediction_target['variable_tgt_name_weight'][source_asts['variable_master_node_restoration_indices']] * \
-                         source_asts['variable_master_node_restoration_indices_mask']
+        tgt_weight = prediction_target['variable_tgt_name_weight']
         weighted_log_prob = tgt_var_name_log_prob * tgt_weight
 
-        ast_log_probs = weighted_log_prob.sum(dim=-1) / source_asts['variable_master_node_restoration_indices_mask'].sum(-1)
+        ast_log_probs = weighted_log_prob.sum(dim=-1) / prediction_target['variable_encoding_restoration_indices_mask'].sum(-1)
         result['batch_log_prob'] = ast_log_probs
 
         return result

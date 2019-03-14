@@ -10,7 +10,7 @@ from tqdm import tqdm
 import numpy as np
 from utils.ast import AbstractSyntaxTree, SyntaxNode
 from utils.graph import PackedGraph
-from utils.vocab import VocabEntry, SAME_VARIABLE_TOKEN
+from utils.vocab import VocabEntry, SAME_VARIABLE_TOKEN, Vocab
 from model.encoder import GraphASTEncoder
 import sentencepiece as spm
 import random
@@ -56,12 +56,10 @@ class Batch(object):
 class Batcher(object):
     def __init__(self, config, return_examples=True):
         self.config = config
-        self.vocab = torch.load(config['data']['vocab_file'])
-        self.bpe_model = spm.SentencePieceProcessor()
-        self.bpe_model.Load(config['data']['bpe_model_path'])
+        self.vocab = Vocab.load(config['data']['vocab_file'])
         self.grammar = self.vocab.grammar
 
-        self.return_examples = True
+        self.return_examples = return_examples
 
     def to_tensor_dict(self, examples: List[Example] = None, source_asts: List[AbstractSyntaxTree] = None) -> Dict[str, torch.Tensor]:
         if examples:
@@ -80,14 +78,13 @@ class Batcher(object):
         packed_graph.variable_master_node_restoration_indices = None
         packed_graph.variable_master_node_restoration_indices_mask = None
 
-        _tensors = GraphASTEncoder.to_tensor_dict(packed_graph, self.bpe_model, self.bpe_model.pad_id(), self.grammar, self.vocab)
+        _tensors = GraphASTEncoder.to_tensor_dict(packed_graph,
+                                                  self.grammar, self.vocab)
         tensor_dict.update(_tensors)
 
         if examples:
             prediction_target = self.to_batched_prediction_target(source_asts, [e.variable_name_map for e in examples],
-                                                                  packed_graph,
-                                                                  self.vocab,
-                                                                  self.config['train']['unchanged_variable_weight'])
+                                                                  packed_graph)
             tensor_dict['prediction_target'] = prediction_target
 
         tensor_dict['batch_size'] = len(source_asts)
@@ -104,52 +101,79 @@ class Batcher(object):
 
         return batch
 
-    @staticmethod
-    def to_batched_prediction_target(source_asts: List['AbstractSyntaxTree'],
+    def to_batched_prediction_target(self,
+                                     source_asts: List['AbstractSyntaxTree'],
                                      variable_name_maps: List[Dict],
-                                     packed_graph: PackedGraph,
-                                     vocab: VocabEntry,
-                                     unchanged_var_weight=1.):
+                                     packed_graph: PackedGraph):
         batch_size = len(source_asts)
+        unchanged_var_weight = self.config['train']['unchanged_variable_weight']
 
-        variable_master_nodes_num = packed_graph._group_node_count['variable_master_nodes']
-        packed_variable_tgt_name_id = torch.zeros(variable_master_nodes_num, dtype=torch.long)
-        packed_variable_tgt_name_weight = torch.zeros(variable_master_nodes_num)
-        var_with_new_name_mask = torch.zeros(variable_master_nodes_num)
-        auxiliary_var_mask = torch.zeros(variable_master_nodes_num)
+        use_bpe_for_var_name = self.config['decoder']['type'] == 'RecurrentSubtokenDecoder'
 
-        ptr = 0
+        variable_name_subtoken_maps = []
+        if use_bpe_for_var_name:
+            eov_id = self.vocab.target.subtoken_model.eos_id()
+            for var_name_map in variable_name_maps:
+                var_name_subtoken_map = dict()
+                for old_name, new_name in var_name_map.items():
+                    if old_name == new_name:
+                        subtoken_ids = [self.vocab.target[SAME_VARIABLE_TOKEN], eov_id]
+                    else:
+                        subtoken_ids = self.vocab.target.subtoken_model.encode_as_ids(new_name) + [eov_id]
+                    var_name_subtoken_map[old_name] = subtoken_ids
+                variable_name_subtoken_maps.append(var_name_subtoken_map)
+        else:
+            for var_name_map in variable_name_maps:
+                var_name_subtoken_map = dict()
+                for old_name, new_name in var_name_map.items():
+                    if old_name == new_name:
+                        subtoken_ids = [self.vocab.target[SAME_VARIABLE_TOKEN]]
+                    else:
+                        subtoken_ids = [self.vocab.target[new_name]]
+                    var_name_subtoken_map[old_name] = subtoken_ids
+                variable_name_subtoken_maps.append(var_name_subtoken_map)
+
+        max_pred_timestep = max(sum(len(val) for val in x.values()) for x in variable_name_subtoken_maps)
+
+        var_encoding_restoration_indices = torch.zeros(batch_size, max_pred_timestep, dtype=torch.long)
+        var_encoding_restoration_indices_mask = torch.zeros(batch_size, max_pred_timestep)
+
+        variable_tgt_name_id = torch.zeros(batch_size, max_pred_timestep, dtype=torch.long)
+        variable_tgt_name_weight = torch.zeros(batch_size, max_pred_timestep)
+        var_with_new_name_mask = torch.zeros(batch_size, max_pred_timestep)
+        auxiliary_var_mask = torch.zeros(batch_size, max_pred_timestep)
+
+        variable_master_node_ptr = 0
         for e_id, (ast, var_name_map) in enumerate(zip(source_asts, variable_name_maps)):
             _var_node_ids = []
             _tgt_name_ids = []
+            variable_ptr = 0
             for var_name in ast.variables:
-                new_var_name = var_name_map[var_name]
-                var_nodes = ast.variables[var_name]
+                new_var_name_subtoken_ids = variable_name_subtoken_maps[e_id][var_name]
+                variable_end_ptr = variable_ptr + len(new_var_name_subtoken_ids)
 
-                if var_name == new_var_name:
-                    new_name_token_id = vocab.target[SAME_VARIABLE_TOKEN]
-                    auxiliary_var_mask[ptr] = 1.
+                variable_tgt_name_id[e_id, variable_ptr: variable_end_ptr] = torch.tensor(new_var_name_subtoken_ids, dtype=torch.long)
+
+                if var_name == var_name_map[var_name]:
+                    auxiliary_var_mask[e_id, variable_ptr: variable_end_ptr] = 1.
+                    variable_tgt_name_weight[e_id, variable_ptr: variable_end_ptr] = unchanged_var_weight
                 else:
-                    new_name_token_id = vocab.target[new_var_name]
-                    var_with_new_name_mask[ptr] = 1.
+                    var_with_new_name_mask[e_id, variable_ptr: variable_end_ptr] = 1.
+                    variable_tgt_name_weight[e_id, variable_ptr: variable_end_ptr] = 1.
 
-                # if var_name.startswith('v'):
-                #     new_name_token_id = int(var_name[1:])
-                # else:
-                #     new_name_token_id = ord(var_name[0])
-                # auxiliary_var_mask[ptr] = 1.
-                # var_with_new_name_mask[ptr] = 1.
+                var_encoding_restoration_indices[e_id, variable_ptr: variable_end_ptr] = variable_master_node_ptr
 
-                packed_variable_tgt_name_id[ptr] = new_name_token_id
-                packed_variable_tgt_name_weight[ptr] = unchanged_var_weight if var_name == new_var_name else 1.
-                ptr += 1
+                variable_master_node_ptr += 1
+                variable_ptr = variable_end_ptr
 
-        assert torch.eq(packed_variable_tgt_name_id, 0).sum().item() == 0
+            var_encoding_restoration_indices_mask[e_id, :variable_ptr] = 1.
 
-        return dict(variable_tgt_name_id=packed_variable_tgt_name_id,
-                    variable_tgt_name_weight=packed_variable_tgt_name_weight,
+        return dict(variable_tgt_name_id=variable_tgt_name_id,
+                    variable_tgt_name_weight=variable_tgt_name_weight,
                     var_with_new_name_mask=var_with_new_name_mask,
-                    auxiliary_var_mask=auxiliary_var_mask)
+                    auxiliary_var_mask=auxiliary_var_mask,
+                    variable_encoding_restoration_indices=var_encoding_restoration_indices,
+                    variable_encoding_restoration_indices_mask=var_encoding_restoration_indices_mask)
 
 
 def get_json_iterator(file_path, shuffle=False, progress=False) -> Iterable:
@@ -178,10 +202,10 @@ def json_line_reader(file_path, queue, worker_num, shuffle, progress):
         queue.put(None)
 
 
-def example_generator(json_queue, example_queue, bpe_model_path=None):
-    if bpe_model_path:
-        sp = spm.SentencePieceProcessor()
-        sp.Load(bpe_model_path)
+def example_generator(json_queue, example_queue):
+    # if bpe_model_path:
+    #     sp = spm.SentencePieceProcessor()
+    #     sp.Load(bpe_model_path)
     while True:
         payload = json_queue.get()
         if payload is None: break
@@ -193,10 +217,10 @@ def example_generator(json_queue, example_queue, bpe_model_path=None):
         if example.ast.size != max(node.node_id for node in example.ast) + 1:
             continue
 
-        if bpe_model_path:
-            for node in example.ast:
-                if node.node_type == 'obj':
-                    setattr(node, 'sub_tokens', sp.EncodeAsPieces(node.name))
+        # if bpe_model_path:
+        #     for node in example.ast:
+        #         if node.node_type == 'obj':
+        #             setattr(node, 'sub_tokens', sp.EncodeAsPieces(node.name))
 
         example_queue.put(example)
         # print('Push one example', file=sys.stderr)
@@ -249,9 +273,8 @@ def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
 
 
 class Dataset(object):
-    def __init__(self, dataset_file_path, bpe_model_path=None):
+    def __init__(self, dataset_file_path):
         self.file_path = dataset_file_path
-        self.bpe_model_path = bpe_model_path
 
         print(f'reading dataset {dataset_file_path}', file=sys.stderr)
         example_num = 0
@@ -286,7 +309,7 @@ class Dataset(object):
         example_generators = []
         for i in range(num_workers):
             p = multiprocessing.Process(target=example_generator,
-                                        args=(json_enc_queue, example_queue, self.bpe_model_path))
+                                        args=(json_enc_queue, example_queue))
             p.daemon = True
             example_generators.append(p)
 
@@ -340,7 +363,7 @@ class Dataset(object):
         example_generators = []
         for i in range(num_readers):
             p = multiprocessing.Process(target=example_generator,
-                                        args=(json_enc_queue, example_queue, self.bpe_model_path))
+                                        args=(json_enc_queue, example_queue))
             p.daemon = True
             example_generators.append(p)
 
