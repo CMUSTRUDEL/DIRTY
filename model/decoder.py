@@ -151,7 +151,8 @@ class RecurrentDecoder(Decoder):
             'hidden_size': 128,
             'input_feed': False,
             'dropout': 0.2,
-            'beam_size': 5
+            'beam_size': 5,
+            'unk_replace': True
         }
 
     @classmethod
@@ -262,6 +263,7 @@ class RecurrentDecoder(Decoder):
 
     def predict(self, source_asts: List[AbstractSyntaxTree], encoder: Encoder) -> List[Dict]:
         beam_size = self.config['beam_size']
+        unk_replace = self.config['unk_replace']
 
         variable_nums = []
         for ast_id, ast in enumerate(source_asts):
@@ -311,6 +313,10 @@ class RecurrentDecoder(Decoder):
             q_t_by_beam = q_t.view(len(beams), -1, q_t.size(-1))
             # (live_beam_num, beam_size, vocab_size)
             hyp_var_name_scores_t = torch.log_softmax(self.state2names(q_t_by_beam), dim=-1)
+
+            if unk_replace:
+                hyp_var_name_scores_t[:, :, self.vocab.target['<unk>']] = float('-inf')
+
             cont_cand_hyp_scores = hyp_scores_tm1.unsqueeze(-1) + hyp_var_name_scores_t
 
             # (live_beam_num, beam_size)
