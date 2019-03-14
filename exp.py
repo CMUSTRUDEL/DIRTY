@@ -28,7 +28,7 @@ import psutil, gc
 
 import torch
 
-from model.decoder import SimpleDecoder
+from model.simple_decoder import SimpleDecoder
 from model.encoder import GraphASTEncoder
 from model.gnn import AdjacencyList, GatedGraphNeuralNetwork
 from model.model import RenamingModel

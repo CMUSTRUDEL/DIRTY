@@ -5,7 +5,9 @@ import torch.nn as nn
 
 from utils import nn_util, util
 from utils.ast import AbstractSyntaxTree
-from model.decoder import Decoder, SimpleDecoder, RecurrentDecoder
+from model.decoder import Decoder
+from model.recurrent_decoder import RecurrentDecoder
+from model.simple_decoder import SimpleDecoder
 from model.encoder import Encoder, GraphASTEncoder
 from utils.graph import PackedGraph
 from utils.dataset import Batcher, Example
