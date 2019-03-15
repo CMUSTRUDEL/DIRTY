@@ -3,7 +3,7 @@ import sys
 import time
 import ujson as json
 import tarfile
-from typing import Iterable, List, Dict, Union
+from typing import Iterable, List, Dict, Union, Tuple
 import multiprocessing
 
 from tqdm import tqdm
@@ -20,7 +20,6 @@ import torch.multiprocessing as torch_mp
 
 
 batcher_sync_msg = None
-example_queue_lock = None
 
 
 class Example(object):
@@ -178,7 +177,7 @@ class Batcher(object):
                     variable_encoding_restoration_indices_mask=var_encoding_restoration_indices_mask)
 
 
-def get_json_iterator(file_path, shuffle=False, progress=False) -> Iterable:
+def get_json_iterator(file_path, shuffle=False, progress=False) -> Iterable[Tuple]:
     with tarfile.open(file_path, 'r') as f:
         files = [x.name for x in f.getmembers() if x.name.endswith('.jsonl')]
         if shuffle:
@@ -204,28 +203,18 @@ def json_line_reader(file_path, queue, worker_num, shuffle, progress):
         queue.put(None)
 
 
-def example_generator(json_queue, example_queue, config=None):
-    # if bpe_model_path:
-    #     sp = spm.SentencePieceProcessor()
-    #     sp.Load(bpe_model_path)
+def is_valid_example(example):
+    return example.ast.size < 300 and \
+           len(example.variable_name_map) > 0 and \
+           any(k != v for k, v in example.variable_name_map.items())
+
+
+def example_generator(json_queue, example_queue, consumer_num=1, config=None):
     if config:
         vocab = Vocab.load(config['data']['vocab_file'])
         tgt_bpe_model = vocab.target.subtoken_model
-        buffer_size = config['train'].get('buffer_size', 0)
     else:
-        buffer_size = 0
         tgt_bpe_model = None
-
-    buffer = []
-    global example_queue_lock
-
-    def _sort_and_push(_buffer):
-        # sort by number of variables
-        _buffer.sort(key=lambda e: e.target_prediction_seq_length)
-        with example_queue_lock:
-            for example in _buffer:
-                example_queue.put(example)
-        _buffer.clear()
 
     while True:
         payload = json_queue.get()
@@ -235,8 +224,8 @@ def example_generator(json_queue, example_queue, config=None):
         tree_json_dict = json.loads(json_str)
         example = Example.from_json_dict(tree_json_dict, binary_file=meta)
 
-        if example.ast.size != max(node.node_id for node in example.ast) + 1:
-            continue
+        # if example.ast.size != max(node.node_id for node in example.ast) + 1:
+        #     continue
 
         if tgt_bpe_model:
             eov_id = tgt_bpe_model.eos_id()
@@ -253,64 +242,80 @@ def example_generator(json_queue, example_queue, config=None):
             setattr(example, 'variable_name_subtoken_map', variable_name_subtoken_map)
             setattr(example, 'target_prediction_seq_length', tgt_pred_seq_len)
 
-        if buffer_size > 0:
-            buffer.append(example)
-            if buffer_size == len(buffer):
-                _sort_and_push(buffer)
-        else:
-            example_queue.put(example)
-
-        # if bpe_model_path:
-        #     for node in example.ast:
-        #         if node.node_type == 'obj':
-        #             setattr(node, 'sub_tokens', sp.EncodeAsPieces(node.name))
+        example_queue.put(example)
 
         # print('Push one example', file=sys.stderr)
 
-    if buffer:
-        _sort_and_push(buffer)
+    # if buffer:
+    #     _sort_and_push(buffer)
 
-    example_queue.put(None)
+    for i in range(consumer_num):
+        example_queue.put(None)
 
-
-def is_valid_example(example):
-    return example.ast.size < 300 and \
-           example.target_prediction_seq_length <= 200 and \
-           len(example.variable_name_map) > 0 and \
-           any(k != v for k, v in example.variable_name_map.items())
+    # print('[Example Generator] example generator process quit!')
 
 
-def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
-    batch_examples = []
-    tmp_example = None
-    current_batch_size = 0
+def get_batch_size(batch_examples):
+    return len(batch_examples) * max(e.target_prediction_seq_length for e in batch_examples)
+
+
+def train_example_sort_key(example):
+    return example.target_prediction_seq_length
+
+
+def examples_to_batch(example_queue, batch_queue, batch_size, train, return_examples, config):
+    batcher = Batcher(config, return_examples)
+    buffer_size = config['train']['buffer_size']
+    buffer = []
+    producer_finished = False
+
+    def _generate_batches(_buffer):
+        if train:
+            _buffer.sort(key=train_example_sort_key)
+
+        batches = []
+        batch_examples = []
+
+        for example in _buffer:
+            batch_size_with_example = get_batch_size(batch_examples + [example])
+            if batch_examples and batch_size_with_example > batch_size:
+                # t1 = time.time()
+                # batch = batcher.to_batch(batch_examples)
+                # print(f'[Batcher] {time.time() - t1}s took for tensorization', file=sys.stderr)
+
+                # t1 = time.time()
+                batches.append(batch_examples)
+                # print(f'[Batcher] {time.time() - t1}s took to push one batch', file=sys.stderr)
+
+                batch_examples = []
+
+            batch_examples.append(example)
+
+        if batch_examples:
+            batches.append(batch_examples)
+
+        if train:
+            random.shuffle(batches)
+
+        for batch_examples in batches:
+            batch = batcher.to_batch(batch_examples)
+            batch_queue.put(batch)
+
+        _buffer.clear()
 
     while True:
         # print('Example queue size {}'.format(example_queue.qsize()), file=sys.stderr)
-        example = example_queue.get()
-        if example is None:
-            break
+        while len(buffer) < buffer_size:
+            example = example_queue.get()
+            if example is None:
+                producer_finished = True
+                break
+            elif is_valid_example(example):
+                buffer.append(example)
 
-        batch_size_with_example = (len(batch_examples) + 1) * max(e.target_prediction_seq_length for e in batch_examples + [example])
-        if batch_examples and batch_size_with_example > batch_size:
-            # t1 = time.time()
-            batch = batcher.to_batch(batch_examples)
-            # print(f'[Batcher] {time.time() - t1}s took for tensorization', file=sys.stderr)
+        _generate_batches(buffer)
 
-            # t1 = time.time()
-            batch_queue.put(batch)
-            # print(f'[Batcher] {time.time() - t1}s took to push one batch', file=sys.stderr)
-
-            batch_examples = []
-            current_batch_size = 0
-
-        if is_valid_example(example):
-            batch_examples.append(example)
-            # current_batch_size += example.target_prediction_seq_length
-
-    if batch_examples:
-        batch = batcher.to_batch(batch_examples)
-        batch_queue.put(batch)
+        if producer_finished: break
 
     batch_queue.put(None)
     while batcher_sync_msg.value == 0:
@@ -350,7 +355,6 @@ class Dataset(object):
     def _get_iterator(self, shuffle=False, num_workers=1):
         json_enc_queue = multiprocessing.Queue()
         example_queue = multiprocessing.Queue(maxsize=30000)
-        json_enc_queue.task_done()
 
         json_loader = multiprocessing.Process(target=json_line_reader, args=(self.file_path, json_enc_queue, num_workers,
                                                                              shuffle, False))
@@ -407,14 +411,14 @@ class Dataset(object):
 
         json_loader = multiprocessing.Process(target=json_line_reader,
                                               args=(self.file_path, json_enc_queue, num_readers,
-                                                    shuffle, False))
+                                                    False, False))
         json_loader.daemon = True
         example_generators = []
         global example_queue_lock
         example_queue_lock = multiprocessing.Lock()
         for i in range(num_readers):
             p = multiprocessing.Process(target=example_generator,
-                                        args=(json_enc_queue, example_queue, config))
+                                        args=(json_enc_queue, example_queue, 1, config))
             p.daemon = True
             example_generators.append(p)
 
@@ -422,12 +426,11 @@ class Dataset(object):
         for p in example_generators: p.start()
 
         batch_queue = torch_mp.Queue()
-        batcher = Batcher(config, return_examples=return_examples)
         batchers = []
         num_batchers = num_readers
         for i in range(num_batchers):
             p = torch_mp.Process(target=examples_to_batch,
-                                 args=(example_queue, batch_queue, batch_size, batcher))
+                                 args=(example_queue, batch_queue, batch_size, shuffle, return_examples, config))
             p.daemon = True
             batchers.append(p)
 
@@ -445,10 +448,17 @@ class Dataset(object):
                 num_finished_batchers += 1
                 if num_finished_batchers == num_batchers: break
 
+        batch_queue.close()
+        # print('start joining...')
         batcher_sync_msg.value = 1
         json_loader.join()
+        # print('json_loader quitted')
         for p in example_generators: p.join()
+        # print('example generators quitted')
         for p in batchers: p.join()
+        # print('batchers quiteed')
+        sys.stdout.flush()
+        sys.stderr.flush()
 
     def _single_process_batch_iter(self, batch_size: int, config: Dict, num_readers=2, shuffle=False) -> Iterable[Batch]:
         batcher = Batcher(config)
