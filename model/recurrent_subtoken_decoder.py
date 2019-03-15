@@ -1,3 +1,4 @@
+import sys
 from collections import namedtuple, OrderedDict
 from typing import Dict, List
 
@@ -38,7 +39,7 @@ class RecurrentSubtokenDecoder(Decoder):
             'input_feed': False,
             'dropout': 0.2,
             'beam_size': 5,
-            'max_prediction_time_step': 5000
+            'max_prediction_time_step': 1200
         }
 
     @classmethod
@@ -94,6 +95,8 @@ class RecurrentSubtokenDecoder(Decoder):
         variable_encoding = variable_master_node_encoding[variable_encoding_restoration_indices]
         # (batch_size, max_time_step, encoding_size)
         variable_tgt_name_id = prediction_target['variable_tgt_name_id']
+
+        print('[Decoder] variable encoding size: ', variable_encoding.size(), file=sys.stderr)
 
         batch_size = variable_tgt_name_id.size(0)
         variable_encoding_size = variable_encoding.size(-1)
@@ -234,6 +237,10 @@ class RecurrentSubtokenDecoder(Decoder):
                     if hyp_var_name_id == end_of_variable_id:
                         variable_ptr += 1
 
+                        # remove empty cases
+                        if len(prev_hyp.variable_list) == 0 or prev_hyp.variable_list[-1] == end_of_variable_id:
+                            continue
+
                     new_hyp = self.Hypothesis(variable_list=list(prev_hyp.variable_list) + [hyp_var_name_id],
                                               variable_ptr=variable_ptr,
                                               score=new_hyp_score)
@@ -266,26 +273,34 @@ class RecurrentSubtokenDecoder(Decoder):
 
         variable_rename_results = []
         for i, hyps in enumerate(completed_hyps):
+            variable_rename_result = dict()
             ast = source_asts[i]
             hyps = sorted(hyps, key=lambda hyp: -hyp.score)
-            top_hyp = hyps[0]
-            variable_rename_result = dict()
-            sub_token_ptr = 0
-            for old_name in ast.variables:
-                sub_token_begin = sub_token_ptr
-                while top_hyp.variable_list[sub_token_ptr] != end_of_variable_id:
-                    sub_token_ptr += 1
-                sub_token_ptr += 1  # point to first sub-token of next variable
-                sub_token_end = sub_token_ptr
 
-                var_name_token_ids = top_hyp.variable_list[sub_token_begin: sub_token_end]  # include ending </s>
-                if var_name_token_ids == [same_variable_id]:
-                    new_var_name = old_name
-                else:
-                    new_var_name = self.vocab.target.subtoken_model.decode_ids(var_name_token_ids)
+            if not hyps:
+                # return identity renamings
+                print(f'Failed to found a hypothesis for {source_asts[i].compilation_unit}', file=sys.stderr)
+                for old_name in ast.variables:
+                    variable_rename_result[old_name] = {'new_name': old_name,
+                                                        'prob': 0.}
+            else:
+                top_hyp = hyps[0]
+                sub_token_ptr = 0
+                for old_name in ast.variables:
+                    sub_token_begin = sub_token_ptr
+                    while top_hyp.variable_list[sub_token_ptr] != end_of_variable_id:
+                        sub_token_ptr += 1
+                    sub_token_ptr += 1  # point to first sub-token of next variable
+                    sub_token_end = sub_token_ptr
 
-                variable_rename_result[old_name] = {'new_name': new_var_name,
-                                                    'prob': top_hyp.score}
+                    var_name_token_ids = top_hyp.variable_list[sub_token_begin: sub_token_end]  # include ending </s>
+                    if var_name_token_ids == [same_variable_id, end_of_variable_id]:
+                        new_var_name = old_name
+                    else:
+                        new_var_name = self.vocab.target.subtoken_model.decode_ids(var_name_token_ids)
+
+                    variable_rename_result[old_name] = {'new_name': new_var_name,
+                                                        'prob': top_hyp.score}
 
             variable_rename_results.append(variable_rename_result)
 

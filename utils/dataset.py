@@ -20,6 +20,7 @@ import torch.multiprocessing as torch_mp
 
 
 batcher_sync_msg = None
+example_queue_lock = None
 
 
 class Example(object):
@@ -83,8 +84,7 @@ class Batcher(object):
         tensor_dict.update(_tensors)
 
         if examples:
-            prediction_target = self.to_batched_prediction_target(source_asts, [e.variable_name_map for e in examples],
-                                                                  packed_graph)
+            prediction_target = self.to_batched_prediction_target(examples, packed_graph)
             tensor_dict['prediction_target'] = prediction_target
 
         tensor_dict['batch_size'] = len(source_asts)
@@ -102,28 +102,28 @@ class Batcher(object):
         return batch
 
     def to_batched_prediction_target(self,
-                                     source_asts: List['AbstractSyntaxTree'],
-                                     variable_name_maps: List[Dict],
+                                     examples: List[Example],
                                      packed_graph: PackedGraph):
-        batch_size = len(source_asts)
+        batch_size = len(examples)
         unchanged_var_weight = self.config['train']['unchanged_variable_weight']
 
         use_bpe_for_var_name = self.config['decoder']['type'] == 'RecurrentSubtokenDecoder'
 
         variable_name_subtoken_maps = []
         if use_bpe_for_var_name:
-            eov_id = self.vocab.target.subtoken_model.eos_id()
-            for var_name_map in variable_name_maps:
-                var_name_subtoken_map = dict()
-                for old_name, new_name in var_name_map.items():
-                    if old_name == new_name:
-                        subtoken_ids = [self.vocab.target[SAME_VARIABLE_TOKEN], eov_id]
-                    else:
-                        subtoken_ids = self.vocab.target.subtoken_model.encode_as_ids(new_name) + [eov_id]
-                    var_name_subtoken_map[old_name] = subtoken_ids
-                variable_name_subtoken_maps.append(var_name_subtoken_map)
+            # eov_id = self.vocab.target.subtoken_model.eos_id()
+            # for var_name_map in variable_name_maps:
+            #     var_name_subtoken_map = dict()
+            #     for old_name, new_name in var_name_map.items():
+            #         if old_name == new_name:
+            #             subtoken_ids = [self.vocab.target[SAME_VARIABLE_TOKEN], eov_id]
+            #         else:
+            #             subtoken_ids = self.vocab.target.subtoken_model.encode_as_ids(new_name) + [eov_id]
+            #         var_name_subtoken_map[old_name] = subtoken_ids
+            variable_name_subtoken_maps = [e.variable_name_subtoken_map for e in examples]
         else:
-            for var_name_map in variable_name_maps:
+            for example in examples:
+                var_name_map = example.variable_name_map
                 var_name_subtoken_map = dict()
                 for old_name, new_name in var_name_map.items():
                     if old_name == new_name:
@@ -144,7 +144,9 @@ class Batcher(object):
         auxiliary_var_mask = torch.zeros(batch_size, max_pred_timestep)
 
         variable_master_node_ptr = 0
-        for e_id, (ast, var_name_map) in enumerate(zip(source_asts, variable_name_maps)):
+        for e_id, example in enumerate(examples):
+            ast = example.ast
+            var_name_map = example.variable_name_map
             _var_node_ids = []
             _tgt_name_ids = []
             variable_ptr = 0
@@ -202,10 +204,29 @@ def json_line_reader(file_path, queue, worker_num, shuffle, progress):
         queue.put(None)
 
 
-def example_generator(json_queue, example_queue):
+def example_generator(json_queue, example_queue, config=None):
     # if bpe_model_path:
     #     sp = spm.SentencePieceProcessor()
     #     sp.Load(bpe_model_path)
+    if config:
+        vocab = Vocab.load(config['data']['vocab_file'])
+        tgt_bpe_model = vocab.target.subtoken_model
+        buffer_size = config['train'].get('buffer_size', 0)
+    else:
+        buffer_size = 0
+        tgt_bpe_model = None
+
+    buffer = []
+    global example_queue_lock
+
+    def _sort_and_push(_buffer):
+        # sort by number of variables
+        _buffer.sort(key=lambda e: e.target_prediction_seq_length)
+        with example_queue_lock:
+            for example in _buffer:
+                example_queue.put(example)
+        _buffer.clear()
+
     while True:
         payload = json_queue.get()
         if payload is None: break
@@ -217,13 +238,37 @@ def example_generator(json_queue, example_queue):
         if example.ast.size != max(node.node_id for node in example.ast) + 1:
             continue
 
+        if tgt_bpe_model:
+            eov_id = tgt_bpe_model.eos_id()
+            variable_name_subtoken_map = dict()
+            tgt_pred_seq_len = 0
+            for old_name, new_name in example.variable_name_map.items():
+                if old_name == new_name:
+                    subtoken_ids = [vocab.target[SAME_VARIABLE_TOKEN], eov_id]
+                else:
+                    subtoken_ids = tgt_bpe_model.encode_as_ids(new_name) + [eov_id]
+                variable_name_subtoken_map[old_name] = subtoken_ids
+                tgt_pred_seq_len += len(subtoken_ids)
+
+            setattr(example, 'variable_name_subtoken_map', variable_name_subtoken_map)
+            setattr(example, 'target_prediction_seq_length', tgt_pred_seq_len)
+
+        if buffer_size > 0:
+            buffer.append(example)
+            if buffer_size == len(buffer):
+                _sort_and_push(buffer)
+        else:
+            example_queue.put(example)
+
         # if bpe_model_path:
         #     for node in example.ast:
         #         if node.node_type == 'obj':
         #             setattr(node, 'sub_tokens', sp.EncodeAsPieces(node.name))
 
-        example_queue.put(example)
         # print('Push one example', file=sys.stderr)
+
+    if buffer:
+        _sort_and_push(buffer)
 
     example_queue.put(None)
 
@@ -236,7 +281,7 @@ def is_valid_example(example):
 
 def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
     batch_examples = []
-    batch_node_num = 0
+    current_batch_size = 0
 
     while True:
         # print('Example queue size {}'.format(example_queue.qsize()), file=sys.stderr)
@@ -246,9 +291,9 @@ def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
 
         if is_valid_example(example):
             batch_examples.append(example)
-            batch_node_num += example.ast.size
+            current_batch_size += example.target_prediction_seq_length
 
-        if batch_node_num >= batch_size:
+        if current_batch_size >= batch_size:
             # t1 = time.time()
             batch = batcher.to_batch(batch_examples)
             # print(f'[Batcher] {time.time() - t1}s took for tensorization', file=sys.stderr)
@@ -258,7 +303,7 @@ def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
             # print(f'[Batcher] {time.time() - t1}s took to push one batch', file=sys.stderr)
 
             batch_examples = []
-            batch_node_num = 0
+            current_batch_size = 0
 
     if batch_examples:
         batch = batcher.to_batch(batch_examples)
@@ -290,9 +335,9 @@ class Dataset(object):
 
     def get_single_process_iterator(self, shuffle=False, progress=False) -> Iterable[Example]:
         json_str_iter = get_json_iterator(self.file_path, shuffle, progress)
-        for json_str in json_str_iter:
+        for json_str, meta in json_str_iter:
             tree_json_dict = json.loads(json_str)
-            example = Example.from_json_dict(tree_json_dict, binary_file=tree_json_dict['file_name'])
+            example = Example.from_json_dict(tree_json_dict, binary_file=meta)
 
             if example.ast.size != max(node.node_id for node in example.ast) + 1:
                 continue
@@ -301,7 +346,8 @@ class Dataset(object):
 
     def _get_iterator(self, shuffle=False, num_workers=1):
         json_enc_queue = multiprocessing.Queue()
-        example_queue = multiprocessing.Queue()
+        example_queue = multiprocessing.Queue(maxsize=30000)
+        json_enc_queue.task_done()
 
         json_loader = multiprocessing.Process(target=json_line_reader, args=(self.file_path, json_enc_queue, num_workers,
                                                                              shuffle, False))
@@ -309,7 +355,7 @@ class Dataset(object):
         example_generators = []
         for i in range(num_workers):
             p = multiprocessing.Process(target=example_generator,
-                                        args=(json_enc_queue, example_queue))
+                                        args=(json_enc_queue, example_queue, None))
             p.daemon = True
             example_generators.append(p)
 
@@ -361,9 +407,11 @@ class Dataset(object):
                                                     shuffle, False))
         json_loader.daemon = True
         example_generators = []
+        global example_queue_lock
+        example_queue_lock = multiprocessing.Lock()
         for i in range(num_readers):
             p = multiprocessing.Process(target=example_generator,
-                                        args=(json_enc_queue, example_queue))
+                                        args=(json_enc_queue, example_queue, config))
             p.daemon = True
             example_generators.append(p)
 
