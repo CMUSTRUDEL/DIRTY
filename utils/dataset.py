@@ -205,6 +205,7 @@ def json_line_reader(file_path, queue, worker_num, shuffle, progress):
 
 def is_valid_example(example):
     return example.ast.size < 300 and \
+           example.target_prediction_seq_length < 200 and \
            len(example.variable_name_map) > 0 and \
            any(k != v for k, v in example.variable_name_map.items())
 
@@ -242,7 +243,8 @@ def example_generator(json_queue, example_queue, consumer_num=1, config=None):
             setattr(example, 'variable_name_subtoken_map', variable_name_subtoken_map)
             setattr(example, 'target_prediction_seq_length', tgt_pred_seq_len)
 
-        example_queue.put(example)
+        if is_valid_example(example):
+            example_queue.put(example)
 
         # print('Push one example', file=sys.stderr)
 
@@ -362,7 +364,7 @@ class Dataset(object):
         example_generators = []
         for i in range(num_workers):
             p = multiprocessing.Process(target=example_generator,
-                                        args=(json_enc_queue, example_queue, None))
+                                        args=(json_enc_queue, example_queue, 1, None))
             p.daemon = True
             example_generators.append(p)
 
