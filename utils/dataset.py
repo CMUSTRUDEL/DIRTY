@@ -275,12 +275,14 @@ def example_generator(json_queue, example_queue, config=None):
 
 def is_valid_example(example):
     return example.ast.size < 300 and \
+           example.target_prediction_seq_length <= 200 and \
            len(example.variable_name_map) > 0 and \
            any(k != v for k, v in example.variable_name_map.items())
 
 
 def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
     batch_examples = []
+    tmp_example = None
     current_batch_size = 0
 
     while True:
@@ -289,11 +291,8 @@ def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
         if example is None:
             break
 
-        if is_valid_example(example):
-            batch_examples.append(example)
-            current_batch_size += example.target_prediction_seq_length
-
-        if current_batch_size >= batch_size:
+        batch_size_with_example = (len(batch_examples) + 1) * max(e.target_prediction_seq_length for e in batch_examples + [example])
+        if batch_examples and batch_size_with_example > batch_size:
             # t1 = time.time()
             batch = batcher.to_batch(batch_examples)
             # print(f'[Batcher] {time.time() - t1}s took for tensorization', file=sys.stderr)
@@ -304,6 +303,10 @@ def examples_to_batch(example_queue, batch_queue, batch_size, batcher):
 
             batch_examples = []
             current_batch_size = 0
+
+        if is_valid_example(example):
+            batch_examples.append(example)
+            # current_batch_size += example.target_prediction_seq_length
 
     if batch_examples:
         batch = batcher.to_batch(batch_examples)
