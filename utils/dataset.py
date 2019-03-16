@@ -265,30 +265,21 @@ def train_example_sort_key(example):
     return example.target_prediction_seq_length
 
 
-def examples_to_batch(example_queue, batch_queue, batch_size, train, return_examples, config):
-    batcher = Batcher(config, return_examples)
+def example_to_batch(example_queue, batched_examples_queue, batch_size, shuffle, producer_num=1, consumer_num=1, config=None):
     buffer_size = config['train']['buffer_size']
     buffer = []
-    producer_finished = False
+    producer_finished_num = 0
 
-    def _generate_batches(_buffer):
-        if train:
-            _buffer.sort(key=train_example_sort_key)
+    def _generate_batches():
+        buffer.sort(key=train_example_sort_key)
 
         batches = []
         batch_examples = []
 
-        for example in _buffer:
+        for example in buffer:
             batch_size_with_example = get_batch_size(batch_examples + [example])
             if batch_examples and batch_size_with_example > batch_size:
-                # t1 = time.time()
-                # batch = batcher.to_batch(batch_examples)
-                # print(f'[Batcher] {time.time() - t1}s took for tensorization', file=sys.stderr)
-
-                # t1 = time.time()
                 batches.append(batch_examples)
-                # print(f'[Batcher] {time.time() - t1}s took to push one batch', file=sys.stderr)
-
                 batch_examples = []
 
             batch_examples.append(example)
@@ -296,28 +287,47 @@ def examples_to_batch(example_queue, batch_queue, batch_size, train, return_exam
         if batch_examples:
             batches.append(batch_examples)
 
-        if train:
+        if shuffle:
             random.shuffle(batches)
 
         for batch_examples in batches:
-            batch = batcher.to_batch(batch_examples)
-            batch_queue.put(batch)
+            batched_examples_queue.put(batch_examples)
 
-        _buffer.clear()
+        buffer.clear()
 
     while True:
-        # print('Example queue size {}'.format(example_queue.qsize()), file=sys.stderr)
+        t1 = time.time()
         while len(buffer) < buffer_size:
             example = example_queue.get()
             if example is None:
-                producer_finished = True
-                break
+                producer_finished_num += 1
+                if producer_finished_num == producer_num: break
             elif is_valid_example(example):
                 buffer.append(example)
 
-        _generate_batches(buffer)
+        print(f'[ExampleToBatch] {time.time() - t1}s took for loading examples to buffer', file=sys.stderr)
+        _generate_batches()
+        print(f'[ExampleToBatch] {time.time() - t1}s took for batching', file=sys.stderr)
 
-        if producer_finished: break
+        if producer_finished_num == producer_num:
+            break
+
+    for i in range(consumer_num):
+        batched_examples_queue.put(None)
+
+    sys.stderr.flush()
+
+
+def batch_generator(batched_examples_queue, batch_queue, return_examples, config):
+    batcher = Batcher(config, return_examples)
+
+    while True:
+        batched_examples = batched_examples_queue.get()
+        if batched_examples is None:
+            break
+        else:
+            batch = batcher.to_batch(batched_examples)
+            batch_queue.put(batch)
 
     batch_queue.put(None)
     while batcher_sync_msg.value == 0:
@@ -427,12 +437,19 @@ class Dataset(object):
         json_loader.start()
         for p in example_generators: p.start()
 
+        batched_examples_queue = multiprocessing.Queue()
+        example_to_batch_process = multiprocessing.Process(target=example_to_batch,
+                                                           args=(example_queue, batched_examples_queue, batch_size,
+                                                                 shuffle, num_readers, num_readers, config))
+        example_to_batch_process.daemon = True
+        example_to_batch_process.start()
+
         batch_queue = torch_mp.Queue()
         batchers = []
         num_batchers = num_readers
         for i in range(num_batchers):
-            p = torch_mp.Process(target=examples_to_batch,
-                                 args=(example_queue, batch_queue, batch_size, shuffle, return_examples, config))
+            p = torch_mp.Process(target=batch_generator,
+                                 args=(batched_examples_queue, batch_queue, return_examples, config))
             p.daemon = True
             batchers.append(p)
 
@@ -457,6 +474,7 @@ class Dataset(object):
         # print('json_loader quitted')
         for p in example_generators: p.join()
         # print('example generators quitted')
+        example_to_batch_process.join()
         for p in batchers: p.join()
         # print('batchers quiteed')
         sys.stdout.flush()
