@@ -18,9 +18,9 @@ class RecurrentSubtokenDecoder(Decoder):
 
         self.vocab = vocab
 
-        self.lstm_cell = nn.LSTMCell(ast_node_encoding_size + ast_node_encoding_size, hidden_size)
+        self.lstm_cell = nn.LSTMCell(ast_node_encoding_size + hidden_size, hidden_size)  # v_encoding_t + e(y_tm1)
         self.decoder_cell_init = nn.Linear(ast_node_encoding_size, hidden_size)
-        self.state2names = nn.Linear(ast_node_encoding_size, len(vocab.target), bias=True)
+        self.state2names = nn.Linear(hidden_size, len(vocab.target), bias=True)
         self.dropout = nn.Dropout(dropout)
         self.config: Dict = None
 
@@ -96,13 +96,13 @@ class RecurrentSubtokenDecoder(Decoder):
         # (batch_size, max_time_step, encoding_size)
         variable_tgt_name_id = prediction_target['variable_tgt_name_id']
 
-        print('[Decoder] variable encoding size: ', variable_encoding.size(), file=sys.stderr)
+        # print('[Decoder] variable encoding size: ', variable_encoding.size(), file=sys.stderr)
 
         batch_size = variable_tgt_name_id.size(0)
         variable_encoding_size = variable_encoding.size(-1)
 
         h_0 = self.get_init_state(src_ast_encoding)
-        att_tm1 = variable_encoding.new_zeros(src_ast_encoding['tree_num'], variable_encoding_size)
+        att_tm1 = variable_encoding.new_zeros(src_ast_encoding['tree_num'], self.lstm_cell.hidden_size)
 
         h_tm1 = h_0
         query_vecs = []
@@ -116,7 +116,7 @@ class RecurrentSubtokenDecoder(Decoder):
                 v_tm1_name_embed = self.state2names.weight[v_tm1_name_id]
             else:
                 # (batch_size, encoding_size)
-                v_tm1_name_embed = torch.zeros(batch_size, variable_encoding_size, device=self.device)
+                v_tm1_name_embed = torch.zeros(batch_size, self.lstm_cell.hidden_size, device=self.device)
 
             if self.config['input_feed']:
                 x = torch.cat([variable_encoding_t, v_tm1_name_embed, att_tm1], dim=-1)
@@ -180,7 +180,7 @@ class RecurrentSubtokenDecoder(Decoder):
         # (batch_size, variable_master_node_num, encoding_size)
         variable_master_node_encoding = variable_master_node_encoding[variable_master_node_restoration_indices]
         # (batch_size, encoding_size)
-        variable_name_embed_tm1 = att_tm1 = torch.zeros(len(source_asts), encoding_size, device=self.device)
+        variable_name_embed_tm1 = att_tm1 = torch.zeros(len(source_asts), self.lstm_cell.hidden_size, device=self.device)
 
         max_prediction_time_step = self.config['max_prediction_time_step']
         for t in range(0, max_prediction_time_step):
