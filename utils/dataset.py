@@ -265,7 +265,10 @@ def train_example_sort_key(example):
     return example.target_prediction_seq_length
 
 
-def example_to_batch(example_queue, batched_examples_queue, batch_size, shuffle, producer_num=1, consumer_num=1, config=None):
+def example_to_batch(json_queue, batched_examples_queue, batch_size, shuffle, producer_num=1, consumer_num=1, config=None):
+    vocab = Vocab.load(config['data']['vocab_file'])
+    tgt_bpe_model = vocab.target.subtoken_model
+
     buffer_size = config['train']['buffer_size']
     buffer = []
     producer_finished_num = 0
@@ -297,15 +300,40 @@ def example_to_batch(example_queue, batched_examples_queue, batch_size, shuffle,
 
     while True:
         t1 = time.time()
+
         while len(buffer) < buffer_size:
-            example = example_queue.get()
-            if example is None:
+            payload = json_queue.get()
+            if payload is None:
                 producer_finished_num += 1
                 if producer_finished_num == producer_num: break
-            elif is_valid_example(example):
+                else: continue
+
+            json_str, meta = payload
+            tree_json_dict = json.loads(json_str)
+            example = Example.from_json_dict(tree_json_dict, binary_file=meta)
+
+            # if example.ast.size != max(node.node_id for node in example.ast) + 1:
+            #     continue
+
+            if tgt_bpe_model:
+                eov_id = tgt_bpe_model.eos_id()
+                variable_name_subtoken_map = dict()
+                tgt_pred_seq_len = 0
+                for old_name, new_name in example.variable_name_map.items():
+                    if old_name == new_name:
+                        subtoken_ids = [vocab.target[SAME_VARIABLE_TOKEN], eov_id]
+                    else:
+                        subtoken_ids = tgt_bpe_model.encode_as_ids(new_name) + [eov_id]
+                    variable_name_subtoken_map[old_name] = subtoken_ids
+                    tgt_pred_seq_len += len(subtoken_ids)
+
+                setattr(example, 'variable_name_subtoken_map', variable_name_subtoken_map)
+                setattr(example, 'target_prediction_seq_length', tgt_pred_seq_len)
+
+            if is_valid_example(example):
                 buffer.append(example)
 
-        print(f'[ExampleToBatch] {time.time() - t1}s took for loading examples to buffer', file=sys.stderr)
+        print(f'[ExampleToBatch] {time.time() - t1}s took for loading {buffer_size} examples to buffer', file=sys.stderr)
         _generate_batches()
         print(f'[ExampleToBatch] {time.time() - t1}s took for batching', file=sys.stderr)
 
@@ -419,30 +447,21 @@ class Dataset(object):
         global batcher_sync_msg
         batcher_sync_msg = multiprocessing.Value('i', 0)
         json_enc_queue = multiprocessing.Queue(maxsize=30000)
-        example_queue = multiprocessing.Queue(maxsize=30000)
 
         json_loader = multiprocessing.Process(target=json_line_reader,
                                               args=(self.file_path, json_enc_queue, num_readers,
                                                     False, False))
         json_loader.daemon = True
         example_generators = []
-        global example_queue_lock
-        example_queue_lock = multiprocessing.Lock()
+        batched_examples_queue = multiprocessing.Queue()
         for i in range(num_readers):
-            p = multiprocessing.Process(target=example_generator,
-                                        args=(json_enc_queue, example_queue, 1, config))
+            p = multiprocessing.Process(target=example_to_batch,
+                                        args=(json_enc_queue, batched_examples_queue, batch_size, shuffle, 1, 1, config))
             p.daemon = True
             example_generators.append(p)
 
         json_loader.start()
         for p in example_generators: p.start()
-
-        batched_examples_queue = multiprocessing.Queue()
-        example_to_batch_process = multiprocessing.Process(target=example_to_batch,
-                                                           args=(example_queue, batched_examples_queue, batch_size,
-                                                                 shuffle, num_readers, num_readers, config))
-        example_to_batch_process.daemon = True
-        example_to_batch_process.start()
 
         batch_queue = torch_mp.Queue()
         batchers = []
@@ -474,7 +493,6 @@ class Dataset(object):
         # print('json_loader quitted')
         for p in example_generators: p.join()
         # print('example generators quitted')
-        example_to_batch_process.join()
         for p in batchers: p.join()
         # print('batchers quiteed')
         sys.stdout.flush()
