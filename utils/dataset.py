@@ -1,3 +1,4 @@
+import glob
 import pickle
 import sys
 import time
@@ -177,26 +178,37 @@ class Batcher(object):
                     variable_encoding_restoration_indices_mask=var_encoding_restoration_indices_mask)
 
 
-def get_json_iterator(file_path, shuffle=False, progress=False) -> Iterable[Tuple]:
-    with tarfile.open(file_path, 'r') as f:
-        files = [x.name for x in f.getmembers() if x.name.endswith('.jsonl')]
-        if shuffle:
-            np.random.shuffle(files)
+def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, group_by=None) -> Iterable:
+    assert group_by in (None, 'binary_file')
 
-        if progress: file_iter = tqdm(files, file=sys.stdout)
-        else: file_iter = files
+    if isinstance(file_paths, str):
+        file_paths = [file_paths]
 
-        for filename in file_iter:
-            jsonl_file = f.extractfile(filename)
-            if jsonl_file is not None:
-                for line_no, tree_encoding_line in enumerate(jsonl_file):
-                    if tree_encoding_line.decode().startswith('{'):
-                        # tree_json_dict = json.loads(tree_encoding_line)
-                        yield tree_encoding_line, dict(file_name=filename, line_num=line_no)
+    for file_path in file_paths:
+        with tarfile.open(file_path, 'r') as f:
+            files = [x.name for x in f.getmembers() if x.name.endswith('.jsonl')]
+            if shuffle:
+                np.random.shuffle(files)
+
+            if progress: file_iter = tqdm(files, file=sys.stdout)
+            else: file_iter = files
+
+            for filename in file_iter:
+                jsonl_file = f.extractfile(filename)
+                if jsonl_file is not None:
+                    if group_by is None:
+                        for line_no, tree_encoding_line in enumerate(jsonl_file):
+                            # if tree_encoding_line.decode().startswith('{'):
+                            # tree_json_dict = json.loads(tree_encoding_line)
+                            yield tree_encoding_line, dict(file_name=filename, line_num=line_no)
+                    elif group_by == 'binary_file':
+                        lines = [(l.decode().strip(), dict(file_name=filename, line_num=line_no))
+                                 for line_no, l in enumerate(jsonl_file)]
+                        yield lines
 
 
-def json_line_reader(file_path, queue, worker_num, shuffle, progress):
-    for json_str in get_json_iterator(file_path, shuffle, progress):
+def json_line_reader(file_path, queue, worker_num, shuffle, progress, group_by=None):
+    for json_str in get_json_iterator_from_tar_file(file_path, shuffle, progress, group_by=group_by):
         queue.put(json_str)
 
     for i in range(worker_num):
@@ -204,13 +216,15 @@ def json_line_reader(file_path, queue, worker_num, shuffle, progress):
 
 
 def is_valid_example(example):
+    if hasattr(example, 'target_prediction_seq_length'):
+        if example.target_prediction_seq_length >= 200: return False
+
     return example.ast.size < 300 and \
-           example.target_prediction_seq_length < 200 and \
            len(example.variable_name_map) > 0 and \
            any(k != v for k, v in example.variable_name_map.items())
 
 
-def example_generator(json_queue, example_queue, consumer_num=1, config=None):
+def example_generator(json_queue, example_queue, consumer_num=1, train=False, config=None):
     if config:
         vocab = Vocab.load(config['data']['vocab_file'])
         tgt_bpe_model = vocab.target.subtoken_model
@@ -243,7 +257,10 @@ def example_generator(json_queue, example_queue, consumer_num=1, config=None):
             setattr(example, 'variable_name_subtoken_map', variable_name_subtoken_map)
             setattr(example, 'target_prediction_seq_length', tgt_pred_seq_len)
 
-        if is_valid_example(example):
+        if train:
+            if is_valid_example(example):
+                example_queue.put(example)
+        else:
             example_queue.put(example)
 
         # print('Push one example', file=sys.stderr)
@@ -333,9 +350,9 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, shuffle, pr
             if is_valid_example(example):
                 buffer.append(example)
 
-        print(f'[ExampleToBatch] {time.time() - t1}s took for loading {buffer_size} examples to buffer', file=sys.stderr)
+        # print(f'[ExampleToBatch] {time.time() - t1}s took for loading {buffer_size} examples to buffer', file=sys.stderr)
         _generate_batches()
-        print(f'[ExampleToBatch] {time.time() - t1}s took for batching', file=sys.stderr)
+        # print(f'[ExampleToBatch] {time.time() - t1}s took for batching', file=sys.stderr)
 
         if producer_finished_num == producer_num:
             break
@@ -366,12 +383,16 @@ def batch_generator(batched_examples_queue, batch_queue, return_examples, config
 
 
 class Dataset(object):
-    def __init__(self, dataset_file_path):
-        self.file_path = dataset_file_path
+    def __init__(self, file_paths):
+        if isinstance(file_paths, list):
+            self.file_paths = file_paths
+        else:
+            assert isinstance(file_paths, str)
+            self.file_paths = glob.glob(file_paths)
 
-        print(f'reading dataset {dataset_file_path}', file=sys.stderr)
+        print(f'reading data files {self.file_paths}', file=sys.stderr)
         example_num = 0
-        for _ in get_json_iterator(dataset_file_path):
+        for _ in get_json_iterator_from_tar_file(self.file_paths):
             example_num += 1
         self.size = example_num
 
@@ -382,7 +403,7 @@ class Dataset(object):
         return self.get_iterator(progress=True)
 
     def get_single_process_iterator(self, shuffle=False, progress=False) -> Iterable[Example]:
-        json_str_iter = get_json_iterator(self.file_path, shuffle, progress)
+        json_str_iter = get_json_iterator_from_tar_file(self.file_paths, shuffle, progress)
         for json_str, meta in json_str_iter:
             tree_json_dict = json.loads(json_str)
             example = Example.from_json_dict(tree_json_dict, binary_file=meta)
@@ -396,7 +417,7 @@ class Dataset(object):
         json_enc_queue = multiprocessing.Queue()
         example_queue = multiprocessing.Queue(maxsize=30000)
 
-        json_loader = multiprocessing.Process(target=json_line_reader, args=(self.file_path, json_enc_queue, num_workers,
+        json_loader = multiprocessing.Process(target=json_line_reader, args=(self.file_paths, json_enc_queue, num_workers,
                                                                              shuffle, False))
         json_loader.daemon = True
         example_generators = []
@@ -449,7 +470,7 @@ class Dataset(object):
         json_enc_queue = multiprocessing.Queue(maxsize=30000)
 
         json_loader = multiprocessing.Process(target=json_line_reader,
-                                              args=(self.file_path, json_enc_queue, num_readers,
+                                              args=(self.file_paths, json_enc_queue, num_readers,
                                                     False, False))
         json_loader.daemon = True
         example_generators = []
