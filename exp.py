@@ -10,7 +10,7 @@ Options:
     --debug                                     Debug mode
     --seed=<int>                                Seed [default: 0]
     --work-dir=<dir>                            work dir [default: data/exp_runs/]
-    --extra-config=<str>                              extra config [default: {}]
+    --extra-config=<str>                        extra config [default: {}]
 """
 
 import random
@@ -110,25 +110,6 @@ def train(args):
             t1 = time.time()
             result = model(batch.tensor_dict, batch.tensor_dict['prediction_target'])
             print(f'[Learner] batch {train_iter}, {batch.size} examples took {time.time() - t1:4f}s', file=sys.stderr)
-
-            # for i, (src_ast, rename_map) in enumerate(zip(src_asts, rename_maps)):
-            #     log_probs, _info = model([src_ast], [rename_map])
-            #
-            #     tree_node_encoding_1 = info['context_encoding']['packed_tree_node_encoding']
-            #     tree_node_encoding_2 = _info['context_encoding']['packed_tree_node_encoding']
-            #
-            #     packed_graph_1 = info['context_encoding']['packed_graph']
-            #     packed_graph_2 = _info['context_encoding']['packed_graph']
-            #
-            #     for node_group, nodes in packed_graph_1.node_groups[i].items():
-            #         for ast_node, packed_node_id in nodes.items():
-            #             encoding1 = tree_node_encoding_1[packed_node_id]
-            #             encoding2 = tree_node_encoding_2[packed_graph_2.node_groups[0][node_group][ast_node]]
-            #
-            #             diff_sum = torch.abs(encoding1 - encoding2).mean()
-            #             print(diff_sum.item())
-            #             if diff_sum.item() > 1e-6:
-            #                 pass
 
             loss = -result['batch_log_prob'].mean()
 

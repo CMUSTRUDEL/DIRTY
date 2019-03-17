@@ -221,7 +221,8 @@ class GraphASTEncoder(Encoder):
                 if node.is_variable_node:
                     var_node_name_indices[i] = vocab.source[node.old_name]
 
-                if node.node_type == 'obj':
+                # function root with type `block` also has an name entry storing the name of the function
+                if node.node_type == 'obj' or node.node_type == 'block' and hasattr(node, 'name'):
                     # compute variable embedding
                     node_sub_tokes = obj_name_bpe_model.encode_as_ids(node.name)
                     sub_tokens_list.append(node_sub_tokes)

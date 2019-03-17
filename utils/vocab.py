@@ -205,7 +205,7 @@ if __name__ == '__main__':
                     tgt_words.append(new_var_name)
                 var_types.add(node.type)
 
-            if node.node_type == 'obj':
+            if node.node_type == 'obj' or node.node_type == 'block' and hasattr(node, 'name'):
                 identifier_names.append(node.name)
 
     print('building source words vocabulary')

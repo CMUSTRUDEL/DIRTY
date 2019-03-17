@@ -194,6 +194,7 @@ class AbstractSyntaxTree(object):
     @classmethod
     def from_json_dict(cls, json_dict: Dict) -> 'AbstractSyntaxTree':
         root = SyntaxNode.from_json_dict(json_dict['ast'])
+        root.name = json_dict['function']
         tree = cls(root, compilation_unit=json_dict['function'], code=json_dict['raw_code'] if 'raw_code' in json_dict else None)
 
         return tree

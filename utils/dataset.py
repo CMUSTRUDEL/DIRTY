@@ -185,6 +185,8 @@ def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, g
         file_paths = [file_paths]
 
     for file_path in file_paths:
+        payloads = []
+        t1 = time.time()
         with tarfile.open(file_path, 'r') as f:
             files = [x.name for x in f.getmembers() if x.name.endswith('.jsonl')]
             if shuffle:
@@ -200,11 +202,21 @@ def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, g
                         for line_no, tree_encoding_line in enumerate(jsonl_file):
                             # if tree_encoding_line.decode().startswith('{'):
                             # tree_json_dict = json.loads(tree_encoding_line)
-                            yield tree_encoding_line, dict(file_name=filename, line_num=line_no)
+                            payload = tree_encoding_line, dict(file_name=filename, line_num=line_no)
+                            # yield payload
+                            payloads.append(payload)
                     elif group_by == 'binary_file':
                         lines = [(l.decode().strip(), dict(file_name=filename, line_num=line_no))
                                  for line_no, l in enumerate(jsonl_file)]
                         yield lines
+
+        if shuffle:
+            np.random.shuffle(payloads)
+
+        for payload in payloads:
+            yield payload
+
+        print(f'load shard {file_path} took {time.time() - t1:.4f}s', file=sys.stderr)
 
 
 def json_line_reader(file_path, queue, worker_num, shuffle, progress, group_by=None):
@@ -215,7 +227,7 @@ def json_line_reader(file_path, queue, worker_num, shuffle, progress, group_by=N
         queue.put(None)
 
 
-def is_valid_example(example):
+def is_valid_training_example(example):
     if hasattr(example, 'target_prediction_seq_length'):
         if example.target_prediction_seq_length >= 200: return False
 
@@ -282,7 +294,7 @@ def train_example_sort_key(example):
     return example.target_prediction_seq_length
 
 
-def example_to_batch(json_queue, batched_examples_queue, batch_size, shuffle, producer_num=1, consumer_num=1, config=None):
+def example_to_batch(json_queue, batched_examples_queue, batch_size, train, producer_num=1, consumer_num=1, config=None):
     vocab = Vocab.load(config['data']['vocab_file'])
     tgt_bpe_model = vocab.target.subtoken_model
 
@@ -307,7 +319,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, shuffle, pr
         if batch_examples:
             batches.append(batch_examples)
 
-        if shuffle:
+        if train:
             random.shuffle(batches)
 
         for batch_examples in batches:
@@ -347,7 +359,10 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, shuffle, pr
                 setattr(example, 'variable_name_subtoken_map', variable_name_subtoken_map)
                 setattr(example, 'target_prediction_seq_length', tgt_pred_seq_len)
 
-            if is_valid_example(example):
+            if train:
+                if is_valid_training_example(example):
+                    buffer.append(example)
+            else:
                 buffer.append(example)
 
         # print(f'[ExampleToBatch] {time.time() - t1}s took for loading {buffer_size} examples to buffer', file=sys.stderr)
@@ -464,20 +479,20 @@ class Dataset(object):
         else:
             return it_func(self._batch_iterator(batch_size, config, num_readers, shuffle, return_examples))
 
-    def _batch_iterator(self, batch_size: int, config: Dict, num_readers=2, shuffle=False, return_examples=True) -> Iterable[Batch]:
+    def _batch_iterator(self, batch_size: int, config: Dict, num_readers=2, train=False, return_examples=True) -> Iterable[Batch]:
         global batcher_sync_msg
         batcher_sync_msg = multiprocessing.Value('i', 0)
         json_enc_queue = multiprocessing.Queue(maxsize=30000)
 
         json_loader = multiprocessing.Process(target=json_line_reader,
                                               args=(self.file_paths, json_enc_queue, num_readers,
-                                                    False, False))
+                                                    train, False))
         json_loader.daemon = True
         example_generators = []
         batched_examples_queue = multiprocessing.Queue()
         for i in range(num_readers):
             p = multiprocessing.Process(target=example_to_batch,
-                                        args=(json_enc_queue, batched_examples_queue, batch_size, shuffle, 1, 1, config))
+                                        args=(json_enc_queue, batched_examples_queue, batch_size, train, 1, 1, config))
             p.daemon = True
             example_generators.append(p)
 
