@@ -106,3 +106,8 @@ class HexRaysLexer(CLexer):
             inherit
         ]
     }
+
+
+if __name__ == '__main__':
+    code = '__int64 (__fastcall **)(unsigned __int64, signed __int64, __int64, _QWORD, __int64, signed __int64)'
+    print([token for token in Lexer(code).get_tokens()])

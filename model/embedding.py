@@ -45,3 +45,7 @@ class SubTokenEmbedder(nn.Module):
         embedding = embedding.sum(dim=1) / sub_tokens_mask.sum(-1).unsqueeze(-1)
 
         return embedding
+
+
+class NodeTypeEmbedder(nn.Module):
+    pass

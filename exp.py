@@ -3,6 +3,7 @@ Variable renaming
 
 Usage:
     exp.py train [options] CONFIG_FILE
+    exp.py test [options] MODEL_FILE TEST_DATA_FILE
 
 Options:
     -h --help                                   Show this screen
@@ -12,7 +13,7 @@ Options:
     --work-dir=<dir>                            work dir [default: data/exp_runs/]
     --extra-config=<str>                        extra config [default: {}]
 """
-
+import pickle
 import random
 import time
 from typing import List, Tuple, Dict, Iterable
@@ -64,10 +65,6 @@ def train(args):
     model = RenamingModel.build(config)
     model.train()
 
-    print('Current Configuration:', file=sys.stderr)
-    pp = pprint.PrettyPrinter(indent=2, stream=sys.stderr)
-    pp.pprint(model.config)
-
     if args['--cuda']:
         model = model.cuda()
 
@@ -95,7 +92,7 @@ def train(args):
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
         train_set_iter = train_set.batch_iterator(batch_size=batch_size,
                                                   return_examples=False,
-                                                  config=config, progress=True, shuffle=True, num_readers=5,
+                                                  config=config, progress=True, train=True, num_readers=5,
                                                   single_batcher=False)
         epoch += 1
 
@@ -107,9 +104,9 @@ def train(args):
             nn_util.to(batch.tensor_dict, model.device)
             # print(f'[Learner] {time.time() - t1}s took for moving tensors to device', file=sys.stderr)
 
-            t1 = time.time()
+            # t1 = time.time()
             result = model(batch.tensor_dict, batch.tensor_dict['prediction_target'])
-            print(f'[Learner] batch {train_iter}, {batch.size} examples took {time.time() - t1:4f}s', file=sys.stderr)
+            # print(f'[Learner] batch {train_iter}, {batch.size} examples took {time.time() - t1:4f}s', file=sys.stderr)
 
             loss = -result['batch_log_prob'].mean()
 
@@ -145,6 +142,28 @@ def train(args):
         t1 = time.time()
 
 
+def test(args):
+    sys.setrecursionlimit(7000)
+    model_path = args['MODEL_FILE']
+    test_set_path = args['TEST_DATA_FILE']
+
+    extra_config = None
+    if args['--extra-config']:
+        extra_config = args['--extra-config']
+        extra_config = json.loads(extra_config)
+
+    print(f'loading model from [{model_path}]', file=sys.stderr)
+    model = RenamingModel.load(model_path, use_cuda=args['--cuda'], new_config=extra_config)
+    model.eval()
+
+    test_set = Dataset(test_set_path)
+    eval_results = Evaluator.decode_and_evaluate(model, test_set, batch_size=4096, return_results=False)
+
+    print(eval_results, file=sys.stderr)
+    #
+    # pickle.dump(decode_results, open(args['MODEL_FILE'] + '.eval_results.bin', 'wb'))
+
+
 if __name__ == '__main__':
     cmd_args = docopt(__doc__)
     print(f'Main process id {os.getpid()}', file=sys.stderr)
@@ -160,4 +179,7 @@ if __name__ == '__main__':
     np.random.seed(seed * 13 // 7)
     random.seed(seed * 17 // 7)
 
-    train(cmd_args)
+    if cmd_args['train']:
+        train(cmd_args)
+    elif cmd_args['test']:
+        test(cmd_args)

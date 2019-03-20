@@ -1,3 +1,5 @@
+import pprint
+import sys
 from typing import List, Dict, Tuple, Iterable
 
 import torch
@@ -65,6 +67,10 @@ class RenamingModel(nn.Module):
         encoder.batcher = model.batcher
         decoder.batcher = model.batcher
 
+        print('Current Configuration:', file=sys.stderr)
+        pp = pprint.PrettyPrinter(indent=2, stream=sys.stderr)
+        pp.pprint(model.config)
+
         return model
 
     def forward(self, source_asts: Dict[str, torch.Tensor], prediction_target: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, Dict]:
@@ -100,7 +106,7 @@ class RenamingModel(nn.Module):
 
     def decode_dataset(self, dataset, batch_size=4096) -> Iterable[Tuple[Example, Dict]]:
         with torch.no_grad():
-            data_iter = dataset.batch_iterator(batch_size=batch_size, shuffle=False, progress=False,
+            data_iter = dataset.batch_iterator(batch_size=batch_size, train=False, progress=False,
                                                config=self.config)
             was_training = self.training
             self.eval()

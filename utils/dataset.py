@@ -1,6 +1,7 @@
 import glob
 import pickle
 import sys
+import os
 import time
 import ujson as json
 import tarfile
@@ -10,6 +11,7 @@ import multiprocessing
 from tqdm import tqdm
 import numpy as np
 from utils.ast import AbstractSyntaxTree, SyntaxNode
+from utils.code_processing import annotate_type
 from utils.graph import PackedGraph
 from utils.vocab import VocabEntry, SAME_VARIABLE_TOKEN, Vocab
 from model.encoder import GraphASTEncoder
@@ -38,6 +40,9 @@ class Example(object):
 
         for var_name, var_nodes in tree.variables.items():
             variable_name_map[var_name] = var_nodes[0].new_name
+
+        if 'test_meta' in json_dict:
+            kwargs['test_meta'] = json_dict['test_meta']
 
         return cls(tree, variable_name_map, **kwargs)
 
@@ -184,13 +189,16 @@ def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, g
     if isinstance(file_paths, str):
         file_paths = [file_paths]
 
+    if shuffle:
+        np.random.shuffle(file_paths)
+
     for file_path in file_paths:
         payloads = []
         t1 = time.time()
         with tarfile.open(file_path, 'r') as f:
             files = [x.name for x in f.getmembers() if x.name.endswith('.jsonl')]
-            if shuffle:
-                np.random.shuffle(files)
+            # if shuffle:
+            #     np.random.shuffle(files)
 
             if progress: file_iter = tqdm(files, file=sys.stdout)
             else: file_iter = files
@@ -213,10 +221,10 @@ def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, g
         if shuffle:
             np.random.shuffle(payloads)
 
+        print(f'load shard {file_path} took {time.time() - t1:.4f}s', file=sys.stderr)
+
         for payload in payloads:
             yield payload
-
-        print(f'load shard {file_path} took {time.time() - t1:.4f}s', file=sys.stderr)
 
 
 def json_line_reader(file_path, queue, worker_num, shuffle, progress, group_by=None):
@@ -301,6 +309,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, prod
     buffer_size = config['train']['buffer_size']
     buffer = []
     producer_finished_num = 0
+    print(f'[ExampleToBatch] pid={os.getpid()}', file=sys.stderr)
 
     def _generate_batches():
         buffer.sort(key=train_example_sort_key)
@@ -324,6 +333,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, prod
 
         for batch_examples in batches:
             batched_examples_queue.put(batch_examples)
+            # print(f'[ExampleToBatch] batched examples queue size {batched_examples_queue.qsize()}', file=sys.stderr)
 
         buffer.clear()
 
@@ -381,12 +391,15 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, prod
 def batch_generator(batched_examples_queue, batch_queue, return_examples, config):
     batcher = Batcher(config, return_examples)
 
+    print(f'[BatchGenerator] pid={os.getpid()}', file=sys.stderr)
+
     while True:
         batched_examples = batched_examples_queue.get()
         if batched_examples is None:
             break
         else:
             batch = batcher.to_batch(batched_examples)
+            # print(f'[Batcher] Batch queue size {batch_queue.qsize()}', file=sys.stderr)
             batch_queue.put(batch)
 
     batch_queue.put(None)
@@ -430,7 +443,7 @@ class Dataset(object):
 
     def _get_iterator(self, shuffle=False, num_workers=1):
         json_enc_queue = multiprocessing.Queue()
-        example_queue = multiprocessing.Queue(maxsize=30000)
+        example_queue = multiprocessing.Queue(maxsize=5000)
 
         json_loader = multiprocessing.Process(target=json_line_reader, args=(self.file_paths, json_enc_queue, num_workers,
                                                                              shuffle, False))
@@ -468,28 +481,28 @@ class Dataset(object):
     def batch_iterator(self, batch_size: int, config: Dict,
                        return_examples=True,
                        num_readers=2,
-                       progress=True, shuffle=False, single_batcher=False) -> Iterable[Union[Batch, Dict[str, torch.Tensor]]]:
+                       progress=True, train=False, single_batcher=False) -> Iterable[Union[Batch, Dict[str, torch.Tensor]]]:
         if progress:
             it_func = lambda x: tqdm(x, file=sys.stdout)
         else:
             it_func = lambda x: x
 
         if single_batcher:
-            return it_func(self._single_process_batch_iter(batch_size, config, num_readers, shuffle))
+            return it_func(self._single_process_batch_iter(batch_size, config, num_readers, train))
         else:
-            return it_func(self._batch_iterator(batch_size, config, num_readers, shuffle, return_examples))
+            return it_func(self._batch_iterator(batch_size, config, num_readers, train, return_examples))
 
     def _batch_iterator(self, batch_size: int, config: Dict, num_readers=2, train=False, return_examples=True) -> Iterable[Batch]:
         global batcher_sync_msg
         batcher_sync_msg = multiprocessing.Value('i', 0)
-        json_enc_queue = multiprocessing.Queue(maxsize=30000)
+        json_enc_queue = multiprocessing.Queue(maxsize=10000)
 
         json_loader = multiprocessing.Process(target=json_line_reader,
                                               args=(self.file_paths, json_enc_queue, num_readers,
                                                     train, False))
         json_loader.daemon = True
         example_generators = []
-        batched_examples_queue = multiprocessing.Queue()
+        batched_examples_queue = multiprocessing.Queue(maxsize=100)
         for i in range(num_readers):
             p = multiprocessing.Process(target=example_to_batch,
                                         args=(json_enc_queue, batched_examples_queue, batch_size, train, 1, 1, config))
@@ -499,7 +512,7 @@ class Dataset(object):
         json_loader.start()
         for p in example_generators: p.start()
 
-        batch_queue = torch_mp.Queue()
+        batch_queue = torch_mp.Queue(maxsize=100)
         batchers = []
         num_batchers = num_readers
         for i in range(num_batchers):

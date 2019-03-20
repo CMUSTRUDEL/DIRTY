@@ -1,5 +1,9 @@
+from typing import Dict, List
+
 import numpy as np
 import torch
+
+import editdistance
 
 from utils.dataset import Dataset
 from model.model import RenamingModel
@@ -7,8 +11,32 @@ from model.model import RenamingModel
 
 class Evaluator(object):
     @staticmethod
-    def decode_and_evaluate(model: RenamingModel, dataset: Dataset, batch_size=2048):
-        data_iter = dataset.batch_iterator(batch_size=batch_size, shuffle=False, progress=True, config=model.config)
+    def get_soft_metrics(pred_name: str, gold_name: str) -> Dict:
+        edit_distance = float(editdistance.eval(pred_name, gold_name))
+        cer = float(edit_distance / len(gold_name))
+        acc = float(pred_name == gold_name)
+
+        return dict(edit_distance=edit_distance,
+                    character_error_rate=cer,
+                    accuracy=acc)
+
+    @staticmethod
+    def average(metrics_list: List[Dict]) -> Dict:
+        avg_results = dict()
+        for metrics in metrics_list:
+            for key, val in metrics.items():
+                avg_results.setdefault(key, []).append(val)
+
+        for key in avg_results.keys():
+            val = avg_results[key]
+            avg_results[key] = np.average(val)
+
+        return avg_results
+
+    @staticmethod
+    def decode_and_evaluate(model: RenamingModel, dataset: Dataset, batch_size=2048, return_results=False):
+        data_iter = dataset.batch_iterator(batch_size=batch_size, train=False, progress=True,
+                                           config=model.config, num_readers=2)
 
         was_training = model.training
         model.eval()
@@ -16,37 +44,68 @@ class Evaluator(object):
         variable_acc_list = []
         need_rename_cases = []
 
+        func_name_in_train_acc_list = []
+        func_name_not_in_train_acc_list = []
+        func_body_in_train_acc_list = []
+        func_body_not_in_train_acc_list = []
+
+        all_examples = []
+
         with torch.no_grad():
             for batch in data_iter:
                 examples = batch.examples
                 rename_results = model.decoder.predict([e.ast for e in examples], model.encoder)
                 for example, rename_result in zip(examples, rename_results):
-                    tree_acc = []
+                    example_pred_accs = []
                     if len(example.variable_name_map) == 0:
                         continue
 
                     for old_name, gold_new_name in example.variable_name_map.items():
                         pred = rename_result[old_name]
                         pred_new_name = pred['new_name']
-                        is_correct = pred_new_name == gold_new_name
-                        tree_acc.append(is_correct)
+                        var_metric = Evaluator.get_soft_metrics(pred_new_name, gold_new_name)
+                        # is_correct = pred_new_name == gold_new_name
+                        example_pred_accs.append(var_metric)
 
                         if gold_new_name != old_name:  # and gold_new_name in model.vocab.target:
-                            need_rename_cases.append(is_correct)
+                            need_rename_cases.append(var_metric)
 
-                    variable_acc_list.extend(tree_acc)
-                    tree_acc = np.average(tree_acc)
-                    example_acc_list.append(tree_acc)
+                            if example.test_meta['function_name_in_train']:
+                                func_name_in_train_acc_list.append(var_metric)
+                            else:
+                                func_name_not_in_train_acc_list.append(var_metric)
 
-        num_variables = len(variable_acc_list)
-        corpus_acc = np.average(variable_acc_list)
-        corpus_need_rename_acc = np.average(need_rename_cases)
+                            if example.test_meta['function_body_in_train']:
+                                func_body_in_train_acc_list.append(var_metric)
+                            else:
+                                func_body_not_in_train_acc_list.append(var_metric)
+
+                    variable_acc_list.extend(example_pred_accs)
+                    example_acc_list.append(example_pred_accs)
+
+                    if return_results:
+                        all_examples.append((example, rename_result, example_pred_accs))
+
         valid_example_num = len(example_acc_list)
-        tree_acc = np.average(example_acc_list)
+        num_variables = len(variable_acc_list)
+        corpus_acc = Evaluator.average(variable_acc_list)
 
         if was_training:
             model.train()
 
-        return dict(corpus_acc=corpus_acc, corpus_need_rename_acc=corpus_need_rename_acc,
-                    tree_acc=tree_acc,
-                    num_variables=num_variables, num_valid_examples=valid_example_num)
+        eval_results = dict(corpus_acc=corpus_acc,
+                            corpus_need_rename_acc=Evaluator.average(need_rename_cases),
+                            func_name_in_train_acc=Evaluator.average(func_name_in_train_acc_list),
+                            func_name_not_in_train_acc=Evaluator.average(func_name_not_in_train_acc_list),
+                            func_body_in_train_acc=Evaluator.average(func_body_in_train_acc_list),
+                            func_body_not_in_train_acc=Evaluator.average(func_body_not_in_train_acc_list),
+                            num_variables=num_variables,
+                            num_valid_examples=valid_example_num)
+
+        if return_results:
+            return eval_results, all_examples
+        return eval_results
+
+
+if __name__ == '__main__':
+    print(Evaluator.get_soft_metrics('file_name', 'filename'))

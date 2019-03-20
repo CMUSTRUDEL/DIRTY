@@ -187,10 +187,10 @@ if __name__ == '__main__':
 
     # extract vocab and node types
     node_types = set()
-    var_types = set()
     src_words = []
     tgt_words = []
     identifier_names = []
+    type_tokens = []
     for example in train_set.get_iterator(progress=True, num_workers=5):
         for node in example.ast:
             node_types.add(node.node_type)
@@ -203,10 +203,12 @@ if __name__ == '__main__':
 
                 if old_var_name != new_var_name:
                     tgt_words.append(new_var_name)
-                var_types.add(node.type)
 
             if node.node_type == 'obj' or node.node_type == 'block' and hasattr(node, 'name'):
                 identifier_names.append(node.name)
+
+            if hasattr(node, 'type_tokens'):
+                type_tokens.extend(node.type_tokens)
 
     print('building source words vocabulary')
     src_var_vocab_entry = VocabEntry.from_corpus([src_words], size=vocab_size,
@@ -244,11 +246,19 @@ if __name__ == '__main__':
                                    f'--input={id_names_file}')
     obj_name_vocab_entry = VocabEntry(vocab_file + '.obj_name.model')
 
+    type_vocab = Counter(type_tokens)
+    num_types = 100
+    var_types = []
+    for type_token, freq in type_vocab.items():
+        if freq > 100:
+            print(type_token, freq)
+            var_types.append(type_token)
+
     print('init node types and variable types')
     grammar = Grammar(node_types, var_types)
 
     print('Node types:', node_types)
-    # print('Variable types:', var_types)
+    print('Variable types:', var_types)
 
     vocab = Vocab(source=src_var_vocab_entry,
                   target=tgt_var_vocab_entry,

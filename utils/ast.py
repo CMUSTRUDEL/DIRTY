@@ -35,7 +35,7 @@ class SyntaxNode(object):
 
     @classmethod
     def from_json_dict(cls, json_dict: Dict) -> 'SyntaxNode':
-        named_fields = {k: v for k, v in json_dict.items() if k not in {'node_id', 'node_type', 'children', 'address', 'x', 'y'}}
+        named_fields = {k: v for k, v in json_dict.items() if k not in {'node_id', 'node_type', 'children', 'address', 'x', 'y', 'z'}}
 
         if 'x' in json_dict:
             named_fields['x'] = SyntaxNode.from_json_dict(json_dict['x'])
@@ -58,6 +58,25 @@ class SyntaxNode(object):
             node.add_child(child_node)
 
         return node
+
+    def to_json_dict(self):
+        json_dict = dict(node_id=self.node_id,
+                         node_type=self.node_type,
+                         address=self.address)
+
+        for named_filed, val in self.named_fields.items():
+            if named_filed in ('x', 'y', 'z'):
+                json_dict[named_filed] = val.to_json_dict()
+            else:
+                json_dict[named_filed] = val
+
+        if self.children:
+            children = []
+            for child in self.children:
+                children.append(child.to_json_dict())
+            json_dict['children'] = children
+
+        return json_dict
 
     @property
     def is_variable_node(self):
@@ -672,5 +691,14 @@ if __name__ == '__main__':
 }
 """
     json_dict = json.loads(json_str)
-    tree = AbstractSyntaxTree.from_json_dict(json_dict)
-    pass
+    tree = SyntaxNode.from_json_dict(json_dict['root'])
+
+    tree_reconstr = SyntaxNode.from_json_dict(tree.to_json_dict())
+    assert tree_reconstr == tree
+    assert tree.to_string() == tree_reconstr.to_string()
+    print(tree.to_json_dict())
+
+    from utils.code_processing import annotate_type
+
+    annotate_type(tree_reconstr)
+    print(tree_reconstr.to_json_dict())
