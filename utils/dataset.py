@@ -335,6 +335,8 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
 
         for batch_examples in batches:
             batch = batcher.to_batch(batch_examples)
+            while batched_examples_queue.qsize() > 100:
+                time.sleep(10)
             batched_examples_queue.put(batch)
             # print(f'[ExampleToBatch] batched examples queue size {batched_examples_queue.qsize()}', file=sys.stderr)
 
@@ -509,7 +511,7 @@ class Dataset(object):
                                                     train, False))
         json_loader.daemon = True
         example_generators = []
-        batch_queue = torch_mp.Queue(maxsize=100)
+        batch_queue = torch_mp.Queue(maxsize=1000)
         for i in range(num_readers):
             p = multiprocessing.Process(target=example_to_batch,
                                         args=(json_enc_queue, batch_queue, batch_size, train, config))
@@ -523,6 +525,7 @@ class Dataset(object):
         while True:
             # t1 = time.time()
             batch = batch_queue.get()
+            print(f'[Dataset] Batch queue size {batch_queue.qsize()}', file=sys.stderr)
             # print(f'{time.time() - t1} took to load a batch', file=sys.stderr)
             if batch is not None:
                 yield batch
