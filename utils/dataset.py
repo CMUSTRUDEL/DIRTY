@@ -304,13 +304,13 @@ def train_example_sort_key(example):
     return example.target_prediction_seq_length
 
 
-def example_to_batch(json_queue, batched_examples_queue, batch_size, train, producer_num=1, consumer_num=1, config=None):
-    vocab = Vocab.load(config['data']['vocab_file'])
-    tgt_bpe_model = vocab.target.subtoken_model
+def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config):
+    batcher = Batcher(config, return_examples=not train)
+    tgt_bpe_model = batcher.vocab.target.subtoken_model
+    vocab = batcher.vocab
 
     buffer_size = config['train']['buffer_size']
     buffer = []
-    producer_finished_num = 0
     print(f'[ExampleToBatch] pid={os.getpid()}', file=sys.stderr)
 
     def _generate_batches():
@@ -334,20 +334,21 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, prod
             random.shuffle(batches)
 
         for batch_examples in batches:
-            batched_examples_queue.put(batch_examples)
+            batch = batcher.to_batch(batch_examples)
+            batched_examples_queue.put(batch)
             # print(f'[ExampleToBatch] batched examples queue size {batched_examples_queue.qsize()}', file=sys.stderr)
 
         buffer.clear()
 
+    finished = False
     while True:
         t1 = time.time()
 
         while len(buffer) < buffer_size:
             payload = json_queue.get()
             if payload is None:
-                producer_finished_num += 1
-                if producer_finished_num == producer_num: break
-                else: continue
+                finished = True
+                break
 
             json_str, meta = payload
             tree_json_dict = json.loads(json_str)
@@ -381,11 +382,13 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, prod
         _generate_batches()
         # print(f'[ExampleToBatch] {time.time() - t1}s took for batching', file=sys.stderr)
 
-        if producer_finished_num == producer_num:
+        if finished:
             break
 
-    for i in range(consumer_num):
-        batched_examples_queue.put(None)
+    batched_examples_queue.put(None)
+
+    while batcher_sync_msg.value == 0:
+        time.sleep(1)
 
     print(f'[ExampleToBatch] quit', file=sys.stderr)
     sys.stderr.flush()
@@ -506,26 +509,15 @@ class Dataset(object):
                                                     train, False))
         json_loader.daemon = True
         example_generators = []
-        batched_examples_queue = multiprocessing.Queue(maxsize=100)
+        batch_queue = torch_mp.Queue(maxsize=100)
         for i in range(num_readers):
-            num_consumers = 1 if i == 0 else abs(num_batchers + 1 - num_readers)
             p = multiprocessing.Process(target=example_to_batch,
-                                        args=(json_enc_queue, batched_examples_queue, batch_size, train, 1, num_consumers, config))
+                                        args=(json_enc_queue, batch_queue, batch_size, train, config))
             p.daemon = True
             example_generators.append(p)
 
         json_loader.start()
         for p in example_generators: p.start()
-
-        batch_queue = torch_mp.Queue(maxsize=100)
-        batchers = []
-        for i in range(num_batchers):
-            p = torch_mp.Process(target=batch_generator,
-                                 args=(batched_examples_queue, batch_queue, return_examples, config))
-            p.daemon = True
-            batchers.append(p)
-
-        for p in batchers: p.start()
 
         num_finished_batchers = 0
         while True:
@@ -539,15 +531,13 @@ class Dataset(object):
                 num_finished_batchers += 1
                 if num_finished_batchers == num_batchers: break
 
-        batched_examples_queue.cancel_join_thread()
         batch_queue.close()
         # print('start joining...')
         batcher_sync_msg.value = 1
         json_loader.join()
         # print('json_loader quitted')
-        for p in example_generators: p.terminate()
+        for p in example_generators: p.join()
         # print('example generators quitted')
-        for p in batchers: p.join()
         # print('batchers quiteed')
         sys.stdout.flush()
         sys.stderr.flush()
