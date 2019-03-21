@@ -98,7 +98,9 @@ class Batcher(object):
         return tensor_dict
 
     def to_batch(self, examples: List[Example]) -> Batch:
-        tensor_dict = self.to_tensor_dict(examples)
+        with torch.no_grad():
+            tensor_dict = self.to_tensor_dict(examples)
+
         if not self.return_examples:
             examples = None
 
@@ -385,6 +387,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, prod
     for i in range(consumer_num):
         batched_examples_queue.put(None)
 
+    print(f'[ExampleToBatch] quit', file=sys.stderr)
     sys.stderr.flush()
 
 
@@ -406,7 +409,7 @@ def batch_generator(batched_examples_queue, batch_queue, return_examples, config
     while batcher_sync_msg.value == 0:
         time.sleep(1)
 
-    # print('[Batcher] Quit current batcher', file=sys.stderr)
+    print('[Batcher] Quit current batcher', file=sys.stderr)
     sys.stderr.flush()
 
 
@@ -480,7 +483,8 @@ class Dataset(object):
 
     def batch_iterator(self, batch_size: int, config: Dict,
                        return_examples=True,
-                       num_readers=2,
+                       num_readers=3,
+                       num_batchers=3,
                        progress=True, train=False, single_batcher=False) -> Iterable[Union[Batch, Dict[str, torch.Tensor]]]:
         if progress:
             it_func = lambda x: tqdm(x, file=sys.stdout)
@@ -490,9 +494,9 @@ class Dataset(object):
         if single_batcher:
             return it_func(self._single_process_batch_iter(batch_size, config, num_readers, train))
         else:
-            return it_func(self._batch_iterator(batch_size, config, num_readers, train, return_examples))
+            return it_func(self._batch_iterator(batch_size, config, num_readers, num_batchers, train, return_examples))
 
-    def _batch_iterator(self, batch_size: int, config: Dict, num_readers=2, train=False, return_examples=True) -> Iterable[Batch]:
+    def _batch_iterator(self, batch_size: int, config: Dict, num_readers, num_batchers, train=False, return_examples=True) -> Iterable[Batch]:
         global batcher_sync_msg
         batcher_sync_msg = multiprocessing.Value('i', 0)
         json_enc_queue = multiprocessing.Queue(maxsize=10000)
@@ -504,8 +508,9 @@ class Dataset(object):
         example_generators = []
         batched_examples_queue = multiprocessing.Queue(maxsize=100)
         for i in range(num_readers):
+            num_consumers = 1 if i == 0 else abs(num_batchers + 1 - num_readers)
             p = multiprocessing.Process(target=example_to_batch,
-                                        args=(json_enc_queue, batched_examples_queue, batch_size, train, 1, 1, config))
+                                        args=(json_enc_queue, batched_examples_queue, batch_size, train, 1, num_consumers, config))
             p.daemon = True
             example_generators.append(p)
 
@@ -514,7 +519,6 @@ class Dataset(object):
 
         batch_queue = torch_mp.Queue(maxsize=100)
         batchers = []
-        num_batchers = num_readers
         for i in range(num_batchers):
             p = torch_mp.Process(target=batch_generator,
                                  args=(batched_examples_queue, batch_queue, return_examples, config))
@@ -535,12 +539,13 @@ class Dataset(object):
                 num_finished_batchers += 1
                 if num_finished_batchers == num_batchers: break
 
+        batched_examples_queue.cancel_join_thread()
         batch_queue.close()
         # print('start joining...')
         batcher_sync_msg.value = 1
         json_loader.join()
         # print('json_loader quitted')
-        for p in example_generators: p.join()
+        for p in example_generators: p.terminate()
         # print('example generators quitted')
         for p in batchers: p.join()
         # print('batchers quiteed')

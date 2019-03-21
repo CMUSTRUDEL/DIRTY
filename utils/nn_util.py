@@ -3,6 +3,9 @@ import numpy as np
 import torch
 
 
+SMALL_NUMBER = 1e-8
+
+
 def glorot_init(params):
     for p in params:
         if len(p.data.size()) > 1:

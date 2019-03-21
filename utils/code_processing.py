@@ -33,8 +33,8 @@ def annotate_type(root: SyntaxNode) -> None:
         if hasattr(node, 'type'):
             type_tokens = [t[1].lstrip('_') for t in Lexer(node.type).get_tokens()]
             type_tokens = [t for t in type_tokens if t not in ('(', ')')]
+            node.named_fields.add('type_tokens')
             setattr(node, 'type_tokens', type_tokens)
-            node.named_fields['type_tokens'] = type_tokens
 
         for child in node.member_nodes:
             _visit(child)

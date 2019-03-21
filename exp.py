@@ -92,8 +92,8 @@ def train(args):
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
         train_set_iter = train_set.batch_iterator(batch_size=batch_size,
                                                   return_examples=False,
-                                                  config=config, progress=True, train=True, num_readers=5,
-                                                  single_batcher=False)
+                                                  config=config, progress=True, train=True,
+                                                  num_readers=config['train']['num_readers'], num_batchers=config['train']['num_batchers'])
         epoch += 1
 
         for batch in train_set_iter:
@@ -133,7 +133,7 @@ def train(args):
         if epoch % evaluate_every_nepoch == 0:
             print(f'[Learner] Perform evaluation', file=sys.stderr)
             t1 = time.time()
-            eval_results = Evaluator.decode_and_evaluate(model, dev_set, batch_size=batch_size)
+            eval_results = Evaluator.decode_and_evaluate(model, dev_set, config)
             print(f'[Learner] Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
 
         model_save_path = os.path.join(work_dir, f'model.iter{train_iter}.bin')

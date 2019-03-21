@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from sentencepiece import SentencePieceProcessor
 
-from model.embedding import SubTokenEmbedder
+from model.embedding import SubTokenEmbedder, NodeTypeEmbedder
 from utils import util
 from utils.ast import AbstractSyntaxTree
 from model.gnn import GatedGraphNeuralNetwork, AdjacencyList
@@ -24,7 +24,9 @@ class GraphASTEncoder(Encoder):
     def __init__(self,
                  gnn: GatedGraphNeuralNetwork,
                  connections: List[str],
-                 sub_token_embedder: SubTokenEmbedder,
+                 node_syntax_type_embedding_size: int,
+                 node_type_embedder: NodeTypeEmbedder,
+                 node_content_embedder: SubTokenEmbedder,
                  vocab: Vocab):
         super(GraphASTEncoder, self).__init__()
 
@@ -33,19 +35,26 @@ class GraphASTEncoder(Encoder):
 
         self.vocab = vocab
         self.grammar = grammar = vocab.grammar
-        self.node_type_embedding = nn.Embedding(len(grammar.syntax_types) + 2, gnn.hidden_size)
-        self.var_node_name_embedding = nn.Embedding(len(vocab.source), gnn.hidden_size, padding_idx=0)
+
+        self.node_syntax_type_embedding = nn.Embedding(len(grammar.syntax_types) + 2, node_syntax_type_embedding_size)
         self.variable_master_node_type_idx = len(grammar.syntax_types)
         self.master_node_type_idx = self.variable_master_node_type_idx + 1
-        self.type_and_content_hybrid = nn.Linear(2 * gnn.hidden_size, gnn.hidden_size)
 
-        self.sub_token_embedder = sub_token_embedder
+        self.var_node_name_embedding = nn.Embedding(len(vocab.source), gnn.hidden_size, padding_idx=0)
+
+        self.node_type_embedder = node_type_embedder
+        self.node_content_embedder = node_content_embedder
+
+        self.type_and_content_hybrid = nn.Linear(node_syntax_type_embedding_size +
+                                                 node_type_embedder.embeddings.embedding_dim +
+                                                 node_content_embedder.embeddings.embedding_dim,
+                                                 gnn.hidden_size, bias=False)
 
         self.config: Dict = None
 
     @property
     def device(self):
-        return self.node_type_embedding.weight.device
+        return self.node_syntax_type_embedding.weight.device
 
     @classmethod
     def default_params(cls):
@@ -57,7 +66,10 @@ class GraphASTEncoder(Encoder):
             },
             'connections': {'top_down', 'bottom_up', 'variable_master_nodes', 'terminals', 'master_node'},
             'vocab_file': None,
-            'bpe_model_path': None
+            'bpe_model_path': None,
+            'node_syntax_type_embedding_size': 64,
+            'node_type_embedding_size': 64,
+            'node_content_embedding_size': 128
         }
 
     @classmethod
@@ -79,11 +91,14 @@ class GraphASTEncoder(Encoder):
                                       num_edge_types=num_edge_types)
 
         vocab = Vocab.load(params['vocab_file'])
-        sub_token_embedder = SubTokenEmbedder(vocab.obj_name.subtoken_model_path, gnn.hidden_size)
+        node_type_embedder = NodeTypeEmbedder(len(vocab.grammar.variable_types), params['node_type_embedding_size'])
+        node_content_embedder = SubTokenEmbedder(vocab.obj_name.subtoken_model_path, params['node_content_embedding_size'])
 
         model = cls(gnn,
                     params['connections'],
-                    sub_token_embedder,
+                    params['node_syntax_type_embedding_size'],
+                    node_type_embedder,
+                    node_content_embedder,
                     vocab)
         model.config = params
 
@@ -206,15 +221,18 @@ class GraphASTEncoder(Encoder):
         variable_master_node_type_idx = len(grammar.syntax_types)
         master_node_type_idx = variable_master_node_type_idx + 1
 
-        node_type_indices = torch.zeros(packed_graph.size, dtype=torch.long)
+        node_syntax_type_indices = torch.zeros(packed_graph.size, dtype=torch.long)
         var_node_name_indices = torch.zeros(packed_graph.size, dtype=torch.long)
         tree_node_to_tree_id_map = torch.zeros(packed_graph.size, dtype=torch.long)
 
         sub_tokens_list = []
         node_with_subtokens_indices = []
+        node_type_tokens_list = [0 for _ in range(packed_graph.size)]
 
         for i, (ast_id, group, node_key) in enumerate(packed_graph.nodes.values()):
             ast = packed_graph.trees[ast_id]
+
+            node_type_tokens = []
             if group == 'ast_nodes':
                 node = ast.id_to_node[node_key]
                 type_idx = grammar.syntax_type_to_id[node.node_type]
@@ -224,9 +242,13 @@ class GraphASTEncoder(Encoder):
                 # function root with type `block` also has an name entry storing the name of the function
                 if node.node_type == 'obj' or node.node_type == 'block' and hasattr(node, 'name'):
                     # compute variable embedding
-                    node_sub_tokes = obj_name_bpe_model.encode_as_ids(node.name)
-                    sub_tokens_list.append(node_sub_tokes)
+                    node_sub_tokens = obj_name_bpe_model.encode_as_ids(node.name)
+                    sub_tokens_list.append(node_sub_tokens)
                     node_with_subtokens_indices.append(i)
+
+                if hasattr(node, 'type_tokens'):
+                    node_type_tokens = [vocab.grammar.variable_type_to_id(t) for t in node.type_tokens]
+
             elif group == 'variable_master_nodes':
                 type_idx = variable_master_node_type_idx
                 var_node_name_indices[i] = vocab.source[node_key]
@@ -236,7 +258,8 @@ class GraphASTEncoder(Encoder):
                 raise ValueError()
 
             tree_node_to_tree_id_map[i] = ast_id
-            node_type_indices[i] = type_idx
+            node_syntax_type_indices[i] = type_idx
+            node_type_tokens_list[i] = node_type_tokens
 
         sub_tokens_indices = None
         if node_with_subtokens_indices:
@@ -248,26 +271,34 @@ class GraphASTEncoder(Encoder):
 
             sub_tokens_indices = torch.from_numpy(sub_tokens_indices)
 
+        max_typetoken_num = max(len(x) for x in node_type_tokens_list)
+        node_type_indices = np.zeros((len(node_type_tokens_list), max_typetoken_num), dtype=np.int64)
+        for i, type_ids in enumerate(node_type_tokens_list):
+            node_type_indices[i, :len(type_ids)] = type_ids
+        node_type_indices = torch.from_numpy(node_type_indices)
+
         return dict(
             tree_num=packed_graph.tree_num,
-            node_type_indices=torch.tensor(node_type_indices, dtype=torch.long),
-            var_node_name_indices=torch.tensor(var_node_name_indices, dtype=torch.long),
+            node_syntax_type_indices=node_syntax_type_indices,
+            node_type_indices=node_type_indices,
+            var_node_name_indices=var_node_name_indices,
             node_with_subtokens_indices=torch.tensor(node_with_subtokens_indices, dtype=torch.long),
             sub_tokens_indices=sub_tokens_indices,
             tree_node_to_tree_id_map=tree_node_to_tree_id_map
         )
 
     def get_batched_tree_init_encoding(self, tensor_dict: Dict[str, torch.Tensor]) -> torch.Tensor:
-        node_type_embedding = self.node_type_embedding(tensor_dict['node_type_indices'])
+        node_syntax_type_embedding = self.node_syntax_type_embedding(tensor_dict['node_syntax_type_indices'])
+        node_type_embedding = self.node_type_embedder(tensor_dict['node_type_indices'])
         node_content_embedding = self.var_node_name_embedding(tensor_dict['var_node_name_indices']) * \
             torch.ne(tensor_dict['var_node_name_indices'], 0.).float().unsqueeze(-1)
 
         if tensor_dict['node_with_subtokens_indices'].size(0) > 0:
-            obj_node_content_embedding = self.sub_token_embedder(tensor_dict['sub_tokens_indices'])
+            obj_node_content_embedding = self.node_content_embedder(tensor_dict['sub_tokens_indices'])
             node_content_embedding = node_content_embedding.scatter(0, tensor_dict['node_with_subtokens_indices'].unsqueeze(-1).expand_as(obj_node_content_embedding),
                                                                     obj_node_content_embedding)
 
-        tree_node_embedding = self.type_and_content_hybrid(torch.cat([node_type_embedding, node_content_embedding], dim=-1))
+        tree_node_embedding = self.type_and_content_hybrid(torch.cat([node_syntax_type_embedding, node_type_embedding, node_content_embedding], dim=-1))
 
         return tree_node_embedding
 

@@ -52,6 +52,7 @@ def example_generator(json_queue, example_queue, consumer_num=1):
             canonicalize_constants(root)
             # add function name to the name field of the root block
             root.name = tree_json_dict['function']
+            root.named_fields.add('name')
 
             new_json_dict = root.to_json_dict()
             tree_json_dict['ast'] = new_json_dict

@@ -18,11 +18,11 @@ class SyntaxNode(object):
         self.address = address
         self.children = []
         self.parent = None
-        self.named_fields = OrderedDict()
+        self.named_fields = set()  # used as a ordered set
 
         if named_fields:
             for field_name, field_val in named_fields.items():
-                self.named_fields[field_name] = field_val
+                self.named_fields.add(field_name)
                 setattr(self, field_name, field_val)
 
         if children:
@@ -64,7 +64,8 @@ class SyntaxNode(object):
                          node_type=self.node_type,
                          address=self.address)
 
-        for named_filed, val in self.named_fields.items():
+        for named_filed in self.named_fields:
+            val = getattr(self, named_filed)
             if named_filed in ('x', 'y', 'z'):
                 json_dict[named_filed] = val.to_json_dict()
             else:
@@ -162,7 +163,8 @@ class SyntaxNode(object):
             sb = StringIO()
 
         sb.write(f'(Node{self.node_id}-{self.node_type}')
-        for key, val in self.named_fields.items():
+        for key in self.named_fields:
+            val = getattr(self, key)
             if key not in ('x', 'y', 'z'):
                 sb.write('-')
                 sb.write(f'{key}:{val}'.replace(' ', '_').replace('(', '_').replace(')', '_'))

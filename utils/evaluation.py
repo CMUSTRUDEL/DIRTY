@@ -17,26 +17,33 @@ class Evaluator(object):
         acc = float(pred_name == gold_name)
 
         return dict(edit_distance=edit_distance,
-                    character_error_rate=cer,
+                    ref_len=len(gold_name),
+                    cer=cer,
                     accuracy=acc)
 
     @staticmethod
     def average(metrics_list: List[Dict]) -> Dict:
-        avg_results = dict()
+        agg_results = dict()
         for metrics in metrics_list:
             for key, val in metrics.items():
-                avg_results.setdefault(key, []).append(val)
+                agg_results.setdefault(key, []).append(val)
 
-        for key in avg_results.keys():
+        avg_results = dict()
+        avg_results['corpus_cer'] = sum(agg_results['edit_distance']) / sum(agg_results['ref_len'])
+
+        for key, val in agg_results.items():
             val = avg_results[key]
             avg_results[key] = np.average(val)
 
         return avg_results
 
     @staticmethod
-    def decode_and_evaluate(model: RenamingModel, dataset: Dataset, batch_size=2048, return_results=False):
-        data_iter = dataset.batch_iterator(batch_size=batch_size, train=False, progress=True,
-                                           config=model.config, num_readers=2)
+    def decode_and_evaluate(model: RenamingModel, dataset: Dataset, config: Dict, return_results=False):
+        data_iter = dataset.batch_iterator(batch_size=config['train']['batch_size'],
+                                           train=False, progress=True,
+                                           config=model.config,
+                                           num_readers=config['train']['num_readers'],
+                                           num_batchers=config['train']['num_batchers'])
 
         was_training = model.training
         model.eval()
