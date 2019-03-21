@@ -157,11 +157,11 @@ def test(args):
     model.eval()
 
     test_set = Dataset(test_set_path)
-    eval_results = Evaluator.decode_and_evaluate(model, test_set, batch_size=4096, return_results=False)
+    eval_results, decode_results = Evaluator.decode_and_evaluate(model, test_set, model.config, return_results=True)
 
     print(eval_results, file=sys.stderr)
-    #
-    # pickle.dump(decode_results, open(args['MODEL_FILE'] + '.eval_results.bin', 'wb'))
+
+    pickle.dump(decode_results, open(args['MODEL_FILE'] + f'.{test_set_path.split("/")[-1]}.decode_results.bin', 'wb'))
 
 
 if __name__ == '__main__':
