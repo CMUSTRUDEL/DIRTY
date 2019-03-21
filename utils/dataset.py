@@ -7,9 +7,13 @@ import ujson as json
 import tarfile
 from typing import Iterable, List, Dict, Union, Tuple
 import multiprocessing
+import threading
+import queue
 
 from tqdm import tqdm
 import numpy as np
+
+from utils import nn_util
 from utils.ast import AbstractSyntaxTree, SyntaxNode
 from utils.code_processing import annotate_type
 from utils.graph import PackedGraph
@@ -94,6 +98,9 @@ class Batcher(object):
 
         tensor_dict['batch_size'] = len(source_asts)
         tensor_dict['packed_graph_size'] = packed_graph.size
+
+        num_elements = nn_util.get_tensor_dict_size(tensor_dict)
+        tensor_dict['num_elements'] = num_elements
 
         return tensor_dict
 
@@ -335,8 +342,9 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
 
         for batch_examples in batches:
             batch = batcher.to_batch(batch_examples)
-            while batched_examples_queue.qsize() > 100:
-                time.sleep(10)
+            # while batched_examples_queue.qsize() > 100:
+            #     time.sleep(10)
+            # print(batch.tensor_dict['num_elements'])
             batched_examples_queue.put(batch)
             # print(f'[ExampleToBatch] batched examples queue size {batched_examples_queue.qsize()}', file=sys.stderr)
 
@@ -416,6 +424,21 @@ def batch_generator(batched_examples_queue, batch_queue, return_examples, config
 
     print('[Batcher] Quit current batcher', file=sys.stderr)
     sys.stderr.flush()
+
+
+def worker_manager(worker_result_queue, out_queue, num_workers):
+    num_finished_workers = 0
+    while True:
+        t0 = time.time()
+        batch = worker_result_queue.get()
+        print(f'[LocalWorkerManager] {time.time() - t0} took to load a batch, size={worker_result_queue.qsize()}', file=sys.stderr)
+        if batch is not None:
+            out_queue.put(batch)
+        else:
+            num_finished_workers += 1
+            if num_finished_workers == num_workers: break
+
+    out_queue.put(None)
 
 
 class Dataset(object):
@@ -511,35 +534,38 @@ class Dataset(object):
                                                     train, False))
         json_loader.daemon = True
         example_generators = []
-        batch_queue = torch_mp.Queue(maxsize=1000)
+        worker_result_queue = torch_mp.Queue(maxsize=200)
         for i in range(num_readers):
             p = multiprocessing.Process(target=example_to_batch,
-                                        args=(json_enc_queue, batch_queue, batch_size, train, config))
+                                        args=(json_enc_queue, worker_result_queue, batch_size, train, config))
             p.daemon = True
             example_generators.append(p)
 
         json_loader.start()
         for p in example_generators: p.start()
 
-        num_finished_batchers = 0
+        batch_queue = queue.Queue()
+        worker_manager_thread = threading.Thread(target=worker_manager, args=(worker_result_queue, batch_queue, num_readers))
+        worker_manager_thread.start()
+
         while True:
             # t1 = time.time()
+            main_process_queue_get_lock = 1
             batch = batch_queue.get()
-            print(f'[Dataset] Batch queue size {batch_queue.qsize()}', file=sys.stderr)
+            print(f'[MainThread] local batch queue size {batch_queue.qsize()}', file=sys.stderr)
             # print(f'{time.time() - t1} took to load a batch', file=sys.stderr)
-            if batch is not None:
-                yield batch
+            if batch is None:
+                break
             else:
-                # print('One batcher finished!', file=sys.stderr)
-                num_finished_batchers += 1
-                if num_finished_batchers == num_batchers: break
+                yield batch
 
-        batch_queue.close()
+        worker_result_queue.close()
         # print('start joining...')
         batcher_sync_msg.value = 1
         json_loader.join()
         # print('json_loader quitted')
         for p in example_generators: p.join()
+        worker_manager_thread.join()
         # print('example generators quitted')
         # print('batchers quiteed')
         sys.stdout.flush()

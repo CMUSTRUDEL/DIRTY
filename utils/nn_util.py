@@ -46,3 +46,18 @@ def batch_iter(data, batch_size, shuffle=False):
         examples = [data[idx] for idx in indices]
 
         yield examples
+
+
+def get_tensor_dict_size(tensor_dict):
+    total_num_elements = 0
+    for key, val in tensor_dict.items():
+        if isinstance(val, dict):
+            num_elements = get_tensor_dict_size(val)
+        elif torch.is_tensor(val):
+            num_elements = val.nelement()
+        else:
+            num_elements = 0
+
+        total_num_elements += num_elements
+
+    return total_num_elements
