@@ -29,6 +29,11 @@ import torch.multiprocessing as torch_mp
 batcher_sync_msg = None
 
 
+import resource
+rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
+
+
 class Example(object):
     def __init__(self, ast: AbstractSyntaxTree, variable_name_map: dict, **kwargs):
         self.ast = ast
@@ -311,7 +316,7 @@ def train_example_sort_key(example):
     return example.target_prediction_seq_length
 
 
-def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config):
+def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config, worker_manager_lock):
     batcher = Batcher(config, return_examples=not train)
     tgt_bpe_model = batcher.vocab.target.subtoken_model
     vocab = batcher.vocab
@@ -345,6 +350,8 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
             # while batched_examples_queue.qsize() > 100:
             #     time.sleep(10)
             # print(batch.tensor_dict['num_elements'])
+            while worker_manager_lock.value == 1:
+                time.sleep(0.2)
             batched_examples_queue.put(batch)
             # print(f'[ExampleToBatch] batched examples queue size {batched_examples_queue.qsize()}', file=sys.stderr)
 
@@ -426,17 +433,44 @@ def batch_generator(batched_examples_queue, batch_queue, return_examples, config
     sys.stderr.flush()
 
 
-def worker_manager(worker_result_queue, out_queue, num_workers):
+def worker_manager(worker_result_queue, out_queue, num_workers, worker_manager_lock, buffer_size):
     num_finished_workers = 0
+    patience = 0
+    prev_queue_size = -1
+
     while True:
-        t0 = time.time()
-        batch = worker_result_queue.get()
-        print(f'[LocalWorkerManager] {time.time() - t0} took to load a batch, size={worker_result_queue.qsize()}', file=sys.stderr)
-        if batch is not None:
-            out_queue.put(batch)
+        finished = False
+        # t0 = time.time()
+        queue_size = worker_result_queue.qsize()
+        print(f'[LocalWorkerManager] queue size={queue_size}, patience={patience}', file=sys.stderr)
+        if queue_size > buffer_size or patience >= 10:
+            worker_manager_lock.value = 1
+            patience = 0
+            print(f'[LocalWorkerManager] start loading {queue_size} batches...', file=sys.stderr)
+
+            i = 0
+            while not worker_result_queue.empty() and i < buffer_size:
+                batch = worker_result_queue.get()
+
+                # print(f'[LocalWorkerManager] {time.time() - t0} took to load a batch, size={worker_result_queue.qsize()}', file=sys.stderr)
+                if batch is not None:
+                    out_queue.put(batch)
+                else:
+                    num_finished_workers += 1
+                    if num_finished_workers == num_workers:
+                        finished = True
+                        break
+                i += 1
+
+            print(f'[LocalWorkerManager] loaded {i} batches...', file=sys.stderr)
+            worker_manager_lock.value = 0
         else:
-            num_finished_workers += 1
-            if num_finished_workers == num_workers: break
+            if queue_size == prev_queue_size:
+                patience += 1
+
+        prev_queue_size = queue_size
+        time.sleep(0.2)
+        if finished: break
 
     out_queue.put(None)
 
@@ -528,6 +562,7 @@ class Dataset(object):
         global batcher_sync_msg
         batcher_sync_msg = multiprocessing.Value('i', 0)
         json_enc_queue = multiprocessing.Queue(maxsize=10000)
+        worker_manager_lock = multiprocessing.Value('i', 0)
 
         json_loader = multiprocessing.Process(target=json_line_reader,
                                               args=(self.file_paths, json_enc_queue, num_readers,
@@ -537,7 +572,7 @@ class Dataset(object):
         worker_result_queue = torch_mp.Queue(maxsize=200)
         for i in range(num_readers):
             p = multiprocessing.Process(target=example_to_batch,
-                                        args=(json_enc_queue, worker_result_queue, batch_size, train, config))
+                                        args=(json_enc_queue, worker_result_queue, batch_size, train, config, worker_manager_lock))
             p.daemon = True
             example_generators.append(p)
 
@@ -545,7 +580,7 @@ class Dataset(object):
         for p in example_generators: p.start()
 
         batch_queue = queue.Queue()
-        worker_manager_thread = threading.Thread(target=worker_manager, args=(worker_result_queue, batch_queue, num_readers))
+        worker_manager_thread = threading.Thread(target=worker_manager, args=(worker_result_queue, batch_queue, num_readers, worker_manager_lock, 100))
         worker_manager_thread.start()
 
         while True:
