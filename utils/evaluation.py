@@ -32,7 +32,6 @@ class Evaluator(object):
         avg_results['corpus_cer'] = sum(agg_results['edit_distance']) / sum(agg_results['ref_len'])
 
         for key, val in agg_results.items():
-            val = avg_results[key]
             avg_results[key] = np.average(val)
 
         return avg_results
