@@ -442,8 +442,8 @@ def worker_manager(worker_result_queue, out_queue, num_workers, worker_manager_l
         finished = False
         # t0 = time.time()
         queue_size = worker_result_queue.qsize()
-        print(f'[LocalWorkerManager] queue size={queue_size}, patience={patience}', file=sys.stderr)
-        if queue_size > buffer_size or patience >= 10:
+        # print(f'[LocalWorkerManager] queue size={queue_size}, patience={patience}', file=sys.stderr)
+        if (queue_size > buffer_size or patience >= 10) and out_queue.qsize() < buffer_size:
             worker_manager_lock.value = 1
             patience = 0
             print(f'[LocalWorkerManager] start loading {queue_size} batches...', file=sys.stderr)
@@ -587,7 +587,7 @@ class Dataset(object):
             # t1 = time.time()
             main_process_queue_get_lock = 1
             batch = batch_queue.get()
-            print(f'[MainThread] local batch queue size {batch_queue.qsize()}', file=sys.stderr)
+            # print(f'[MainThread] local batch queue size {batch_queue.qsize()}', file=sys.stderr)
             # print(f'{time.time() - t1} took to load a batch', file=sys.stderr)
             if batch is None:
                 break
