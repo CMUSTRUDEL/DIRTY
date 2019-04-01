@@ -28,6 +28,7 @@ import torch.multiprocessing as torch_mp
 
 batcher_sync_msg = None
 
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 import resource
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -80,18 +81,10 @@ class Batcher(object):
         if examples:
             source_asts = [e.ast for e in examples]
 
-        packed_graph = GraphASTEncoder.to_packed_graph(source_asts,
-                                                       connections=self.config['encoder']['connections'])
+        packed_graph, graph_tensor_dict = GraphASTEncoder.to_packed_graph(source_asts,
+                                                                          connections=self.config['encoder']['connections'])
 
-        tensor_dict = {'adj_lists': packed_graph.adj_lists,
-                       'variable_master_node_restoration_indices': packed_graph.variable_master_node_restoration_indices,
-                       'variable_master_node_restoration_indices_mask': packed_graph.variable_master_node_restoration_indices_mask,
-                       'variable_master_node_ids': [_id for node, _id in
-                                                    packed_graph.get_nodes_by_group('variable_master_nodes')]}
-
-        packed_graph.adj_lists = None
-        packed_graph.variable_master_node_restoration_indices = None
-        packed_graph.variable_master_node_restoration_indices_mask = None
+        tensor_dict = graph_tensor_dict
 
         _tensors = GraphASTEncoder.to_tensor_dict(packed_graph,
                                                   self.grammar, self.vocab)

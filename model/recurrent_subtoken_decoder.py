@@ -85,14 +85,12 @@ class RecurrentSubtokenDecoder(Decoder):
         return h_t, q_t, None
 
     def forward(self, src_ast_encoding, prediction_target):
-        # (prediction_node_num, encoding_size)
-        variable_master_node_encoding = src_ast_encoding['variable_master_node_encoding']
         # (batch_size, max_time_step)
         variable_encoding_restoration_indices = prediction_target['variable_encoding_restoration_indices']
         variable_encoding_restoration_indices_mask = prediction_target['variable_encoding_restoration_indices_mask']
 
         # (batch_size, max_time_step, encoding_size)
-        variable_encoding = variable_master_node_encoding[variable_encoding_restoration_indices]
+        variable_encoding = src_ast_encoding['variable_encoding'][variable_encoding_restoration_indices]
         # (batch_size, max_time_step, encoding_size)
         variable_tgt_name_id = prediction_target['variable_tgt_name_id']
 
@@ -172,13 +170,12 @@ class RecurrentSubtokenDecoder(Decoder):
         h_tm1 = h_0 = self.get_init_state(context_encoding)
 
         # (variable_master_node_num, encoding_size)
-        variable_master_node_encoding = context_encoding['variable_master_node_encoding']
-        encoding_size = variable_master_node_encoding.size(1)
-        # (batch_size, variable_master_node_num)
-        variable_master_node_restoration_indices = context_encoding['variable_master_node_restoration_indices']
+        variable_encoding = context_encoding['variable_encoding']
+        encoding_size = variable_encoding.size(1)
 
+        # Note that we are using the `restoration_indices` from `context_encoding`, which is the word-level restoration index
         # (batch_size, variable_master_node_num, encoding_size)
-        variable_master_node_encoding = variable_master_node_encoding[variable_master_node_restoration_indices]
+        variable_encoding = variable_encoding[context_encoding['variable_encoding_restoration_indices']]
         # (batch_size, encoding_size)
         variable_name_embed_tm1 = att_tm1 = torch.zeros(len(source_asts), self.lstm_cell.hidden_size, device=self.device)
 
@@ -186,9 +183,9 @@ class RecurrentSubtokenDecoder(Decoder):
         for t in range(0, max_prediction_time_step):
             # (total_live_hyp_num, encoding_size)
             if t > 0:
-                variable_encoding_t = variable_master_node_encoding[hyp_ast_ids_t, hyp_variable_ptrs_t]
+                variable_encoding_t = variable_encoding[hyp_ast_ids_t, hyp_variable_ptrs_t]
             else:
-                variable_encoding_t = variable_master_node_encoding[:, 0]
+                variable_encoding_t = variable_encoding[:, 0]
 
             if self.config['input_feed']:
                 x = torch.cat([variable_encoding_t, variable_name_embed_tm1, att_tm1], dim=-1)

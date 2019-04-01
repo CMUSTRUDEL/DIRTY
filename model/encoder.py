@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import pickle
 
 import torch
@@ -62,9 +62,9 @@ class GraphASTEncoder(Encoder):
             'gnn': {
                 'hidden_size': 128,
                 'layer_timesteps': [8],
-                'residual_connections': {0: [0]}
+                'residual_connections': {'0': [0]}
             },
-            'connections': {'top_down', 'bottom_up', 'variable_master_nodes', 'terminals', 'master_node'},
+            'connections': {'top_down', 'bottom_up', 'variable_master_nodes', 'terminals', 'master_node', 'self_loop'},
             'vocab_file': None,
             'bpe_model_path': None,
             'node_syntax_type_embedding_size': 64,
@@ -82,7 +82,8 @@ class GraphASTEncoder(Encoder):
             'bottom_up': 1,
             'variable_master_nodes': 2,
             'terminals': 2,
-            'master_node': 2
+            'master_node': 2,
+            'var_usage': 2
         }
         num_edge_types = sum(connection2edge_type[key] for key in connections)
         gnn = GatedGraphNeuralNetwork(hidden_size=params['gnn']['hidden_size'],
@@ -111,34 +112,50 @@ class GraphASTEncoder(Encoder):
         tree_node_encoding = self.gnn.compute_node_representations(initial_node_representation=tree_node_init_encoding,
                                                                    adjacency_lists=tensor_dict['adj_lists'])
 
-        variable_master_node_ids = tensor_dict['variable_master_node_ids']
+        connections = self.config['connections']
 
-        variable_master_node_encoding = tree_node_encoding[variable_master_node_ids]
+        if 'variable_master_nodes' in connections:
+            variable_master_node_ids = tensor_dict['variable_master_node_ids']
+            variable_encoding = tree_node_encoding[variable_master_node_ids]
+        else:
+            var_nodes_encoding = tree_node_encoding[tensor_dict['variable_node_ids']]
+            variable_num = tensor_dict['variable_mention_nums'].size(0)
+            variable_encoding = torch.zeros(variable_num, var_nodes_encoding.size(-1), device=self.device)
+            var_nodes_encoding_sum = variable_encoding.scatter_add_(0, tensor_dict['variable_node_variable_ids'].unsqueeze(-1).expand_as(var_nodes_encoding), var_nodes_encoding)
+            variable_encoding = var_nodes_encoding_sum / tensor_dict['variable_mention_nums'].unsqueeze(-1)
 
         context_encoding = dict(
             tree_node_init_encoding=tree_node_init_encoding,
             packed_tree_node_encoding=tree_node_encoding,
-            variable_master_node_encoding=variable_master_node_encoding,
+            variable_encoding=variable_encoding,
             tree_num=tensor_dict['tree_num'],
             tree_node_to_tree_id_map=tensor_dict['tree_node_to_tree_id_map'],
-            variable_master_node_restoration_indices=tensor_dict['variable_master_node_restoration_indices'],
-            variable_master_node_restoration_indices_mask=tensor_dict['variable_master_node_restoration_indices_mask']
+            variable_encoding_restoration_indices=tensor_dict['variable_encoding_restoration_indices'],
+            variable_encoding_restoration_indices_mask=tensor_dict['variable_encoding_restoration_indices_mask']
         )
 
         return context_encoding
 
+    # noinspection PyUnboundLocalVariable
     @classmethod
-    def to_packed_graph(cls, asts: List[AbstractSyntaxTree], connections: List) -> PackedGraph:
+    def to_packed_graph(cls, asts: List[AbstractSyntaxTree], connections: List) -> Tuple[PackedGraph, Dict]:
         packed_graph = PackedGraph(asts)
+        max_variable_num = max(len(ast.variables) for ast in asts)
 
         node_adj_list = []
         terminal_nodes_adj_list = []
         master_node_adj_list = []
         var_master_nodes_adj_list = []
+        var_usage_adj_list = []
 
-        max_variable_num = max(len(ast.variables) for ast in asts)
-        var_master_node_restoration_indices = torch.zeros(len(asts), max_variable_num, dtype=torch.long)
-        var_master_node_restoration_indices_mask = torch.zeros(len(asts), max_variable_num)
+        var_node_ids = []  # list of node ids of variable mentions
+        var_node_variable_ids = []
+        var_mention_nums = []  # list of number of mentions for each variable
+
+        use_variable_master_node = 'variable_master_nodes' in connections
+        variable_repr_restoration_indices = torch.zeros(len(asts), max_variable_num, dtype=torch.long)
+        variable_repr_restoration_indices_mask = torch.zeros(len(asts), max_variable_num)
+        variable_cum_count = 0
 
         for ast_id, ast in enumerate(asts):
             for prev_node, succ_node in ast.adjacency_list:
@@ -166,20 +183,33 @@ class GraphASTEncoder(Encoder):
                     for node in ast
                 ])
 
-            # add prediction node to packed graph
             for i, (var_name, var_nodes) in enumerate(ast.variables.items()):
-                var_master_node_id, node_id_in_group = packed_graph.register_node(ast_id, var_name,
-                                                                                  group='variable_master_nodes',
-                                                                                  return_node_index_in_group=True)
+                var_node_num = len(var_nodes)
+                # add data flow links
+                if 'var_usage' in connections:
+                    for _idx in range(len(var_nodes) - 1):
+                        _var_node, _next_var_node = var_nodes[_idx], var_nodes[_idx + 1]
+                        var_usage_adj_list.append((packed_graph.get_packed_node_id(ast_id, _var_node), packed_graph.get_packed_node_id(ast_id, _next_var_node)))
 
-                var_master_node_restoration_indices[ast_id, i] = node_id_in_group
+                if use_variable_master_node:
+                    var_master_node_id, node_id_in_group = packed_graph.register_node(ast_id, var_name,
+                                                                                      group='variable_master_nodes',
+                                                                                      return_node_index_in_group=True)
 
-                var_master_nodes_adj_list.extend([(
-                    var_master_node_id, packed_graph.get_packed_node_id(ast_id, node))
-                    for node in var_nodes
-                ])
+                    var_master_nodes_adj_list.extend([(
+                        var_master_node_id, packed_graph.get_packed_node_id(ast_id, node))
+                        for node in var_nodes
+                    ])
+                else:
+                    var_node_packed_ids = [packed_graph.get_packed_node_id(ast_id, node) for node in var_nodes]
+                    var_node_ids.extend(var_node_packed_ids)
+                    var_node_variable_ids.extend([variable_cum_count] * var_node_num)
+                    var_mention_nums.append(var_node_num)
 
-            var_master_node_restoration_indices_mask[ast_id, :len(ast.variables)] = 1.
+                variable_repr_restoration_indices[ast_id, i] = variable_cum_count
+                variable_cum_count += 1
+
+            variable_repr_restoration_indices_mask[ast_id, :len(ast.variables)] = 1.
 
         adj_lists = []
         if 'top_down' in connections:
@@ -191,6 +221,10 @@ class GraphASTEncoder(Encoder):
             reversed_var_master_nodes_adj_list = [(n2, n1) for n1, n2 in var_master_nodes_adj_list]
             adj_lists.append(master_node_adj_list)
             adj_lists.append(reversed_var_master_nodes_adj_list)
+        if 'var_usage' in connections:
+            reversed_var_usage_adj_list = [(n2, n1) for n1, n2 in var_usage_adj_list]
+            adj_lists.append(var_usage_adj_list)
+            adj_lists.append(reversed_var_usage_adj_list)
         if 'terminals' in connections:
             reversed_terminal_nodes_adj_list = [(n2, n1) for n1, n2 in terminal_nodes_adj_list]
             adj_lists.append(terminal_nodes_adj_list)
@@ -199,16 +233,26 @@ class GraphASTEncoder(Encoder):
             reversed_master_node_adj_list = [(n2, n1) for n1, n2 in master_node_adj_list]
             adj_lists.append(master_node_adj_list)
             adj_lists.append(reversed_master_node_adj_list)
+        # if 'self_loop' in connections:
+        #     self_loop_adj_list = [(n, n) for n in packed_graph.get_nodes_by_group('ast')]
 
         adj_lists = [
             AdjacencyList(adj_list=adj_list, node_num=packed_graph.size) for adj_list in adj_lists
         ]
 
-        packed_graph.adj_lists = adj_lists
-        packed_graph.variable_master_node_restoration_indices = var_master_node_restoration_indices
-        packed_graph.variable_master_node_restoration_indices_mask = var_master_node_restoration_indices_mask
+        tensor_dict = {'adj_lists': adj_lists,
+                       'variable_encoding_restoration_indices': variable_repr_restoration_indices,
+                       'variable_encoding_restoration_indices_mask': variable_repr_restoration_indices_mask}
 
-        return packed_graph
+        if use_variable_master_node:
+            tensor_dict['variable_master_node_ids'] = [_id for node, _id in
+                                                       packed_graph.get_nodes_by_group('variable_master_nodes')]
+        else:
+            tensor_dict['variable_node_ids'] = torch.tensor(var_node_ids)
+            tensor_dict['variable_node_variable_ids'] = torch.tensor(var_node_variable_ids)
+            tensor_dict['variable_mention_nums'] = torch.tensor(var_mention_nums, dtype=torch.float)
+
+        return packed_graph, tensor_dict
 
     @classmethod
     def to_tensor_dict(cls, packed_graph: PackedGraph,
