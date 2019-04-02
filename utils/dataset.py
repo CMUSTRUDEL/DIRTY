@@ -439,7 +439,7 @@ def worker_manager(worker_result_queue, out_queue, num_workers, worker_manager_l
         if (queue_size > buffer_size or patience >= 10) and out_queue.qsize() < buffer_size:
             worker_manager_lock.value = 1
             patience = 0
-            print(f'[LocalWorkerManager] start loading {queue_size} batches...', file=sys.stderr)
+            # print(f'[LocalWorkerManager] start loading {queue_size} batches...', file=sys.stderr)
 
             i = 0
             while not worker_result_queue.empty() and i < buffer_size:
@@ -455,7 +455,7 @@ def worker_manager(worker_result_queue, out_queue, num_workers, worker_manager_l
                         break
                 i += 1
 
-            print(f'[LocalWorkerManager] loaded {i} batches...', file=sys.stderr)
+            # print(f'[LocalWorkerManager] loaded {i} batches...', file=sys.stderr)
             worker_manager_lock.value = 0
         else:
             if queue_size == prev_queue_size:
