@@ -22,7 +22,7 @@ from multiprocessing import Process
 import numpy as np
 
 from utils.ast import SyntaxNode
-from utils.code_processing import canonicalize_code, annotate_type, canonicalize_constants
+from utils.code_processing import canonicalize_code, annotate_type, canonicalize_constants, preprocess_ast
 from utils.dataset import Example, json_line_reader
 from tqdm import tqdm
 
@@ -48,8 +48,8 @@ def example_generator(json_queue, example_queue, consumer_num=1):
             # root_reconstr = SyntaxNode.from_json_dict(root.to_json_dict())
             # assert root == root_reconstr
 
-            annotate_type(root)
-            canonicalize_constants(root)
+            preprocess_ast(root, code=tree_json_dict['raw_code'])
+
             # add function name to the name field of the root block
             root.name = tree_json_dict['function']
             root.named_fields.add('name')

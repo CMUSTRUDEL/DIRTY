@@ -64,7 +64,7 @@ class GraphASTEncoder(Encoder):
                 'layer_timesteps': [8],
                 'residual_connections': {'0': [0]}
             },
-            'connections': {'top_down', 'bottom_up', 'variable_master_nodes', 'terminals', 'master_node', 'self_loop'},
+            'connections': {'top_down', 'bottom_up', 'variable_master_nodes', 'terminals', 'master_node', 'func_root_to_arg'},
             'vocab_file': None,
             'bpe_model_path': None,
             'node_syntax_type_embedding_size': 64,
@@ -83,7 +83,8 @@ class GraphASTEncoder(Encoder):
             'variable_master_nodes': 2,
             'terminals': 2,
             'master_node': 2,
-            'var_usage': 2
+            'var_usage': 2,
+            'func_root_to_arg': 1
         }
         num_edge_types = sum(connection2edge_type[key] for key in connections)
         gnn = GatedGraphNeuralNetwork(hidden_size=params['gnn']['hidden_size'],
@@ -147,6 +148,7 @@ class GraphASTEncoder(Encoder):
         master_node_adj_list = []
         var_master_nodes_adj_list = []
         var_usage_adj_list = []
+        func_root_to_arg_adj_list = []
 
         var_node_ids = []  # list of node ids of variable mentions
         var_node_variable_ids = []
@@ -191,6 +193,11 @@ class GraphASTEncoder(Encoder):
                         _var_node, _next_var_node = var_nodes[_idx], var_nodes[_idx + 1]
                         var_usage_adj_list.append((packed_graph.get_packed_node_id(ast_id, _var_node), packed_graph.get_packed_node_id(ast_id, _next_var_node)))
 
+                if 'func_root_to_arg' in connections and var_nodes[0].is_arg:
+                    func_root_node_id = packed_graph.get_packed_node_id(ast_id, ast.root)
+                    for var_node in var_nodes:
+                        func_root_to_arg_adj_list.append((func_root_node_id, packed_graph.get_packed_node_id(ast_id, var_node)))
+
                 if use_variable_master_node:
                     var_master_node_id, node_id_in_group = packed_graph.register_node(ast_id, var_name,
                                                                                       group='variable_master_nodes',
@@ -225,6 +232,8 @@ class GraphASTEncoder(Encoder):
             reversed_var_usage_adj_list = [(n2, n1) for n1, n2 in var_usage_adj_list]
             adj_lists.append(var_usage_adj_list)
             adj_lists.append(reversed_var_usage_adj_list)
+        if 'func_root_to_arg' in connections:
+            adj_lists.append(func_root_to_arg_adj_list)
         if 'terminals' in connections:
             reversed_terminal_nodes_adj_list = [(n2, n1) for n1, n2 in terminal_nodes_adj_list]
             adj_lists.append(terminal_nodes_adj_list)
