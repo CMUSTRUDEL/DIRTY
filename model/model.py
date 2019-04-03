@@ -9,6 +9,7 @@ from utils import nn_util, util
 from utils.ast import AbstractSyntaxTree
 from model.decoder import Decoder
 from model.recurrent_subtoken_decoder import RecurrentSubtokenDecoder
+from model.attentional_recurrent_subtoken_decoder import AttentionalRecurrentSubtokenDecoder
 from model.recurrent_decoder import RecurrentDecoder
 from model.simple_decoder import SimpleDecoder
 from model.encoder import Encoder, GraphASTEncoder

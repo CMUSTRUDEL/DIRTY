@@ -11,152 +11,36 @@ from utils import util, nn_util
 from utils.ast import AbstractSyntaxTree
 from utils.vocab import Vocab, SAME_VARIABLE_TOKEN, END_OF_VARIABLE_TOKEN
 
+from model.recurrent_subtoken_decoder import RecurrentSubtokenDecoder
+from utils.vocab import Vocab
 
-class RecurrentSubtokenDecoder(Decoder):
+
+class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
     def __init__(self, ast_node_encoding_size: int, hidden_size: int, dropout: float, vocab: Vocab):
-        super(Decoder, self).__init__()
+        super(AttentionalRecurrentSubtokenDecoder, self).__init__(ast_node_encoding_size, hidden_size, dropout, vocab)
 
-        self.vocab = vocab
+        self.att_src_linear = nn.Linear(ast_node_encoding_size, hidden_size, bias=False)
+        self.att_vec_linear = nn.Linear(ast_node_encoding_size + hidden_size, hidden_size, bias=False)
 
-        self.lstm_cell = nn.LSTMCell(ast_node_encoding_size + hidden_size, hidden_size)  # v_encoding_t + e(y_tm1)
-        self.decoder_cell_init = nn.Linear(ast_node_encoding_size, hidden_size)
-        self.state2names = nn.Linear(hidden_size, len(vocab.target), bias=True)
-        self.dropout = nn.Dropout(dropout)
-        self.config: Dict = None
+    def step(self, x, h_tm1, context_encoding):
+        h_t, cell_t = self.lstm_cell(x, h_tm1)
 
-        self.Hypothesis = namedtuple('Hypothesis', ['variable_list', 'variable_ptr', 'score'])
+        ctx_t, alpha_t = nn_util.dot_prod_attention(h_t,
+                                                    context_encoding['unpacked_tree_encoding'],
+                                                    context_encoding['src_encoding_att_linear'],
+                                                    context_encoding['tree_restoration_indices_mask'])
 
-    @property
-    def device(self):
-        return self.state2names.weight.device
+        att_t = torch.tanh(self.att_vec_linear(torch.cat([h_t, ctx_t], 1)))
+        att_t = self.dropout(att_t)
 
-    @classmethod
-    def default_params(cls):
-        return {
-            'vocab_file': None,
-            'ast_node_encoding_size': 128,
-            'hidden_size': 128,
-            'input_feed': False,
-            'dropout': 0.2,
-            'beam_size': 5,
-            'max_prediction_time_step': 1200,
-            'independent_prediction_for_each_variable': False
-        }
-
-    @property
-    def independent_prediction_for_each_variable(self):
-        return self.config['independent_prediction_for_each_variable']
-
-    @classmethod
-    def build(cls, config):
-        params = util.update(cls.default_params(), config)
-
-        vocab = Vocab.load(params['vocab_file'])
-        model = cls(params['ast_node_encoding_size'], params['hidden_size'], params['dropout'], vocab)
-        model.config = params
-
-        return model
-
-    def get_init_state(self, src_ast_encoding):
-        # compute initial decoder's state via average pooling
-
-        # (packed_graph_size, encoding_size)
-        packed_tree_node_encoding = src_ast_encoding['packed_tree_node_encoding']
-
-        tree_num = src_ast_encoding['tree_num']
-        total_node_num = src_ast_encoding['tree_node_to_tree_id_map'].size(0)
-        encoding_size = packed_tree_node_encoding.size(-1)
-
-        zero_encoding = packed_tree_node_encoding.new_zeros(tree_num, encoding_size)
-
-        node_encoding_sum = zero_encoding.scatter_add_(0,
-                                                       src_ast_encoding['tree_node_to_tree_id_map'].unsqueeze(-1).expand(-1, encoding_size),
-                                                       packed_tree_node_encoding)
-        tree_node_num = packed_tree_node_encoding.new_zeros(tree_num).scatter_add_(0, src_ast_encoding['tree_node_to_tree_id_map'],
-                                                                                   packed_tree_node_encoding.new_zeros(total_node_num).fill_(1.))
-        avg_node_encoding = node_encoding_sum / tree_node_num.unsqueeze(-1)
-
-        c_0 = self.decoder_cell_init(avg_node_encoding)
-        h_0 = torch.tanh(c_0)
-
-        return h_0, c_0
-
-    def rnn_step(self, x, h_tm1, src_ast_encoding):
-        h_t = self.lstm_cell(x, h_tm1)
-        # TODO: implement attention?
-        # att_t = torch.tanh(self.att_vec_linear(torch.cat([h_t], 1)))
-        q_t = self.dropout(h_t[0])
-
-        return h_t, q_t, None
+        return (h_t, cell_t), att_t, ctx_t
 
     def forward(self, src_ast_encoding, prediction_target):
-        # (batch_size, max_time_step)
-        variable_encoding_restoration_indices = prediction_target['variable_encoding_restoration_indices']
-        variable_encoding_restoration_indices_mask = prediction_target['variable_encoding_restoration_indices_mask']
+        # prepare tensors for attention
+        unpacked_tree_encoding = src_ast_encoding['unpacked_tree_encoding'] = src_ast_encoding['packed_tree_node_encoding'][src_ast_encoding['tree_restoration_indices']]
+        src_ast_encoding['src_encoding_att_linear'] = self.att_src_linear(unpacked_tree_encoding)
 
-        # (batch_size, max_time_step, encoding_size)
-        variable_encoding = src_ast_encoding['variable_encoding'][variable_encoding_restoration_indices]
-        # (batch_size, max_time_step, encoding_size)
-        variable_tgt_name_id = prediction_target['variable_tgt_name_id']
-
-        batch_size = variable_tgt_name_id.size(0)
-        variable_encoding_size = variable_encoding.size(-1)
-
-        h_0 = self.get_init_state(src_ast_encoding)
-        att_tm1 = variable_encoding.new_zeros(src_ast_encoding['tree_num'], self.lstm_cell.hidden_size)
-        v_tm1_name_embed = torch.zeros(batch_size, self.lstm_cell.hidden_size, device=self.device)
-
-        h_tm1 = h_0
-        query_vecs = []
-        max_time_step = variable_encoding.size(1)
-        for t, variable_encoding_t in enumerate(variable_encoding.split(split_size=1, dim=1)):
-            # variable_encoding_t: (batch_size, encoding_size)
-            variable_encoding_t = variable_encoding_t.squeeze(1)
-
-            if self.config['input_feed']:
-                x = torch.cat([variable_encoding_t, v_tm1_name_embed, att_tm1], dim=-1)
-            else:
-                x = torch.cat([variable_encoding_t, v_tm1_name_embed], dim=-1)
-
-            h_t, q_t, alpha_t = self.step(x, h_tm1, src_ast_encoding)
-
-            att_tm1 = q_t
-            h_tm1 = h_t
-            query_vecs.append(q_t)
-            v_tm1_name_id = variable_tgt_name_id[:, t]
-            v_tm1_name_embed = self.state2names.weight[v_tm1_name_id]
-
-            if self.independent_prediction_for_each_variable and t < max_time_step - 1:
-                # (batch_size, )
-                variable_ids_tp1 = variable_encoding_restoration_indices[:, t + 1]
-                variable_ids_t = variable_encoding_restoration_indices[:, t]
-
-                is_tp1_same_variable = torch.eq(variable_ids_tp1, variable_ids_t).float().unsqueeze(-1)  # TODO: check if correct!
-                h_tm1 = (h_tm1[0] * is_tp1_same_variable, h_tm1[1] * is_tp1_same_variable)
-                att_tm1 = att_tm1 * is_tp1_same_variable
-                v_tm1_name_embed = v_tm1_name_embed * is_tp1_same_variable
-
-        # (batch_size, max_prediction_node_num, encoding_size)
-        query_vecs = torch.stack(query_vecs).permute(1, 0, 2)
-
-        # (batch_size, max_prediction_node_num, vocab_size)
-        logits = self.state2names(query_vecs)
-        var_name_log_probs = torch.log_softmax(logits, dim=-1)
-        var_name_log_probs = var_name_log_probs * variable_encoding_restoration_indices_mask.unsqueeze(-1)
-
-        return var_name_log_probs
-
-    def get_target_log_prob(self, var_name_log_probs, prediction_target, src_ast_encoding):
-        # (batch_size, max_prediction_node_num)
-        variable_tgt_name_id = prediction_target['variable_tgt_name_id']
-        tgt_var_name_log_prob = torch.gather(var_name_log_probs,
-                                             dim=-1, index=variable_tgt_name_id.unsqueeze(-1)).squeeze(-1)
-
-        tgt_var_name_log_prob = tgt_var_name_log_prob * prediction_target['variable_encoding_restoration_indices_mask']
-
-        result = dict(tgt_var_name_log_prob=tgt_var_name_log_prob)
-
-        return result
+        return RecurrentSubtokenDecoder.forward(self, src_ast_encoding, prediction_target)
 
     def predict(self, source_asts: List[AbstractSyntaxTree], encoder: Encoder) -> List[Dict]:
         beam_size = self.config['beam_size']
@@ -176,7 +60,12 @@ class RecurrentSubtokenDecoder(Decoder):
         nn_util.to(tensor_dict, self.device)
 
         context_encoding = encoder(tensor_dict)
+        # prepare tensors for attention
+        unpacked_tree_encoding = context_encoding['unpacked_tree_encoding'] = context_encoding['packed_tree_node_encoding'][context_encoding['tree_restoration_indices']]
+        context_encoding['src_encoding_att_linear'] = self.att_src_linear(unpacked_tree_encoding)
+
         h_tm1 = h_0 = self.get_init_state(context_encoding)
+        context_encoding_t = context_encoding
 
         # (variable_master_node_num, encoding_size)
         variable_encoding = context_encoding['variable_encoding']
@@ -201,7 +90,7 @@ class RecurrentSubtokenDecoder(Decoder):
             else:
                 x = torch.cat([variable_encoding_t, variable_name_embed_tm1], dim=-1)
 
-            h_t, q_t, alpha_t = self.rnn_step(x, h_tm1, context_encoding)
+            h_t, q_t, alpha_t = self.rnn_step(x, h_tm1, context_encoding_t)
 
             # (total_live_hyp_num, vocab_size)
             hyp_var_name_scores_t = torch.log_softmax(self.state2names(q_t), dim=-1)
@@ -276,6 +165,11 @@ class RecurrentSubtokenDecoder(Decoder):
                 hyp_variable_ptrs_t = new_hyp_variable_ptrs
 
                 beams = new_beams
+
+                # (total_hyp_num, max_tree_size, node_encoding_size)
+                context_encoding_t = dict(unpacked_tree_encoding=context_encoding['unpacked_tree_encoding'][hyp_ast_ids_t],
+                                          src_encoding_att_linear=context_encoding['src_encoding_att_linear'][hyp_ast_ids_t],
+                                          tree_restoration_indices_mask=context_encoding['tree_restoration_indices_mask'][hyp_ast_ids_t])
 
                 if self.independent_prediction_for_each_variable:
                     is_same_variable_mask = torch.tensor(is_same_variable_mask, device=self.device, dtype=torch.float).unsqueeze(-1)
