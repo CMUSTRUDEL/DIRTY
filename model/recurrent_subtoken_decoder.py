@@ -18,6 +18,9 @@ class RecurrentSubtokenDecoder(Decoder):
 
         self.vocab = vocab
 
+        self.att_src_linear = nn.Linear(ast_node_encoding_size, hidden_size, bias=False)
+        self.att_vec_linear = nn.Linear(ast_node_encoding_size + hidden_size, hidden_size, bias=False)
+
         self.lstm_cell = nn.LSTMCell(ast_node_encoding_size + hidden_size, hidden_size)  # v_encoding_t + e(y_tm1)
         self.decoder_cell_init = nn.Linear(ast_node_encoding_size, hidden_size)
         self.state2names = nn.Linear(hidden_size, len(vocab.target), bias=True)
@@ -89,6 +92,19 @@ class RecurrentSubtokenDecoder(Decoder):
 
         return h_t, q_t, None
 
+    def attentional_rnn_step(self, x, h_tm1, context_encoding):
+        h_t, cell_t = self.lstm_cell(x, h_tm1)
+
+        ctx_t, alpha_t = nn_util.dot_prod_attention(h_t,
+                                                    context_encoding['unpacked_tree_encoding'],
+                                                    context_encoding['src_encoding_att_linear'],
+                                                    context_encoding['tree_restoration_indices_mask'])
+
+        att_t = torch.tanh(self.att_vec_linear(torch.cat([h_t, ctx_t], 1)))
+        att_t = self.dropout(att_t)
+
+        return (h_t, cell_t), att_t, ctx_t
+
     def forward(self, src_ast_encoding, prediction_target):
         # (batch_size, max_time_step)
         variable_encoding_restoration_indices = prediction_target['variable_encoding_restoration_indices']
@@ -99,7 +115,9 @@ class RecurrentSubtokenDecoder(Decoder):
         # (batch_size, max_time_step, encoding_size)
         variable_tgt_name_id = prediction_target['variable_tgt_name_id']
 
-        # print('[Decoder] variable encoding size: ', variable_encoding.size(), file=sys.stderr)
+        # prepare tensors for attention
+        unpacked_tree_encoding = src_ast_encoding['unpacked_tree_encoding'] = src_ast_encoding['packed_tree_node_encoding'][src_ast_encoding['tree_restoration_indices']]
+        src_ast_encoding['src_encoding_att_linear'] = self.att_src_linear(unpacked_tree_encoding)
 
         batch_size = variable_tgt_name_id.size(0)
         variable_encoding_size = variable_encoding.size(-1)
@@ -120,7 +138,7 @@ class RecurrentSubtokenDecoder(Decoder):
             else:
                 x = torch.cat([variable_encoding_t, v_tm1_name_embed], dim=-1)
 
-            h_t, q_t, alpha_t = self.rnn_step(x, h_tm1, src_ast_encoding)
+            h_t, q_t, alpha_t = self.attentional_rnn_step(x, h_tm1, src_ast_encoding)
 
             att_tm1 = q_t
             h_tm1 = h_t
@@ -278,6 +296,182 @@ class RecurrentSubtokenDecoder(Decoder):
                 hyp_variable_ptrs_t = new_hyp_variable_ptrs
 
                 beams = new_beams
+
+                if self.independent_prediction_for_each_variable:
+                    is_same_variable_mask = torch.tensor(is_same_variable_mask, device=self.device, dtype=torch.float).unsqueeze(-1)
+                    h_tm1 = (h_tm1[0] * is_same_variable_mask, h_tm1[1] * is_same_variable_mask)
+                    att_tm1 = att_tm1 * is_same_variable_mask
+                    variable_name_embed_tm1 = variable_name_embed_tm1 * is_same_variable_mask
+            else:
+                break
+
+        variable_rename_results = []
+        for i, hyps in enumerate(completed_hyps):
+            variable_rename_result = dict()
+            ast = source_asts[i]
+            hyps = sorted(hyps, key=lambda hyp: -hyp.score)
+
+            if not hyps:
+                # return identity renamings
+                print(f'Failed to found a hypothesis for {source_asts[i].compilation_unit}', file=sys.stderr)
+                for old_name in ast.variables:
+                    variable_rename_result[old_name] = {'new_name': old_name,
+                                                        'prob': 0.}
+            else:
+                top_hyp = hyps[0]
+                sub_token_ptr = 0
+                for old_name in ast.variables:
+                    sub_token_begin = sub_token_ptr
+                    while top_hyp.variable_list[sub_token_ptr] != end_of_variable_id:
+                        sub_token_ptr += 1
+                    sub_token_ptr += 1  # point to first sub-token of next variable
+                    sub_token_end = sub_token_ptr
+
+                    var_name_token_ids = top_hyp.variable_list[sub_token_begin: sub_token_end]  # include ending </s>
+                    if var_name_token_ids == [same_variable_id, end_of_variable_id]:
+                        new_var_name = old_name
+                    else:
+                        new_var_name = self.vocab.target.subtoken_model.decode_ids(var_name_token_ids)
+
+                    variable_rename_result[old_name] = {'new_name': new_var_name,
+                                                        'prob': top_hyp.score}
+
+            variable_rename_results.append(variable_rename_result)
+
+        return variable_rename_results
+
+    def attentional_predict(self, source_asts: List[AbstractSyntaxTree], encoder: Encoder) -> List[Dict]:
+        beam_size = self.config['beam_size']
+        same_variable_id = self.vocab.target[SAME_VARIABLE_TOKEN]
+        end_of_variable_id = self.vocab.target[END_OF_VARIABLE_TOKEN]
+
+        variable_nums = []
+        for ast_id, ast in enumerate(source_asts):
+            variable_nums.append(len(ast.variables))
+
+        beams = OrderedDict((ast_id, [self.Hypothesis([], 0, 0.)]) for ast_id, ast in enumerate(source_asts))
+        hyp_scores_tm1 = torch.zeros(len(beams), device=self.device)
+        completed_hyps = [[] for _ in source_asts]
+        tgt_vocab_size = len(self.vocab.target)
+
+        tensor_dict = self.batcher.to_tensor_dict(source_asts=source_asts)
+        nn_util.to(tensor_dict, self.device)
+
+        context_encoding = encoder(tensor_dict)
+        # prepare tensors for attention
+        unpacked_tree_encoding = context_encoding['unpacked_tree_encoding'] = context_encoding['packed_tree_node_encoding'][context_encoding['tree_restoration_indices']]
+        context_encoding['src_encoding_att_linear'] = self.att_src_linear(unpacked_tree_encoding)
+
+        h_tm1 = h_0 = self.get_init_state(context_encoding)
+        context_encoding_t = context_encoding
+
+        # (variable_master_node_num, encoding_size)
+        variable_encoding = context_encoding['variable_encoding']
+        encoding_size = variable_encoding.size(1)
+
+        # Note that we are using the `restoration_indices` from `context_encoding`, which is the word-level restoration index
+        # (batch_size, variable_master_node_num, encoding_size)
+        variable_encoding = variable_encoding[context_encoding['variable_encoding_restoration_indices']]
+        # (batch_size, encoding_size)
+        variable_name_embed_tm1 = att_tm1 = torch.zeros(len(source_asts), self.lstm_cell.hidden_size, device=self.device)
+
+        max_prediction_time_step = self.config['max_prediction_time_step']
+        for t in range(0, max_prediction_time_step):
+            # (total_live_hyp_num, encoding_size)
+            if t > 0:
+                variable_encoding_t = variable_encoding[hyp_ast_ids_t, hyp_variable_ptrs_t]
+            else:
+                variable_encoding_t = variable_encoding[:, 0]
+
+            if self.config['input_feed']:
+                x = torch.cat([variable_encoding_t, variable_name_embed_tm1, att_tm1], dim=-1)
+            else:
+                x = torch.cat([variable_encoding_t, variable_name_embed_tm1], dim=-1)
+
+            h_t, q_t, alpha_t = self.attentional_rnn_step(x, h_tm1, context_encoding)
+
+            # (total_live_hyp_num, vocab_size)
+            hyp_var_name_scores_t = torch.log_softmax(self.state2names(q_t), dim=-1)
+
+            cont_cand_hyp_scores = hyp_scores_tm1.unsqueeze(-1) + hyp_var_name_scores_t
+
+            new_beams = OrderedDict()
+            live_beam_ids = []
+            new_hyp_scores = []
+            live_prev_hyp_ids = []
+            new_hyp_var_name_ids = []
+            new_hyp_ast_ids = []
+            new_hyp_variable_ptrs = []
+            is_same_variable_mask = []
+            beam_start_hyp_pos = 0
+            for beam_id, (ast_id, beam) in enumerate(beams.items()):
+                beam_end_hyp_pos = beam_start_hyp_pos + len(beam)
+                # (live_beam_size, vocab_size)
+                beam_cont_cand_hyp_scores = cont_cand_hyp_scores[beam_start_hyp_pos: beam_end_hyp_pos]
+                cont_beam_size = beam_size - len(completed_hyps[ast_id])
+                beam_new_hyp_scores, beam_new_hyp_positions = torch.topk(beam_cont_cand_hyp_scores.view(-1),
+                                                                         k=cont_beam_size,
+                                                                         dim=-1)
+
+                # (cont_beam_size)
+                beam_prev_hyp_ids = beam_new_hyp_positions / tgt_vocab_size
+                beam_hyp_var_name_ids = beam_new_hyp_positions % tgt_vocab_size
+
+                _prev_hyp_ids = beam_prev_hyp_ids.cpu()
+                _hyp_var_name_ids = beam_hyp_var_name_ids.cpu()
+                _new_hyp_scores = beam_new_hyp_scores.cpu()
+
+                for i in range(cont_beam_size):
+                    prev_hyp_id = _prev_hyp_ids[i].item()
+                    prev_hyp = beam[prev_hyp_id]
+                    hyp_var_name_id = _hyp_var_name_ids[i].item()
+                    new_hyp_score = _new_hyp_scores[i].item()
+
+                    variable_ptr = prev_hyp.variable_ptr
+                    if hyp_var_name_id == end_of_variable_id:
+                        variable_ptr += 1
+
+                        # remove empty cases
+                        if len(prev_hyp.variable_list) == 0 or prev_hyp.variable_list[-1] == end_of_variable_id:
+                            continue
+
+                    new_hyp = self.Hypothesis(variable_list=list(prev_hyp.variable_list) + [hyp_var_name_id],
+                                              variable_ptr=variable_ptr,
+                                              score=new_hyp_score)
+
+                    if variable_ptr == variable_nums[ast_id]:
+                        completed_hyps[ast_id].append(new_hyp)
+                    else:
+                        new_beams.setdefault(ast_id, []).append(new_hyp)
+                        live_beam_ids.append(beam_id)
+                        new_hyp_scores.append(new_hyp_score)
+                        live_prev_hyp_ids.append(beam_start_hyp_pos + prev_hyp_id)
+                        new_hyp_var_name_ids.append(hyp_var_name_id)
+                        new_hyp_ast_ids.append(ast_id)
+                        new_hyp_variable_ptrs.append(variable_ptr)
+                        is_same_variable_mask.append(1. if prev_hyp.variable_ptr == variable_ptr else 0.)
+
+                beam_start_hyp_pos = beam_end_hyp_pos
+
+            if live_beam_ids:
+                hyp_scores_tm1 = torch.tensor(new_hyp_scores, device=self.device)
+                h_tm1 = (h_t[0][live_prev_hyp_ids], h_t[1][live_prev_hyp_ids])
+                att_tm1 = q_t[live_prev_hyp_ids]
+
+                variable_name_embed_tm1 = self.state2names.weight[new_hyp_var_name_ids]
+                hyp_ast_ids_t = new_hyp_ast_ids
+                hyp_variable_ptrs_t = new_hyp_variable_ptrs
+
+                beams = new_beams
+
+                # (total_hyp_num, max_tree_size, node_encoding_size)
+                unpacked_tree_encoding_t = context_encoding['unpacked_tree_encoding'][hyp_ast_ids_t]
+                src_encoding_att_linear_t = context_encoding['src_encoding_att_linear'][hyp_ast_ids_t]
+                tree_restoration_indices_mask_t = context_encoding['tree_restoration_indices_mask'][hyp_ast_ids_t]
+
+                context_encoding_t = dict(unpacked_tree_encoding=unpacked_tree_encoding_t,
+                                          src_encoding_att_linear=src_encoding_att_linear_t,
+                                          tree_restoration_indices_mask=tree_restoration_indices_mask_t)
 
                 if self.independent_prediction_for_each_variable:
                     is_same_variable_mask = torch.tensor(is_same_variable_mask, device=self.device, dtype=torch.float).unsqueeze(-1)

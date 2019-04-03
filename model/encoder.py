@@ -129,11 +129,9 @@ class GraphASTEncoder(Encoder):
             tree_node_init_encoding=tree_node_init_encoding,
             packed_tree_node_encoding=tree_node_encoding,
             variable_encoding=variable_encoding,
-            tree_num=tensor_dict['tree_num'],
-            tree_node_to_tree_id_map=tensor_dict['tree_node_to_tree_id_map'],
-            variable_encoding_restoration_indices=tensor_dict['variable_encoding_restoration_indices'],
-            variable_encoding_restoration_indices_mask=tensor_dict['variable_encoding_restoration_indices_mask']
         )
+
+        context_encoding.update(tensor_dict)
 
         return context_encoding
 
@@ -249,9 +247,18 @@ class GraphASTEncoder(Encoder):
             AdjacencyList(adj_list=adj_list, node_num=packed_graph.size) for adj_list in adj_lists
         ]
 
+        tree_restoration_indices = torch.zeros(packed_graph.tree_num, max(tree.size for tree in packed_graph.trees), dtype=torch.long)
+        tree_restoration_indices_mask = torch.zeros(packed_graph.tree_num, max(tree.size for tree in packed_graph.trees), dtype=torch.float)
+        for ast_id in range(packed_graph.tree_num):
+            packed_node_ids = list(packed_graph.node_groups[ast_id]['ast_nodes'].values())
+            tree_restoration_indices[ast_id, :len(packed_node_ids)] = torch.tensor(packed_node_ids)
+            tree_restoration_indices_mask[ast_id, :len(packed_node_ids)] = 1.
+
         tensor_dict = {'adj_lists': adj_lists,
                        'variable_encoding_restoration_indices': variable_repr_restoration_indices,
-                       'variable_encoding_restoration_indices_mask': variable_repr_restoration_indices_mask}
+                       'variable_encoding_restoration_indices_mask': variable_repr_restoration_indices_mask,
+                       'tree_restoration_indices': tree_restoration_indices,
+                       'tree_restoration_indices_mask': tree_restoration_indices_mask}
 
         if use_variable_master_node:
             tensor_dict['variable_master_node_ids'] = [_id for node, _id in
@@ -355,9 +362,9 @@ class GraphASTEncoder(Encoder):
 
         return tree_node_embedding
 
-    def unpack_batch_encoding(self, flattened_node_encodings: torch.Tensor,
-                              batch_syntax_trees: List[AbstractSyntaxTree],
-                              example_node2batch_node_map: Dict):
+    def unpack_encoding(self, flattened_node_encodings: torch.Tensor,
+                        batch_syntax_trees: List[AbstractSyntaxTree],
+                        example_node2batch_node_map: Dict):
         batch_size = len(batch_syntax_trees)
         max_node_num = max(tree.size for tree in batch_syntax_trees)
 

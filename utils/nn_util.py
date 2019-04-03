@@ -1,4 +1,6 @@
 import math
+from typing import Tuple
+
 import numpy as np
 import torch
 
@@ -61,3 +63,22 @@ def get_tensor_dict_size(tensor_dict):
         total_num_elements += num_elements
 
     return total_num_elements
+
+
+def dot_prod_attention(h_t: torch.Tensor,
+                       src_encoding: torch.Tensor,
+                       src_encoding_att_linear: torch.Tensor,
+                       mask: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        # (batch_size, src_sent_len)
+        att_weight = torch.bmm(src_encoding_att_linear, h_t.unsqueeze(2)).squeeze(2)
+
+        if mask is not None:
+            att_weight.data.masked_fill_((1. - mask).byte(), -float('inf'))
+
+        softmaxed_att_weight = torch.softmax(att_weight, dim=-1)
+
+        att_view = (att_weight.size(0), 1, att_weight.size(1))
+        # (batch_size, hidden_size)
+        ctx_vec = torch.bmm(softmaxed_att_weight.view(*att_view), src_encoding).squeeze(1)
+
+        return ctx_vec, softmaxed_att_weight
