@@ -39,8 +39,13 @@ class RecurrentSubtokenDecoder(Decoder):
             'input_feed': False,
             'dropout': 0.2,
             'beam_size': 5,
-            'max_prediction_time_step': 1200
+            'max_prediction_time_step': 1200,
+            'independent_prediction_for_each_variable': False
         }
+
+    @property
+    def independent_prediction_for_each_variable(self):
+        return self.config['independent_prediction_for_each_variable']
 
     @classmethod
     def build(cls, config):
@@ -101,20 +106,14 @@ class RecurrentSubtokenDecoder(Decoder):
 
         h_0 = self.get_init_state(src_ast_encoding)
         att_tm1 = variable_encoding.new_zeros(src_ast_encoding['tree_num'], self.lstm_cell.hidden_size)
+        v_tm1_name_embed = torch.zeros(batch_size, self.lstm_cell.hidden_size, device=self.device)
 
         h_tm1 = h_0
         query_vecs = []
+        max_time_step = variable_encoding.size(1)
         for t, variable_encoding_t in enumerate(variable_encoding.split(split_size=1, dim=1)):
             # variable_encoding_t: (batch_size, encoding_size)
             variable_encoding_t = variable_encoding_t.squeeze(1)
-            if t > 0:
-                # (batch_size)
-                v_tm1_name_id = variable_tgt_name_id[:, t - 1]
-                # (batch_size, encoding_size)
-                v_tm1_name_embed = self.state2names.weight[v_tm1_name_id]
-            else:
-                # (batch_size, encoding_size)
-                v_tm1_name_embed = torch.zeros(batch_size, self.lstm_cell.hidden_size, device=self.device)
 
             if self.config['input_feed']:
                 x = torch.cat([variable_encoding_t, v_tm1_name_embed, att_tm1], dim=-1)
@@ -126,6 +125,18 @@ class RecurrentSubtokenDecoder(Decoder):
             att_tm1 = q_t
             h_tm1 = h_t
             query_vecs.append(q_t)
+            v_tm1_name_id = variable_tgt_name_id[:, t]
+            v_tm1_name_embed = self.state2names.weight[v_tm1_name_id]
+
+            if self.independent_prediction_for_each_variable and t < max_time_step - 1:
+                # (batch_size, )
+                variable_ids_tp1 = variable_encoding_restoration_indices[:, t + 1]
+                variable_ids_t = variable_encoding_restoration_indices[:, t]
+
+                is_tp1_same_variable = torch.eq(variable_ids_tp1, variable_ids_t).float().unsqueeze(-1)  # TODO: check if correct!
+                h_tm1 = (h_tm1[0] * is_tp1_same_variable, h_tm1[1] * is_tp1_same_variable)
+                att_tm1 = att_tm1 * is_tp1_same_variable
+                v_tm1_name_embed = v_tm1_name_embed * is_tp1_same_variable
 
         # (batch_size, max_prediction_node_num, encoding_size)
         query_vecs = torch.stack(query_vecs).permute(1, 0, 2)
@@ -206,6 +217,7 @@ class RecurrentSubtokenDecoder(Decoder):
             new_hyp_var_name_ids = []
             new_hyp_ast_ids = []
             new_hyp_variable_ptrs = []
+            is_same_variable_mask = []
             beam_start_hyp_pos = 0
             for beam_id, (ast_id, beam) in enumerate(beams.items()):
                 beam_end_hyp_pos = beam_start_hyp_pos + len(beam)
@@ -252,6 +264,7 @@ class RecurrentSubtokenDecoder(Decoder):
                         new_hyp_var_name_ids.append(hyp_var_name_id)
                         new_hyp_ast_ids.append(ast_id)
                         new_hyp_variable_ptrs.append(variable_ptr)
+                        is_same_variable_mask.append(1. if prev_hyp.variable_ptr == variable_ptr else 0.)
 
                 beam_start_hyp_pos = beam_end_hyp_pos
 
@@ -265,6 +278,12 @@ class RecurrentSubtokenDecoder(Decoder):
                 hyp_variable_ptrs_t = new_hyp_variable_ptrs
 
                 beams = new_beams
+
+                if self.independent_prediction_for_each_variable:
+                    is_same_variable_mask = torch.tensor(is_same_variable_mask, device=self.device, dtype=torch.float).unsqueeze(-1)
+                    h_tm1 = (h_tm1[0] * is_same_variable_mask, h_tm1[1] * is_same_variable_mask)
+                    att_tm1 = att_tm1 * is_same_variable_mask
+                    variable_name_embed_tm1 = variable_name_embed_tm1 * is_same_variable_mask
             else:
                 break
 
