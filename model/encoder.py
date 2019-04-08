@@ -247,18 +247,31 @@ class GraphASTEncoder(Encoder):
             AdjacencyList(adj_list=adj_list, node_num=packed_graph.size) for adj_list in adj_lists
         ]
 
-        tree_restoration_indices = torch.zeros(packed_graph.tree_num, max(tree.size for tree in packed_graph.trees), dtype=torch.long)
-        tree_restoration_indices_mask = torch.zeros(packed_graph.tree_num, max(tree.size for tree in packed_graph.trees), dtype=torch.float)
+        max_tree_node_num = max(tree.size for tree in packed_graph.trees)
+        tree_restoration_indices = torch.zeros(packed_graph.tree_num, max_tree_node_num, dtype=torch.long)
+        tree_restoration_indices_mask = torch.zeros(packed_graph.tree_num, max_tree_node_num, dtype=torch.float)
+
+        max_terminal_node_num = max(len(tree.terminal_nodes) for tree in packed_graph.trees)
+        terminal_node_restoration_indices = torch.zeros(packed_graph.tree_num, max_terminal_node_num, dtype=torch.long)
+        terminal_node_restoration_indices_mask = torch.zeros(packed_graph.tree_num, max_terminal_node_num, dtype=torch.float)
+
         for ast_id in range(packed_graph.tree_num):
             packed_node_ids = list(packed_graph.node_groups[ast_id]['ast_nodes'].values())
             tree_restoration_indices[ast_id, :len(packed_node_ids)] = torch.tensor(packed_node_ids)
             tree_restoration_indices_mask[ast_id, :len(packed_node_ids)] = 1.
 
+            tree = packed_graph.trees[ast_id]
+            terminal_node_ids = [packed_graph.get_packed_node_id(ast_id, node) for node in tree.terminal_nodes]
+            terminal_node_restoration_indices[ast_id, :len(terminal_node_ids)] = torch.tensor(terminal_node_ids)
+            terminal_node_restoration_indices_mask[ast_id, :len(terminal_node_ids)] = 1.
+
         tensor_dict = {'adj_lists': adj_lists,
                        'variable_encoding_restoration_indices': variable_repr_restoration_indices,
                        'variable_encoding_restoration_indices_mask': variable_repr_restoration_indices_mask,
                        'tree_restoration_indices': tree_restoration_indices,
-                       'tree_restoration_indices_mask': tree_restoration_indices_mask}
+                       'tree_restoration_indices_mask': tree_restoration_indices_mask,
+                       'terminal_node_restoration_indices': terminal_node_restoration_indices,
+                       'terminal_node_restoration_indices_mask': terminal_node_restoration_indices_mask}
 
         if use_variable_master_node:
             tensor_dict['variable_master_node_ids'] = [_id for node, _id in

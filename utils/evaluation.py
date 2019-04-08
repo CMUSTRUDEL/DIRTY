@@ -38,7 +38,8 @@ class Evaluator(object):
 
     @staticmethod
     def decode_and_evaluate(model: RenamingModel, dataset: Dataset, config: Dict, return_results=False):
-        data_iter = dataset.batch_iterator(batch_size=config['train']['batch_size'],
+        eval_batch_size = config['train']['eval_batch_size'] if 'eval_batch_size' in config['train'] else config['train']['batch_size']
+        data_iter = dataset.batch_iterator(batch_size=eval_batch_size,
                                            train=False, progress=True,
                                            config=model.config,
                                            num_readers=config['train']['num_readers'],

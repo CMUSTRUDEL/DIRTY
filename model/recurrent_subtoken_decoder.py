@@ -118,7 +118,7 @@ class RecurrentSubtokenDecoder(Decoder):
             else:
                 x = torch.cat([variable_encoding_t, v_tm1_name_embed], dim=-1)
 
-            h_t, q_t, alpha_t = self.step(x, h_tm1, src_ast_encoding)
+            h_t, q_t, alpha_t = self.rnn_step(x, h_tm1, src_ast_encoding)
 
             att_tm1 = q_t
             h_tm1 = h_t

@@ -22,23 +22,49 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
         self.att_src_linear = nn.Linear(ast_node_encoding_size, hidden_size, bias=False)
         self.att_vec_linear = nn.Linear(ast_node_encoding_size + hidden_size, hidden_size, bias=False)
 
-    def step(self, x, h_tm1, context_encoding):
+    @classmethod
+    def default_params(cls):
+        params = RecurrentSubtokenDecoder.default_params()
+        params.update({
+            'attention_target': 'ast_nodes'  # terminal_nodes
+        })
+
+        return params
+
+    def rnn_step(self, x, h_tm1, context_encoding):
         h_t, cell_t = self.lstm_cell(x, h_tm1)
 
         ctx_t, alpha_t = nn_util.dot_prod_attention(h_t,
-                                                    context_encoding['unpacked_tree_encoding'],
-                                                    context_encoding['src_encoding_att_linear'],
-                                                    context_encoding['tree_restoration_indices_mask'])
+                                                    context_encoding['attention_value'],
+                                                    context_encoding['attention_key'],
+                                                    context_encoding['attention_value_mask'])
 
         att_t = torch.tanh(self.att_vec_linear(torch.cat([h_t, ctx_t], 1)))
         att_t = self.dropout(att_t)
 
         return (h_t, cell_t), att_t, ctx_t
 
+    def get_attention_memory(self, context_encoding):
+        att_tgt = self.config['attention_target']
+        if att_tgt == 'ast_nodes':
+            value = context_encoding['packed_tree_node_encoding'][context_encoding['tree_restoration_indices']]
+            key = self.att_src_linear(value)
+            mask = context_encoding['tree_restoration_indices_mask']
+        elif att_tgt == 'terminal_nodes':
+            value = context_encoding['packed_tree_node_encoding'][context_encoding['terminal_node_restoration_indices']]
+            key = self.att_src_linear(value)
+            mask = context_encoding['terminal_node_restoration_indices_mask']
+        else:
+            raise ValueError('unknown attention target')
+
+        return {'attention_key': key,
+                'attention_value': value,
+                'attention_value_mask': mask}
+
     def forward(self, src_ast_encoding, prediction_target):
         # prepare tensors for attention
-        unpacked_tree_encoding = src_ast_encoding['unpacked_tree_encoding'] = src_ast_encoding['packed_tree_node_encoding'][src_ast_encoding['tree_restoration_indices']]
-        src_ast_encoding['src_encoding_att_linear'] = self.att_src_linear(unpacked_tree_encoding)
+        attention_memory = self.get_attention_memory(src_ast_encoding)
+        src_ast_encoding.update(attention_memory)
 
         return RecurrentSubtokenDecoder.forward(self, src_ast_encoding, prediction_target)
 
@@ -61,11 +87,10 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
         context_encoding = encoder(tensor_dict)
         # prepare tensors for attention
-        unpacked_tree_encoding = context_encoding['unpacked_tree_encoding'] = context_encoding['packed_tree_node_encoding'][context_encoding['tree_restoration_indices']]
-        context_encoding['src_encoding_att_linear'] = self.att_src_linear(unpacked_tree_encoding)
+        attention_memory = self.get_attention_memory(context_encoding)
+        context_encoding_t = attention_memory
 
         h_tm1 = h_0 = self.get_init_state(context_encoding)
-        context_encoding_t = context_encoding
 
         # (variable_master_node_num, encoding_size)
         variable_encoding = context_encoding['variable_encoding']
@@ -167,9 +192,9 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
                 beams = new_beams
 
                 # (total_hyp_num, max_tree_size, node_encoding_size)
-                context_encoding_t = dict(unpacked_tree_encoding=context_encoding['unpacked_tree_encoding'][hyp_ast_ids_t],
-                                          src_encoding_att_linear=context_encoding['src_encoding_att_linear'][hyp_ast_ids_t],
-                                          tree_restoration_indices_mask=context_encoding['tree_restoration_indices_mask'][hyp_ast_ids_t])
+                context_encoding_t = dict(attention_key=attention_memory['attention_key'][hyp_ast_ids_t],
+                                          attention_value=attention_memory['attention_value'][hyp_ast_ids_t],
+                                          attention_value_mask=attention_memory['attention_value_mask'][hyp_ast_ids_t])
 
                 if self.independent_prediction_for_each_variable:
                     is_same_variable_mask = torch.tensor(is_same_variable_mask, device=self.device, dtype=torch.float).unsqueeze(-1)
