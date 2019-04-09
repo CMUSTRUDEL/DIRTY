@@ -22,7 +22,8 @@ from multiprocessing import Process
 import numpy as np
 
 from utils.ast import SyntaxNode
-from utils.code_processing import canonicalize_code, annotate_type, canonicalize_constants, preprocess_ast
+from utils.code_processing import canonicalize_code, annotate_type, canonicalize_constants, preprocess_ast, \
+    tokenize_raw_code
 from utils.dataset import Example, json_line_reader
 from tqdm import tqdm
 
@@ -49,6 +50,8 @@ def example_generator(json_queue, example_queue, consumer_num=1):
             # assert root == root_reconstr
 
             preprocess_ast(root, code=tree_json_dict['raw_code'])
+            code_tokens = tokenize_raw_code(tree_json_dict['raw_code'])
+            tree_json_dict['code_tokens'] = code_tokens
 
             # add function name to the name field of the root block
             root.name = tree_json_dict['function']
@@ -135,6 +138,7 @@ def main(args):
 
     cur_dir = os.getcwd()
     all_files = glob.glob(os.path.join(tgt_folder, 'files/*.jsonl'))
+    sorted(all_files)  # sort all files by names
     all_files = list(all_files)
     np.random.shuffle(all_files)
     print('Total valid binary file num: ', len(all_files))

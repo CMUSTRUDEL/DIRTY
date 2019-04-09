@@ -9,6 +9,7 @@ from model.decoder import Decoder
 from model.encoder import Encoder
 from utils import util, nn_util
 from utils.ast import AbstractSyntaxTree
+from utils.dataset import Example
 from utils.vocab import Vocab, SAME_VARIABLE_TOKEN, END_OF_VARIABLE_TOKEN
 
 from model.recurrent_subtoken_decoder import RecurrentSubtokenDecoder
@@ -46,16 +47,8 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
     def get_attention_memory(self, context_encoding):
         att_tgt = self.config['attention_target']
-        if att_tgt == 'ast_nodes':
-            value = context_encoding['packed_tree_node_encoding'][context_encoding['tree_restoration_indices']]
-            key = self.att_src_linear(value)
-            mask = context_encoding['tree_restoration_indices_mask']
-        elif att_tgt == 'terminal_nodes':
-            value = context_encoding['packed_tree_node_encoding'][context_encoding['terminal_node_restoration_indices']]
-            key = self.att_src_linear(value)
-            mask = context_encoding['terminal_node_restoration_indices_mask']
-        else:
-            raise ValueError('unknown attention target')
+        value, mask = self.encoder.get_attention_memory(context_encoding, att_tgt)
+        key = self.att_src_linear(value)
 
         return {'attention_key': key,
                 'attention_value': value,
@@ -68,21 +61,22 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
         return RecurrentSubtokenDecoder.forward(self, src_ast_encoding, prediction_target)
 
-    def predict(self, source_asts: List[AbstractSyntaxTree], encoder: Encoder) -> List[Dict]:
+    def predict(self, examples: List[Example], encoder: Encoder) -> List[Dict]:
+        batch_size = len(examples)
         beam_size = self.config['beam_size']
         same_variable_id = self.vocab.target[SAME_VARIABLE_TOKEN]
         end_of_variable_id = self.vocab.target[END_OF_VARIABLE_TOKEN]
 
         variable_nums = []
-        for ast_id, ast in enumerate(source_asts):
-            variable_nums.append(len(ast.variables))
+        for ast_id, example in enumerate(examples):
+            variable_nums.append(len(example.ast.variables))
 
-        beams = OrderedDict((ast_id, [self.Hypothesis([], 0, 0.)]) for ast_id, ast in enumerate(source_asts))
+        beams = OrderedDict((ast_id, [self.Hypothesis([], 0, 0.)]) for ast_id in range(batch_size))
         hyp_scores_tm1 = torch.zeros(len(beams), device=self.device)
-        completed_hyps = [[] for _ in source_asts]
+        completed_hyps = [[] for _ in range(batch_size)]
         tgt_vocab_size = len(self.vocab.target)
 
-        tensor_dict = self.batcher.to_tensor_dict(source_asts=source_asts)
+        tensor_dict = self.batcher.to_tensor_dict(examples)
         nn_util.to(tensor_dict, self.device)
 
         context_encoding = encoder(tensor_dict)
@@ -92,15 +86,11 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
         h_tm1 = h_0 = self.get_init_state(context_encoding)
 
-        # (variable_master_node_num, encoding_size)
-        variable_encoding = context_encoding['variable_encoding']
-        encoding_size = variable_encoding.size(1)
-
         # Note that we are using the `restoration_indices` from `context_encoding`, which is the word-level restoration index
         # (batch_size, variable_master_node_num, encoding_size)
-        variable_encoding = variable_encoding[context_encoding['variable_encoding_restoration_indices']]
+        variable_encoding = context_encoding['variable_encoding']
         # (batch_size, encoding_size)
-        variable_name_embed_tm1 = att_tm1 = torch.zeros(len(source_asts), self.lstm_cell.hidden_size, device=self.device)
+        variable_name_embed_tm1 = att_tm1 = torch.zeros(batch_size, self.lstm_cell.hidden_size, device=self.device)
 
         max_prediction_time_step = self.config['max_prediction_time_step']
         for t in range(0, max_prediction_time_step):
@@ -207,12 +197,12 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
         variable_rename_results = []
         for i, hyps in enumerate(completed_hyps):
             variable_rename_result = dict()
-            ast = source_asts[i]
+            ast = examples[i].ast
             hyps = sorted(hyps, key=lambda hyp: -hyp.score)
 
             if not hyps:
                 # return identity renamings
-                print(f'Failed to found a hypothesis for {source_asts[i].compilation_unit}', file=sys.stderr)
+                print(f'Failed to found a hypothesis for function {ast.compilation_unit}', file=sys.stderr)
                 for old_name in ast.variables:
                     variable_rename_result[old_name] = {'new_name': old_name,
                                                         'prob': 0.}

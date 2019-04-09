@@ -61,7 +61,7 @@ class Evaluator(object):
         with torch.no_grad():
             for batch in data_iter:
                 examples = batch.examples
-                rename_results = model.decoder.predict([e.ast for e in examples], model.encoder)
+                rename_results = model.decoder.predict(examples, model.encoder)
                 for example, rename_result in zip(examples, rename_results):
                     example_pred_accs = []
                     if len(example.variable_name_map) == 0:

@@ -2,7 +2,10 @@ import re
 from typing import List, Set
 
 from utils.ast import SyntaxNode
-from utils.lexer import Lexer
+from utils.lexer import *
+
+
+VARIABLE_ANNOTATION = re.compile(r'@@\w+@@(\w+)@@\w+')
 
 
 def canonicalize_code(code):
@@ -80,3 +83,21 @@ def preprocess_ast(root: SyntaxNode, preprocessors: Set[str] = None, code: str =
             _visit(child)
 
     _visit(root)
+
+
+def tokenize_raw_code(raw_code):
+    lexer = Lexer(raw_code)
+    tokens = []
+    for token_type, token in lexer.get_tokens():
+        if token_type in Token.Literal:
+            token = str(token_type).split('.')[2]
+
+        if token_type == Token.Placeholder.Var:
+            m = VARIABLE_ANNOTATION.match(token)
+            old_name = m.group(1)
+            token = '@@' + old_name + '@@'
+
+        tokens.append(token)
+
+    return tokens
+

@@ -9,6 +9,7 @@ from model.decoder import Decoder
 from model.encoder import Encoder
 from utils import util, nn_util
 from utils.ast import AbstractSyntaxTree
+from utils.dataset import Example
 from utils.vocab import Vocab, SAME_VARIABLE_TOKEN, END_OF_VARIABLE_TOKEN
 
 
@@ -58,28 +59,7 @@ class RecurrentSubtokenDecoder(Decoder):
         return model
 
     def get_init_state(self, src_ast_encoding):
-        # compute initial decoder's state via average pooling
-
-        # (packed_graph_size, encoding_size)
-        packed_tree_node_encoding = src_ast_encoding['packed_tree_node_encoding']
-
-        tree_num = src_ast_encoding['tree_num']
-        total_node_num = src_ast_encoding['tree_node_to_tree_id_map'].size(0)
-        encoding_size = packed_tree_node_encoding.size(-1)
-
-        zero_encoding = packed_tree_node_encoding.new_zeros(tree_num, encoding_size)
-
-        node_encoding_sum = zero_encoding.scatter_add_(0,
-                                                       src_ast_encoding['tree_node_to_tree_id_map'].unsqueeze(-1).expand(-1, encoding_size),
-                                                       packed_tree_node_encoding)
-        tree_node_num = packed_tree_node_encoding.new_zeros(tree_num).scatter_add_(0, src_ast_encoding['tree_node_to_tree_id_map'],
-                                                                                   packed_tree_node_encoding.new_zeros(total_node_num).fill_(1.))
-        avg_node_encoding = node_encoding_sum / tree_node_num.unsqueeze(-1)
-
-        c_0 = self.decoder_cell_init(avg_node_encoding)
-        h_0 = torch.tanh(c_0)
-
-        return h_0, c_0
+        return self.encoder.get_decoder_init_state(src_ast_encoding, self.config)
 
     def rnn_step(self, x, h_tm1, src_ast_encoding):
         h_t = self.lstm_cell(x, h_tm1)
@@ -91,19 +71,21 @@ class RecurrentSubtokenDecoder(Decoder):
 
     def forward(self, src_ast_encoding, prediction_target):
         # (batch_size, max_time_step)
-        variable_encoding_restoration_indices = prediction_target['variable_encoding_restoration_indices']
-        variable_encoding_restoration_indices_mask = prediction_target['variable_encoding_restoration_indices_mask']
+        target_variable_encoding_indices = prediction_target['target_variable_encoding_indices']
+        target_variable_encoding_indices_mask = prediction_target['target_variable_encoding_indices_mask']
+
+        batch_size = target_variable_encoding_indices.size(0)
+        variable_encoding_size = src_ast_encoding['variable_encoding'].size(-1)
 
         # (batch_size, max_time_step, encoding_size)
-        variable_encoding = src_ast_encoding['variable_encoding'][variable_encoding_restoration_indices]
+        # scatter variable encoding to sub-token time steps
+        variable_encoding = torch.gather(src_ast_encoding['variable_encoding'], 1,
+                                         target_variable_encoding_indices.unsqueeze(-1).expand(-1, -1, variable_encoding_size))
         # (batch_size, max_time_step, encoding_size)
         variable_tgt_name_id = prediction_target['variable_tgt_name_id']
 
-        batch_size = variable_tgt_name_id.size(0)
-        variable_encoding_size = variable_encoding.size(-1)
-
         h_0 = self.get_init_state(src_ast_encoding)
-        att_tm1 = variable_encoding.new_zeros(src_ast_encoding['tree_num'], self.lstm_cell.hidden_size)
+        att_tm1 = variable_encoding.new_zeros(src_ast_encoding['batch_size'], self.lstm_cell.hidden_size)
         v_tm1_name_embed = torch.zeros(batch_size, self.lstm_cell.hidden_size, device=self.device)
 
         h_tm1 = h_0
@@ -128,8 +110,8 @@ class RecurrentSubtokenDecoder(Decoder):
 
             if self.independent_prediction_for_each_variable and t < max_time_step - 1:
                 # (batch_size, )
-                variable_ids_tp1 = variable_encoding_restoration_indices[:, t + 1]
-                variable_ids_t = variable_encoding_restoration_indices[:, t]
+                variable_ids_tp1 = target_variable_encoding_indices[:, t + 1]
+                variable_ids_t = target_variable_encoding_indices[:, t]
 
                 is_tp1_same_variable = torch.eq(variable_ids_tp1, variable_ids_t).float().unsqueeze(-1)  # TODO: check if correct!
                 h_tm1 = (h_tm1[0] * is_tp1_same_variable, h_tm1[1] * is_tp1_same_variable)
@@ -142,7 +124,7 @@ class RecurrentSubtokenDecoder(Decoder):
         # (batch_size, max_prediction_node_num, vocab_size)
         logits = self.state2names(query_vecs)
         var_name_log_probs = torch.log_softmax(logits, dim=-1)
-        var_name_log_probs = var_name_log_probs * variable_encoding_restoration_indices_mask.unsqueeze(-1)
+        var_name_log_probs = var_name_log_probs * target_variable_encoding_indices_mask.unsqueeze(-1)
 
         return var_name_log_probs
 
@@ -152,41 +134,38 @@ class RecurrentSubtokenDecoder(Decoder):
         tgt_var_name_log_prob = torch.gather(var_name_log_probs,
                                              dim=-1, index=variable_tgt_name_id.unsqueeze(-1)).squeeze(-1)
 
-        tgt_var_name_log_prob = tgt_var_name_log_prob * prediction_target['variable_encoding_restoration_indices_mask']
+        tgt_var_name_log_prob = tgt_var_name_log_prob * prediction_target['target_variable_encoding_indices_mask']
 
         result = dict(tgt_var_name_log_prob=tgt_var_name_log_prob)
 
         return result
 
-    def predict(self, source_asts: List[AbstractSyntaxTree], encoder: Encoder) -> List[Dict]:
+    def predict(self, examples: List[Example], encoder: Encoder) -> List[Dict]:
+        batch_size = len(examples)
         beam_size = self.config['beam_size']
         same_variable_id = self.vocab.target[SAME_VARIABLE_TOKEN]
         end_of_variable_id = self.vocab.target[END_OF_VARIABLE_TOKEN]
 
         variable_nums = []
-        for ast_id, ast in enumerate(source_asts):
-            variable_nums.append(len(ast.variables))
+        for ast_id, example in enumerate(examples):
+            variable_nums.append(len(example.ast.variables))
 
-        beams = OrderedDict((ast_id, [self.Hypothesis([], 0, 0.)]) for ast_id, ast in enumerate(source_asts))
+        beams = OrderedDict((ast_id, [self.Hypothesis([], 0, 0.)]) for ast_id in range(batch_size))
         hyp_scores_tm1 = torch.zeros(len(beams), device=self.device)
-        completed_hyps = [[] for _ in source_asts]
+        completed_hyps = [[] for _ in range(batch_size)]
         tgt_vocab_size = len(self.vocab.target)
 
-        tensor_dict = self.batcher.to_tensor_dict(source_asts=source_asts)
+        tensor_dict = self.batcher.to_tensor_dict(examples)
         nn_util.to(tensor_dict, self.device)
 
         context_encoding = encoder(tensor_dict)
         h_tm1 = h_0 = self.get_init_state(context_encoding)
 
-        # (variable_master_node_num, encoding_size)
-        variable_encoding = context_encoding['variable_encoding']
-        encoding_size = variable_encoding.size(1)
-
         # Note that we are using the `restoration_indices` from `context_encoding`, which is the word-level restoration index
         # (batch_size, variable_master_node_num, encoding_size)
-        variable_encoding = variable_encoding[context_encoding['variable_encoding_restoration_indices']]
+        variable_encoding = context_encoding['variable_encoding']
         # (batch_size, encoding_size)
-        variable_name_embed_tm1 = att_tm1 = torch.zeros(len(source_asts), self.lstm_cell.hidden_size, device=self.device)
+        variable_name_embed_tm1 = att_tm1 = torch.zeros(batch_size, self.lstm_cell.hidden_size, device=self.device)
 
         max_prediction_time_step = self.config['max_prediction_time_step']
         for t in range(0, max_prediction_time_step):
@@ -288,12 +267,12 @@ class RecurrentSubtokenDecoder(Decoder):
         variable_rename_results = []
         for i, hyps in enumerate(completed_hyps):
             variable_rename_result = dict()
-            ast = source_asts[i]
+            ast = examples[i].ast
             hyps = sorted(hyps, key=lambda hyp: -hyp.score)
 
             if not hyps:
                 # return identity renamings
-                print(f'Failed to found a hypothesis for {source_asts[i].compilation_unit}', file=sys.stderr)
+                print(f'Failed to found a hypothesis for function {ast.compilation_unit}', file=sys.stderr)
                 for old_name in ast.variables:
                     variable_rename_result[old_name] = {'new_name': old_name,
                                                         'prob': 0.}

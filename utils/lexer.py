@@ -109,5 +109,5 @@ class HexRaysLexer(CLexer):
 
 
 if __name__ == '__main__':
-    code = '__int64 (__fastcall **)(unsigned __int64, signed __int64, __int64, _QWORD, __int64, signed __int64)'
-    print([token for token in Lexer(code).get_tokens()])
+    code = '__int64 (__fastcall **)(unsigned __int64, signed __int64, __int64, _QWORD, __int64, signed __int64) {int a = "asdfsdf"; int b =123; a = asd::safd() sadf=12 /*asdf*/}'
+    print([str(token[0]) for token in Lexer(code).get_tokens()])

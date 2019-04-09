@@ -19,7 +19,6 @@ from utils.ast import AbstractSyntaxTree, SyntaxNode
 from utils.code_processing import annotate_type
 from utils.graph import PackedGraph
 from utils.vocab import VocabEntry, SAME_VARIABLE_TOKEN, Vocab
-from model.encoder import GraphASTEncoder
 import sentencepiece as spm
 import random
 
@@ -78,26 +77,28 @@ class Batcher(object):
 
         self.return_examples = return_examples
 
-    def to_tensor_dict(self, examples: List[Example] = None, source_asts: List[AbstractSyntaxTree] = None) -> Dict[str, torch.Tensor]:
-        if examples:
-            source_asts = [e.ast for e in examples]
+    def to_tensor_dict(self, examples: List[Example], train=True) -> Dict[str, torch.Tensor]:
+        from model.sequential_encoder import SequentialEncoder
+        from model.graph_encoder import GraphASTEncoder
 
-        packed_graph, graph_tensor_dict = GraphASTEncoder.to_packed_graph(source_asts,
-                                                                          connections=self.config['encoder']['connections'])
+        if self.config['encoder']['type'] == 'GraphASTEncoder':
+            packed_graph, graph_tensor_dict = GraphASTEncoder.to_packed_graph([e.ast for e in examples],
+                                                                              connections=self.config['encoder']['connections'])
 
-        tensor_dict = graph_tensor_dict
+            tensor_dict = graph_tensor_dict
+            _tensors = GraphASTEncoder.to_tensor_dict(packed_graph,
+                                                      self.grammar, self.vocab)
+            tensor_dict.update(_tensors)
+        elif self.config['encoder']['type'] == 'SequentialEncoder':
+            tensor_dict = SequentialEncoder.to_tensor_dict(examples)
+        else:
+            raise ValueError('UnknownEncoderType')
 
-        _tensors = GraphASTEncoder.to_tensor_dict(packed_graph,
-                                                  self.grammar, self.vocab)
-        tensor_dict.update(_tensors)
-
-        if examples:
-            prediction_target = self.to_batched_prediction_target(examples, packed_graph)
+        if train:
+            prediction_target = self.to_batched_prediction_target(examples)
             tensor_dict['prediction_target'] = prediction_target
 
-        tensor_dict['batch_size'] = len(source_asts)
-        tensor_dict['packed_graph_size'] = packed_graph.size
-
+        tensor_dict['batch_size'] = len(examples)
         num_elements = nn_util.get_tensor_dict_size(tensor_dict)
         tensor_dict['num_elements'] = num_elements
 
@@ -115,9 +116,7 @@ class Batcher(object):
 
         return batch
 
-    def to_batched_prediction_target(self,
-                                     examples: List[Example],
-                                     packed_graph: PackedGraph):
+    def to_batched_prediction_target(self, examples: List[Example]):
         batch_size = len(examples)
         unchanged_var_weight = self.config['train']['unchanged_variable_weight']
 
@@ -149,8 +148,8 @@ class Batcher(object):
 
         max_pred_timestep = max(sum(len(val) for val in x.values()) for x in variable_name_subtoken_maps)
 
-        var_encoding_restoration_indices = torch.zeros(batch_size, max_pred_timestep, dtype=torch.long)
-        var_encoding_restoration_indices_mask = torch.zeros(batch_size, max_pred_timestep)
+        target_variable_encoding_indices = torch.zeros(batch_size, max_pred_timestep, dtype=torch.long)
+        target_variable_encoding_indices_mask = torch.zeros(batch_size, max_pred_timestep)
 
         variable_tgt_name_id = torch.zeros(batch_size, max_pred_timestep, dtype=torch.long)
         variable_tgt_name_weight = torch.zeros(batch_size, max_pred_timestep)
@@ -164,7 +163,7 @@ class Batcher(object):
             _var_node_ids = []
             _tgt_name_ids = []
             variable_ptr = 0
-            for var_name in ast.variables:
+            for var_id, var_name in enumerate(ast.variables):
                 new_var_name_subtoken_ids = variable_name_subtoken_maps[e_id][var_name]
                 variable_end_ptr = variable_ptr + len(new_var_name_subtoken_ids)
 
@@ -177,19 +176,19 @@ class Batcher(object):
                     var_with_new_name_mask[e_id, variable_ptr: variable_end_ptr] = 1.
                     variable_tgt_name_weight[e_id, variable_ptr: variable_end_ptr] = 1.
 
-                var_encoding_restoration_indices[e_id, variable_ptr: variable_end_ptr] = variable_master_node_ptr
+                target_variable_encoding_indices[e_id, variable_ptr: variable_end_ptr] = var_id  # variable_master_node_ptr
 
                 variable_master_node_ptr += 1
                 variable_ptr = variable_end_ptr
 
-            var_encoding_restoration_indices_mask[e_id, :variable_ptr] = 1.
+            target_variable_encoding_indices_mask[e_id, :variable_ptr] = 1.
 
         return dict(variable_tgt_name_id=variable_tgt_name_id,
                     variable_tgt_name_weight=variable_tgt_name_weight,
                     var_with_new_name_mask=var_with_new_name_mask,
                     auxiliary_var_mask=auxiliary_var_mask,
-                    variable_encoding_restoration_indices=var_encoding_restoration_indices,
-                    variable_encoding_restoration_indices_mask=var_encoding_restoration_indices_mask)
+                    target_variable_encoding_indices=target_variable_encoding_indices,
+                    target_variable_encoding_indices_mask=target_variable_encoding_indices_mask)
 
 
 def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, group_by=None) -> Iterable:
@@ -254,16 +253,16 @@ def is_valid_training_example(example):
 
 
 def example_generator(json_queue, example_queue, consumer_num=1):
-    from utils.sequential_preprocess import tokenize_raw_code
-
     while True:
         payload = json_queue.get()
         if payload is None: break
         json_str, meta = payload
 
         tree_json_dict = json.loads(json_str)
-        # code_tokens = tokenize_raw_code(tree_json_dict['raw_code'])
-        example = Example.from_json_dict(tree_json_dict, binary_file=meta)
+        if 'code_tokens' in tree_json_dict:
+            example = Example.from_json_dict(tree_json_dict, binary_file=meta, code_tokens=tree_json_dict['code_tokens'])
+        else:
+            example = Example.from_json_dict(tree_json_dict, binary_file=meta)
 
         example_queue.put(example)
 
@@ -273,8 +272,11 @@ def example_generator(json_queue, example_queue, consumer_num=1):
     # print('[Example Generator] example generator process quit!')
 
 
-def get_batch_size(batch_examples):
-    return len(batch_examples) * max(e.target_prediction_seq_length for e in batch_examples)
+def get_batch_size(batch_examples, use_seq_encoder=False):
+    if not use_seq_encoder:
+        return len(batch_examples) * max(e.target_prediction_seq_length for e in batch_examples)
+    else:
+        return len(batch_examples) * max(e.source_seq_length for e in batch_examples)
 
 
 def train_example_sort_key(example):
@@ -282,6 +284,7 @@ def train_example_sort_key(example):
 
 
 def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config, worker_manager_lock):
+    use_seq_encoder = config['encoder']['type'] == 'SequentialEncoder'
     batcher = Batcher(config, return_examples=not train)
     tgt_bpe_model = batcher.vocab.target.subtoken_model
     vocab = batcher.vocab
@@ -297,7 +300,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
         batch_examples = []
 
         for example in buffer:
-            batch_size_with_example = get_batch_size(batch_examples + [example])
+            batch_size_with_example = get_batch_size(batch_examples + [example], use_seq_encoder)
             if batch_examples and batch_size_with_example > batch_size:
                 batches.append(batch_examples)
                 batch_examples = []
@@ -335,10 +338,22 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
 
             json_str, meta = payload
             tree_json_dict = json.loads(json_str)
-            example = Example.from_json_dict(tree_json_dict, binary_file=meta)
 
-            # if example.ast.size != max(node.node_id for node in example.ast) + 1:
-            #     continue
+            if 'code_tokens' in tree_json_dict:
+                example = Example.from_json_dict(tree_json_dict, binary_file=meta,
+                                                 code_tokens=tree_json_dict['code_tokens'])
+            else:
+                example = Example.from_json_dict(tree_json_dict, binary_file=meta)
+
+            if use_seq_encoder:
+                bpe_model = batcher.vocab.source_tokens.subtoken_model
+                snippet = example.code_tokens
+                snippet = ' '.join(['<s>'] + snippet + ['</s>'])
+                sub_tokens = bpe_model.encode_as_pieces(snippet)
+                sub_token_ids = bpe_model.encode_as_ids(snippet)
+                setattr(example, 'sub_tokens', sub_tokens)
+                setattr(example, 'sub_token_ids', sub_token_ids)
+                setattr(example, 'source_seq_length', len(sub_tokens))
 
             if tgt_bpe_model:
                 eov_id = tgt_bpe_model.eos_id()

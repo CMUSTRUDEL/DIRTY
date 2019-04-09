@@ -24,6 +24,7 @@ from utils.grammar import Grammar
 
 SAME_VARIABLE_TOKEN = '<IDENTITY>'
 END_OF_VARIABLE_TOKEN = '</s>'
+PAD_ID = 0
 
 
 class VocabEntry:
@@ -41,7 +42,7 @@ class VocabEntry:
                 self.word2id[word] = len(self.word2id)
         else:
             self.subtoken_model = None
-            self.word2id['<pad>'] = 0
+            self.word2id['<pad>'] = PAD_ID
             self.word2id['<s>'] = 1
             self.word2id['</s>'] = 2
             self.word2id['<unk>'] = 3
@@ -185,6 +186,10 @@ if __name__ == '__main__':
     vocab_file = args['VOCAB_FILE']
     train_set = Dataset(args['TRAIN_FILE'])
 
+    src_code_tokens_file = vocab_file + '.src_code_tokens.txt'
+    src_preserved_tokens = set()
+    f_src_token = open(src_code_tokens_file, 'w')
+
     # extract vocab and node types
     node_types = set()
     src_words = []
@@ -210,21 +215,39 @@ if __name__ == '__main__':
             if hasattr(node, 'type_tokens'):
                 type_tokens.extend(node.type_tokens)
 
+        code_tokens = example.code_tokens
+        preserved_tokens = [token for token in code_tokens if token.startswith('@@') and token.endswith('@@')]
+        src_preserved_tokens.update(preserved_tokens)
+        f_src_token.write(' '.join(code_tokens) + '\n')
+
+    f_src_token.close()
+
     print('building source words vocabulary')
     src_var_vocab_entry = VocabEntry.from_corpus([src_words], size=vocab_size,
                                                  freq_cutoff=int(args['--freq-cutoff']))
-    print('building target words vocabulary')
-    if args['--use-bpe']:
-        print('use bpe for target words')
 
+    if args['--use-bpe']:
+        print('use bpe')
+
+        print('building source code tokens vocabulary')
+        # train subtoken models
+        src_preserved_tokens = ','.join(src_preserved_tokens)
+        spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id={PAD_ID} --bos_id=1 --eos_id=2 --unk_id=3 '
+                                       f'--user_defined_symbols={src_preserved_tokens} '
+                                       f'--vocab_size={vocab_size} '
+                                       f'--model_prefix={vocab_file}.src_code_tokens --model_type=bpe '
+                                       f'--input={src_code_tokens_file}')
+        src_code_tokens_vocab_entry = VocabEntry(vocab_file + '.src_code_tokens.model')
+
+        print('building target words vocabulary')
         tgt_word_file = args['VOCAB_FILE'] + '.var_names.txt'
         with open(tgt_word_file, 'w') as f:
             for name in tgt_words:
                 f.write(name + '\n')
 
-        # train subtoken models
-        spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id=0 --bos_id=1 --eos_id=2 --unk_id=3 '
-                                       f'--control_symbols=<IDENTITY> --vocab_size={vocab_size} '
+        spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id={PAD_ID} --bos_id=1 --eos_id=2 --unk_id=3 '
+                                       f'--control_symbols=<IDENTITY> '
+                                       f'--vocab_size={vocab_size} '
                                        f'--model_prefix={vocab_file}.tgt --model_type=bpe '
                                        f'--input={tgt_word_file}')
         tgt_var_vocab_entry = VocabEntry(vocab_file + '.tgt.model')
@@ -240,7 +263,7 @@ if __name__ == '__main__':
 
     print('train subtoken model for obj names')
     # train subtoken models
-    spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id=0 --bos_id=1 --eos_id=2 --unk_id=3 '
+    spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id={PAD_ID} --bos_id=1 --eos_id=2 --unk_id=3 '
                                    f'--control_symbols=<IDENTITY> --vocab_size={vocab_size} '
                                    f'--model_prefix={vocab_file}.obj_name --model_type=bpe '
                                    f'--input={id_names_file}')
@@ -261,6 +284,7 @@ if __name__ == '__main__':
     print('Variable types:', var_types)
 
     vocab = Vocab(source=src_var_vocab_entry,
+                  source_tokens=src_code_tokens_vocab_entry,
                   target=tgt_var_vocab_entry,
                   obj_name=obj_name_vocab_entry,
                   grammar=grammar)

@@ -12,7 +12,9 @@ from model.recurrent_subtoken_decoder import RecurrentSubtokenDecoder
 from model.attentional_recurrent_subtoken_decoder import AttentionalRecurrentSubtokenDecoder
 from model.recurrent_decoder import RecurrentDecoder
 from model.simple_decoder import SimpleDecoder
-from model.encoder import Encoder, GraphASTEncoder
+from model.encoder import Encoder
+from model.sequential_encoder import SequentialEncoder
+from model.graph_encoder import GraphASTEncoder
 from utils.graph import PackedGraph
 from utils.dataset import Batcher, Example
 from utils.vocab import SAME_VARIABLE_TOKEN
@@ -56,13 +58,14 @@ class RenamingModel(nn.Module):
     @classmethod
     def build(cls, config):
         params = util.update(cls.default_params(), config)
-        encoder = GraphASTEncoder.build(config['encoder'])
+        encoder = globals()[config['encoder']['type']].build(config['encoder'])
         decoder = globals()[config['decoder']['type']].build(config['decoder'])
 
         model = cls(encoder, decoder)
         params = util.update(params, {'encoder': encoder.config,
                                       'decoder': decoder.config})
         model.config = params
+        model.decoder.encoder = encoder  # give the decoder a reference to the encoder
 
         # assign batcher to sub-modules
         encoder.batcher = model.batcher
@@ -100,7 +103,7 @@ class RenamingModel(nn.Module):
         tgt_weight = prediction_target['variable_tgt_name_weight']
         weighted_log_prob = tgt_var_name_log_prob * tgt_weight
 
-        ast_log_probs = weighted_log_prob.sum(dim=-1) / prediction_target['variable_encoding_restoration_indices_mask'].sum(-1)
+        ast_log_probs = weighted_log_prob.sum(dim=-1) / prediction_target['target_variable_encoding_indices_mask'].sum(-1)
         result['batch_log_prob'] = ast_log_probs
 
         return result
