@@ -64,8 +64,6 @@ class Evaluator(object):
                 rename_results = model.decoder.predict(examples, model.encoder)
                 for example, rename_result in zip(examples, rename_results):
                     example_pred_accs = []
-                    if len(example.variable_name_map) == 0:
-                        continue
 
                     for old_name, gold_new_name in example.variable_name_map.items():
                         pred = rename_result[old_name]

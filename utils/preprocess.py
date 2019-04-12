@@ -6,6 +6,8 @@ Usage:
 Options:
     -h --help                  Show this screen.
     --shard-size=<int>         shard size [default: 3000]
+    --test-file=<file>         test file
+    --no-filtering             do not filter files
 """
 
 import glob
@@ -31,12 +33,18 @@ all_functions = dict()  # indexed by binaries
 
 
 def is_valid_example(example):
-    return example.ast.size < 300 and \
-           len(example.variable_name_map) > 0 and \
-           any(k != v for k, v in example.variable_name_map.items())
+    try:
+        is_valid = example.ast.size < 300 and \
+               len(example.variable_name_map) > 0 and \
+               any(k != v for k, v in example.variable_name_map.items())
+    except RecursionError:
+        is_valid = False
+
+    return is_valid
 
 
-def example_generator(json_queue, example_queue, consumer_num=1):
+def example_generator(json_queue, example_queue, args, consumer_num=1):
+    enable_filter = not args['--no-filtering']
     while True:
         payload = json_queue.get()
         if payload is None: break
@@ -63,7 +71,8 @@ def example_generator(json_queue, example_queue, consumer_num=1):
 
             example = Example.from_json_dict(tree_json_dict, binary_file=meta, json_str=json_str)
 
-            if is_valid_example(example):
+            is_valid = is_valid_example(example) if enable_filter else True
+            if is_valid:
                 canonical_code = canonicalize_code(example.ast.code)
                 example.canonical_code = canonical_code
                 examples.append(example)
@@ -81,7 +90,10 @@ def main(args):
     random.seed(1992)
 
     tgt_folder = args['TARGET_FOLDER']
-    tar_files = glob.glob(args['TAR_FILES'])
+    pattern_list = args['TAR_FILES'].split(',')
+    tar_files = []
+    for pattern in pattern_list:
+        tar_files.extend(glob.glob(pattern))
     print(tar_files)
     shard_size = int(args['--shard-size'])
 
@@ -103,7 +115,7 @@ def main(args):
 
         example_generators = []
         for i in range(num_workers):
-            p = multiprocessing.Process(target=example_generator, args=(json_enc_queue, example_queue, 1))
+            p = multiprocessing.Process(target=example_generator, args=(json_enc_queue, example_queue, args, 1))
             p.daemon = True
             p.start()
             example_generators.append(p)
@@ -138,16 +150,32 @@ def main(args):
 
     cur_dir = os.getcwd()
     all_files = glob.glob(os.path.join(tgt_folder, 'files/*.jsonl'))
+    file_prefix = os.path.join(tgt_folder, 'files/')
     sorted(all_files)  # sort all files by names
     all_files = list(all_files)
-    np.random.shuffle(all_files)
-    print('Total valid binary file num: ', len(all_files))
-
     file_num = len(all_files)
-    test_file_num = int(file_num * 0.1)
-    train_files = all_files[: -2 * test_file_num]
-    test_files = all_files[-2 * test_file_num: -test_file_num]
-    dev_files = all_files[-test_file_num:]
+    print('Total valid binary file num: ', file_num)
+
+    test_file = args['--test-file']
+    if test_file:
+        print(f'using test file {test_file}')
+        with tarfile.open(test_file, 'r') as f:
+            test_files = [os.path.join(file_prefix, x.name.split('/')[-1]) for x in f.getmembers() if x.name.endswith('.jsonl')]
+        dev_file_num = 0
+    else:
+        test_file_num = int(file_num * 0.1)
+        dev_file_num = int(file_num * 0.1)
+        test_files = list(np.random.choice(all_files, size=test_file_num, replace=False))
+
+    test_files_set = set(test_files)
+    train_files = [fname for fname in all_files if fname not in test_files_set]
+
+    if dev_file_num == 0:
+        dev_file_num = int(len(train_files) * 0.1)
+
+    np.random.shuffle(train_files)
+    dev_files = train_files[-dev_file_num:]
+    train_files = train_files[:-dev_file_num]
 
     train_functions = dict()
     for train_file in train_files:
@@ -155,6 +183,7 @@ def main(args):
         for func_name, func in all_functions[file_name].items():
             train_functions.setdefault(func_name, set()).add(func)
 
+    print(f'number training: {len(train_files)}, number dev: {len(dev_files)}, number test: {len(test_files)}')
     print('dump training files')
     shards = [train_files[i:i + shard_size] for i in range(0, len(train_files), shard_size)]
     for shard_id, shard_files in enumerate(shards):

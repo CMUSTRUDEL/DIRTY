@@ -30,7 +30,7 @@ import psutil, gc
 import torch
 
 from model.simple_decoder import SimpleDecoder
-from model.encoder import GraphASTEncoder
+from model.graph_encoder import GraphASTEncoder
 from model.gnn import AdjacencyList, GatedGraphNeuralNetwork
 from model.model import RenamingModel
 from utils import nn_util, util
@@ -134,11 +134,13 @@ def train(args):
             print(f'[Learner] Perform evaluation', file=sys.stderr)
             t1 = time.time()
             eval_results = Evaluator.decode_and_evaluate(model, dev_set, config)
+            # metric = eval_results['corpus_need_rename_acc']['accuracy']
             print(f'[Learner] Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
 
-        model_save_path = os.path.join(work_dir, f'model.iter{train_iter}.bin')
-        model.save(model_save_path)
-        print(f'[Learner] Saved model to {model_save_path}', file=sys.stderr)
+            model_save_path = os.path.join(work_dir, f'model.iter{train_iter}.bin')
+            model.save(model_save_path)
+            print(f'[Learner] Saved model to {model_save_path}', file=sys.stderr)
+
         t1 = time.time()
 
 

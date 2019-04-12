@@ -124,7 +124,7 @@ class SequentialEncoder(Encoder):
 
     @classmethod
     def to_tensor_dict(cls, examples: List[Example]) -> Dict[str, torch.Tensor]:
-        max_time_step = max(len(e.sub_token_ids) for e in examples)
+        max_time_step = max(e.source_seq_length for e in examples)
         input = np.zeros((len(examples), max_time_step), dtype=np.int64)
 
         variable_mention_to_variable_id = torch.zeros(len(examples), max_time_step, dtype=torch.long)
@@ -151,11 +151,10 @@ class SequentialEncoder(Encoder):
             for var_id, var_name in enumerate(example.ast.variables):
                 try:
                     var_pos = variable_position_map[var_name]
+                    variable_mention_num[e_id, var_id] = len(var_pos)
                 except KeyError:
-                    var_pos = [0]
+                    variable_mention_num[e_id, var_id] = 1
                     print(example.binary_file, f'variable [{var_name}] not found', file=sys.stderr)
-
-                variable_mention_num[e_id, var_id] = len(var_pos)
 
             variable_encoding_mask[e_id, :len(example.ast.variables)] = 1.
 

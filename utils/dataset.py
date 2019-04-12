@@ -70,14 +70,14 @@ class Batch(object):
 
 
 class Batcher(object):
-    def __init__(self, config, return_examples=True):
+    def __init__(self, config, train=True):
         self.config = config
         self.vocab = Vocab.load(config['data']['vocab_file'])
         self.grammar = self.vocab.grammar
 
-        self.return_examples = return_examples
+        self.train = train
 
-    def to_tensor_dict(self, examples: List[Example], train=True) -> Dict[str, torch.Tensor]:
+    def to_tensor_dict(self, examples: List[Example]) -> Dict[str, torch.Tensor]:
         from model.sequential_encoder import SequentialEncoder
         from model.graph_encoder import GraphASTEncoder
 
@@ -94,7 +94,7 @@ class Batcher(object):
         else:
             raise ValueError('UnknownEncoderType')
 
-        if train:
+        if self.train:
             prediction_target = self.to_batched_prediction_target(examples)
             tensor_dict['prediction_target'] = prediction_target
 
@@ -108,7 +108,7 @@ class Batcher(object):
         with torch.no_grad():
             tensor_dict = self.to_tensor_dict(examples)
 
-        if not self.return_examples:
+        if self.train:
             batch = Batch(None, tensor_dict)
             del examples[:]
         else:
@@ -279,13 +279,13 @@ def get_batch_size(batch_examples, use_seq_encoder=False):
         return len(batch_examples) * max(e.source_seq_length for e in batch_examples)
 
 
-def train_example_sort_key(example):
-    return example.target_prediction_seq_length
+def train_example_sort_key(example, use_seq_model=False):
+    return example.target_prediction_seq_length if not use_seq_model else example.source_seq_length
 
 
 def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config, worker_manager_lock):
     use_seq_encoder = config['encoder']['type'] == 'SequentialEncoder'
-    batcher = Batcher(config, return_examples=not train)
+    batcher = Batcher(config, train)
     tgt_bpe_model = batcher.vocab.target.subtoken_model
     vocab = batcher.vocab
 
@@ -348,9 +348,9 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
             if use_seq_encoder:
                 bpe_model = batcher.vocab.source_tokens.subtoken_model
                 snippet = example.code_tokens
-                snippet = ' '.join(['<s>'] + snippet + ['</s>'])
-                sub_tokens = bpe_model.encode_as_pieces(snippet)
-                sub_token_ids = bpe_model.encode_as_ids(snippet)
+                snippet = ' '.join(snippet)
+                sub_tokens = ['<s>'] + bpe_model.encode_as_pieces(snippet) + ['</s>']
+                sub_token_ids = [bpe_model.bos_id()] + bpe_model.encode_as_ids(snippet) + [bpe_model.eos_id()]
                 setattr(example, 'sub_tokens', sub_tokens)
                 setattr(example, 'sub_token_ids', sub_token_ids)
                 setattr(example, 'source_seq_length', len(sub_tokens))
