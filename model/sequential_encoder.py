@@ -162,7 +162,8 @@ class SequentialEncoder(Encoder):
                     variable_mention_to_variable_id=variable_mention_to_variable_id,
                     variable_mention_mask=variable_mention_mask,
                     variable_mention_num=variable_mention_num,
-                    variable_encoding_mask=variable_encoding_mask)
+                    variable_encoding_mask=variable_encoding_mask,
+                    batch_size=len(examples))
 
     def get_decoder_init_state(self, context_encoder, config=None):
         fwd_last_layer_cell = context_encoder['last_cells'][-1, 0]

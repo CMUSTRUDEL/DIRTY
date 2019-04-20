@@ -17,20 +17,32 @@ from utils.vocab import Vocab
 
 
 class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
-    def __init__(self, ast_node_encoding_size: int, hidden_size: int, dropout: float, vocab: Vocab):
-        super(AttentionalRecurrentSubtokenDecoder, self).__init__(ast_node_encoding_size, hidden_size, dropout, vocab)
+    def __init__(self, variable_encoding_size: int, context_encoding_size: int, hidden_size: int, dropout: float, vocab: Vocab):
+        super(AttentionalRecurrentSubtokenDecoder, self).__init__(variable_encoding_size, hidden_size, dropout, vocab)
 
-        self.att_src_linear = nn.Linear(ast_node_encoding_size, hidden_size, bias=False)
-        self.att_vec_linear = nn.Linear(ast_node_encoding_size + hidden_size, hidden_size, bias=False)
+        self.att_src_linear = nn.Linear(context_encoding_size, hidden_size, bias=False)
+        self.att_vec_linear = nn.Linear(context_encoding_size + hidden_size, hidden_size, bias=False)
 
     @classmethod
     def default_params(cls):
         params = RecurrentSubtokenDecoder.default_params()
         params.update({
+            'context_encoding_size': 128,
             'attention_target': 'ast_nodes'  # terminal_nodes
         })
 
         return params
+
+    @classmethod
+    def build(cls, config):
+        params = util.update(cls.default_params(), config)
+
+        vocab = Vocab.load(params['vocab_file'])
+        model = cls(params['variable_encoding_size'], params['context_encoding_size'],
+                    params['hidden_size'], params['dropout'], vocab)
+        model.config = params
+
+        return model
 
     def rnn_step(self, x, h_tm1, context_encoding):
         h_t, cell_t = self.lstm_cell(x, h_tm1)

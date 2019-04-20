@@ -91,6 +91,16 @@ class Batcher(object):
             tensor_dict.update(_tensors)
         elif self.config['encoder']['type'] == 'SequentialEncoder':
             tensor_dict = SequentialEncoder.to_tensor_dict(examples)
+        elif self.config['encoder']['type'] == 'HybridEncoder':
+            packed_graph, gnn_tensor_dict = GraphASTEncoder.to_packed_graph([e.ast for e in examples],
+                                                                            connections=self.config['encoder']['graph_encoder']['connections'])
+            gnn_tensors = GraphASTEncoder.to_tensor_dict(packed_graph, self.grammar, self.vocab)
+            gnn_tensor_dict.update(gnn_tensors)
+
+            seq_tensor_dict = SequentialEncoder.to_tensor_dict(examples)
+
+            tensor_dict = {'graph_encoder_input': gnn_tensor_dict,
+                           'seq_encoder_input': seq_tensor_dict}
         else:
             raise ValueError('UnknownEncoderType')
 
@@ -285,6 +295,7 @@ def train_example_sort_key(example, use_seq_model=False):
 
 def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config, worker_manager_lock):
     use_seq_encoder = config['encoder']['type'] == 'SequentialEncoder'
+    use_hybrid_encoder = config['encoder']['type'] == 'HybridEncoder'
     batcher = Batcher(config, train)
     tgt_bpe_model = batcher.vocab.target.subtoken_model
     vocab = batcher.vocab
@@ -345,7 +356,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
             else:
                 example = Example.from_json_dict(tree_json_dict, binary_file=meta)
 
-            if use_seq_encoder:
+            if use_seq_encoder or use_hybrid_encoder:
                 bpe_model = batcher.vocab.source_tokens.subtoken_model
                 snippet = example.code_tokens
                 snippet = ' '.join(snippet)

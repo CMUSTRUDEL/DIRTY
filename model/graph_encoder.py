@@ -354,6 +354,7 @@ class GraphASTEncoder(Encoder):
         node_type_indices = torch.from_numpy(node_type_indices)
 
         return dict(
+            batch_size=packed_graph.tree_num,
             tree_num=packed_graph.tree_num,
             node_syntax_type_indices=node_syntax_type_indices,
             node_type_indices=node_type_indices,

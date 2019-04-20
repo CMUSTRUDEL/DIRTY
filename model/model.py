@@ -13,6 +13,7 @@ from model.attentional_recurrent_subtoken_decoder import AttentionalRecurrentSub
 from model.recurrent_decoder import RecurrentDecoder
 from model.simple_decoder import SimpleDecoder
 from model.encoder import Encoder
+from model.hybrid_encoder import HybridEncoder
 from model.sequential_encoder import SequentialEncoder
 from model.graph_encoder import GraphASTEncoder
 from utils.graph import PackedGraph

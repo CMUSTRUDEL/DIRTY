@@ -14,13 +14,12 @@ from utils.vocab import Vocab, SAME_VARIABLE_TOKEN, END_OF_VARIABLE_TOKEN
 
 
 class RecurrentSubtokenDecoder(Decoder):
-    def __init__(self, ast_node_encoding_size: int, hidden_size: int, dropout: float, vocab: Vocab):
+    def __init__(self, variable_encoding_size: int, hidden_size: int, dropout: float, vocab: Vocab):
         super(Decoder, self).__init__()
 
         self.vocab = vocab
 
-        self.lstm_cell = nn.LSTMCell(ast_node_encoding_size + hidden_size, hidden_size)  # v_encoding_t + e(y_tm1)
-        self.decoder_cell_init = nn.Linear(ast_node_encoding_size, hidden_size)
+        self.lstm_cell = nn.LSTMCell(variable_encoding_size + hidden_size, hidden_size)  # v_encoding_t + e(y_tm1)
         self.state2names = nn.Linear(hidden_size, len(vocab.target), bias=True)
         self.dropout = nn.Dropout(dropout)
         self.config: Dict = None
@@ -35,7 +34,7 @@ class RecurrentSubtokenDecoder(Decoder):
     def default_params(cls):
         return {
             'vocab_file': None,
-            'ast_node_encoding_size': 128,
+            'variable_encoding_size': 128,
             'hidden_size': 128,
             'input_feed': False,
             'dropout': 0.2,
@@ -53,7 +52,8 @@ class RecurrentSubtokenDecoder(Decoder):
         params = util.update(cls.default_params(), config)
 
         vocab = Vocab.load(params['vocab_file'])
-        model = cls(params['ast_node_encoding_size'], params['hidden_size'], params['dropout'], vocab)
+        model = cls(params['variable_encoding_size'],
+                    params['hidden_size'], params['dropout'], vocab)
         model.config = params
 
         return model
