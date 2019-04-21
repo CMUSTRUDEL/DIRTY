@@ -311,7 +311,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
         batch_examples = []
 
         for example in buffer:
-            batch_size_with_example = get_batch_size(batch_examples + [example], use_seq_encoder)
+            batch_size_with_example = get_batch_size(batch_examples + [example], use_seq_encoder or use_hybrid_encoder)
             if batch_examples and batch_size_with_example > batch_size:
                 batches.append(batch_examples)
                 batch_examples = []
