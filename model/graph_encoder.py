@@ -7,6 +7,7 @@ from torch import nn as nn
 from model.embedding import NodeTypeEmbedder, SubTokenEmbedder
 from model.encoder import Encoder
 from model.gnn import GatedGraphNeuralNetwork, AdjacencyList
+from model.sequential_encoder import SequentialEncoder
 from utils import util
 from utils.ast import AbstractSyntaxTree
 from utils.grammar import Grammar
@@ -23,7 +24,8 @@ class GraphASTEncoder(Encoder):
                  decoder_hidden_size: int,
                  node_type_embedder: NodeTypeEmbedder,
                  node_content_embedder: SubTokenEmbedder,
-                 vocab: Vocab):
+                 vocab: Vocab,
+                 config):
         super(GraphASTEncoder, self).__init__()
 
         self.connections = connections
@@ -48,7 +50,16 @@ class GraphASTEncoder(Encoder):
 
         self.decoder_cell_init = nn.Linear(gnn.hidden_size, decoder_hidden_size)
 
-        self.config: Dict = None
+        self.init_with_seq_encoding = config['init_with_seq_encoding']
+        if self.init_with_seq_encoding:
+            self.seq_encoder = SequentialEncoder.build(config['seq_encoder'])
+            if config['seq_encoder']['source_encoding_size'] != gnn.hidden_size:
+                self.seq_variable_encoding_to_graph_linear = nn.Linear(config['seq_encoder']['source_encoding_size'],
+                                                                       gnn.hidden_size)
+            else:
+                self.seq_variable_encoding_to_graph_linear = lambda x: x
+
+        self.config: Dict = config
 
     @property
     def device(self):
@@ -67,7 +78,8 @@ class GraphASTEncoder(Encoder):
             'bpe_model_path': None,
             'node_syntax_type_embedding_size': 64,
             'node_type_embedding_size': 64,
-            'node_content_embedding_size': 128
+            'node_content_embedding_size': 128,
+            'init_with_seq_encoding': False
         }
 
     @classmethod
@@ -100,13 +112,21 @@ class GraphASTEncoder(Encoder):
                     params['decoder_hidden_size'],
                     node_type_embedder,
                     node_content_embedder,
-                    vocab)
+                    vocab,
+                    config=config)
         model.config = params
 
         return model
 
     def forward(self, tensor_dict: Dict[str, torch.Tensor]):
         tree_node_init_encoding = self.get_batched_tree_init_encoding(tensor_dict)
+
+        if self.init_with_seq_encoding:
+            # scatter sequential encoding results to variable positions
+            seq_encoding = self.seq_encoder(tensor_dict['seq_encoder_input'])
+            seq_var_encoding = seq_encoding['variable_encoding']
+            tree_node_init_encoding[tensor_dict['variable_master_node_ids']] = self.seq_variable_encoding_to_graph_linear(
+                seq_var_encoding.view(-1, seq_var_encoding.size(-1))[tensor_dict['var_repr_flattened_positions']])
 
         # (batch_size, node_encoding_size)
         tree_node_encoding = self.gnn.compute_node_representations(initial_node_representation=tree_node_init_encoding,
@@ -139,7 +159,8 @@ class GraphASTEncoder(Encoder):
 
     # noinspection PyUnboundLocalVariable
     @classmethod
-    def to_packed_graph(cls, asts: List[AbstractSyntaxTree], connections: List) -> Tuple[PackedGraph, Dict]:
+    def to_packed_graph(cls, asts: List[AbstractSyntaxTree], connections: List,
+                        init_with_seq_encoding: bool = False) -> Tuple[PackedGraph, Dict]:
         packed_graph = PackedGraph(asts)
         max_variable_num = max(len(ast.variables) for ast in asts)
 
@@ -151,6 +172,7 @@ class GraphASTEncoder(Encoder):
         func_root_to_arg_adj_list = []
 
         var_node_ids = []  # list of node ids of variable mentions
+        var_repr_flattened_positions = []  # list of positions of variable encodings in the flattened version of restored `variable_encoding`
         var_node_variable_ids = []
         var_mention_nums = []  # list of number of mentions for each variable
 
@@ -214,6 +236,8 @@ class GraphASTEncoder(Encoder):
                     var_mention_nums.append(var_node_num)
 
                 variable_repr_restoration_indices[ast_id, i] = variable_cum_count
+                var_repr_flattened_positions.append(i + max_variable_num * ast_id)
+
                 variable_cum_count += 1
 
             variable_repr_restoration_indices_mask[ast_id, :len(ast.variables)] = 1.
@@ -275,6 +299,9 @@ class GraphASTEncoder(Encoder):
                        'terminal_node_restoration_indices': terminal_node_restoration_indices,
                        'terminal_node_restoration_indices_mask': terminal_node_restoration_indices_mask,
                        'packed_graph_size': packed_graph.size}
+
+        if init_with_seq_encoding:
+            tensor_dict['var_repr_flattened_positions'] = torch.tensor(var_repr_flattened_positions, dtype=torch.long)
 
         if use_variable_master_node:
             tensor_dict['variable_master_node_ids'] = [_id for node, _id in

@@ -82,10 +82,15 @@ class Batcher(object):
         from model.graph_encoder import GraphASTEncoder
 
         if self.config['encoder']['type'] == 'GraphASTEncoder':
-            packed_graph, graph_tensor_dict = GraphASTEncoder.to_packed_graph([e.ast for e in examples],
-                                                                              connections=self.config['encoder']['connections'])
+            init_with_seq_encoding = self.config['encoder']['init_with_seq_encoding']
+            packed_graph, tensor_dict = GraphASTEncoder.to_packed_graph([e.ast for e in examples],
+                                                                        connections=self.config['encoder']['connections'],
+                                                                        init_with_seq_encoding=init_with_seq_encoding)
 
-            tensor_dict = graph_tensor_dict
+            if init_with_seq_encoding:
+                seq_tensor_dict = SequentialEncoder.to_tensor_dict(examples)
+                tensor_dict['seq_encoder_input'] = seq_tensor_dict
+
             _tensors = GraphASTEncoder.to_tensor_dict(packed_graph,
                                                       self.grammar, self.vocab)
             tensor_dict.update(_tensors)
@@ -294,8 +299,11 @@ def train_example_sort_key(example, use_seq_model=False):
 
 
 def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config, worker_manager_lock):
+    do_all = config['encoder']['type'] == 'EnsembleModel'  # for ensembling
+
     use_seq_encoder = config['encoder']['type'] == 'SequentialEncoder'
     use_hybrid_encoder = config['encoder']['type'] == 'HybridEncoder'
+    init_with_seq_encoding = config['encoder']['type'] == 'GraphASTEncoder' and config['encoder']['init_with_seq_encoding']
     batcher = Batcher(config, train)
     tgt_bpe_model = batcher.vocab.target.subtoken_model
     vocab = batcher.vocab
@@ -356,7 +364,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
             else:
                 example = Example.from_json_dict(tree_json_dict, binary_file=meta)
 
-            if use_seq_encoder or use_hybrid_encoder:
+            if use_seq_encoder or use_hybrid_encoder or init_with_seq_encoding or do_all:
                 bpe_model = batcher.vocab.source_tokens.subtoken_model
                 snippet = example.code_tokens
                 snippet = ' '.join(snippet)
@@ -366,7 +374,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
                 setattr(example, 'sub_token_ids', sub_token_ids)
                 setattr(example, 'source_seq_length', len(sub_tokens))
 
-            if tgt_bpe_model:
+            if tgt_bpe_model or do_all:
                 eov_id = tgt_bpe_model.eos_id()
                 variable_name_subtoken_map = dict()
                 tgt_pred_seq_len = 0
