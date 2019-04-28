@@ -121,6 +121,9 @@ class RenamingModel(nn.Module):
                 for example, rename_result in zip(batch.examples, rename_results):
                     yield example, rename_result
 
+    def predict(self, examples: List[Example]):
+        return self.decoder.predict(examples, self.encoder)
+
     def save(self, model_path, **kwargs):
         params = {
             'config': self.config,
@@ -142,7 +145,7 @@ class RenamingModel(nn.Module):
         kwargs = params['kwargs'] if params['kwargs'] is not None else dict()
 
         model = cls.build(config, **kwargs)
-        model.load_state_dict(params['state_dict'])
+        model.load_state_dict(params['state_dict'], strict=False)
         model = model.to(device)
         model.eval()
 

@@ -72,14 +72,84 @@ class Batch(object):
 class Batcher(object):
     def __init__(self, config, train=True):
         self.config = config
-        self.vocab = Vocab.load(config['data']['vocab_file'])
-        self.grammar = self.vocab.grammar
-
         self.train = train
+
+        # model specific config
+        self.is_ensemble = config['encoder']['type'] == 'EnsembleModel'
+        if not self.is_ensemble:
+            self.vocab = Vocab.load(config['data']['vocab_file'])
+            self.grammar = self.vocab.grammar
+
+        self.use_seq_encoder = config['encoder']['type'] == 'SequentialEncoder'
+        self.use_hybrid_encoder = config['encoder']['type'] == 'HybridEncoder'
+        self.init_gnn_with_seq_encoding = config['encoder']['type'] == 'GraphASTEncoder' and config['encoder']['init_with_seq_encoding']
+
+    @property
+    def annotate_sequential_input(self):
+        return self.use_seq_encoder or self.use_hybrid_encoder or self.init_gnn_with_seq_encoding
+
+    def annotate_example(self, example) -> Example:
+        """annotate examples by populating specific fields, useful for sorting examples or batching"""
+        # for ensemble models, it will be annotated by the batcher for each specific class
+        if self.is_ensemble:
+            return example
+
+        if self.annotate_sequential_input:
+            src_bpe_model = self.vocab.source_tokens.subtoken_model
+            snippet = example.code_tokens
+            snippet = ' '.join(snippet)
+            sub_tokens = ['<s>'] + src_bpe_model.encode_as_pieces(snippet) + ['</s>']
+            sub_token_ids = [src_bpe_model.bos_id()] + src_bpe_model.encode_as_ids(snippet) + [src_bpe_model.eos_id()]
+            setattr(example, 'sub_tokens', sub_tokens)
+            setattr(example, 'sub_token_ids', sub_token_ids)
+            setattr(example, 'source_seq_length', len(sub_tokens))
+
+        tgt_bpe_model = self.vocab.target.subtoken_model
+        eov_id = tgt_bpe_model.eos_id()
+        variable_name_subtoken_map = dict()
+        tgt_pred_seq_len = 0
+        for old_name, new_name in example.variable_name_map.items():
+            if old_name == new_name:
+                subtoken_ids = [self.vocab.target[SAME_VARIABLE_TOKEN], eov_id]
+            else:
+                subtoken_ids = tgt_bpe_model.encode_as_ids(new_name) + [eov_id]
+            variable_name_subtoken_map[old_name] = subtoken_ids
+            tgt_pred_seq_len += len(subtoken_ids)
+
+        setattr(example, 'variable_name_subtoken_map', variable_name_subtoken_map)
+        setattr(example, 'target_prediction_seq_length', tgt_pred_seq_len)
+
+        return example
+
+    def sort_training_examples(self, examples):
+        def _key(_example):
+            if self.use_seq_encoder:
+                return _example.source_seq_length
+            elif self.is_ensemble:
+                return len(_example.ast.code)
+            else:
+                return _example.target_prediction_seq_length
+
+        examples.sort(key=_key)
+
+        return examples
+
+    def get_batch_size(self, examples: List[Example]):
+        if self.is_ensemble:
+            return len(examples)
+
+        if self.annotate_sequential_input:
+            return len(examples) * max(e.source_seq_length for e in examples)
+        else:
+            return len(examples) * max(e.target_prediction_seq_length for e in examples)
 
     def to_tensor_dict(self, examples: List[Example]) -> Dict[str, torch.Tensor]:
         from model.sequential_encoder import SequentialEncoder
         from model.graph_encoder import GraphASTEncoder
+
+        if not hasattr(examples[0], 'target_prediction_seq_length'):
+            for example in examples:
+                self.annotate_example(example)
 
         if self.config['encoder']['type'] == 'GraphASTEncoder':
             init_with_seq_encoding = self.config['encoder']['init_with_seq_encoding']
@@ -120,8 +190,12 @@ class Batcher(object):
         return tensor_dict
 
     def to_batch(self, examples: List[Example]) -> Batch:
-        with torch.no_grad():
-            tensor_dict = self.to_tensor_dict(examples)
+        if self.is_ensemble:
+            # do not perform tensorization for the parent ensemble model
+            tensor_dict = None
+        else:
+            with torch.no_grad():
+                tensor_dict = self.to_tensor_dict(examples)
 
         if self.train:
             batch = Batch(None, tensor_dict)
@@ -287,39 +361,22 @@ def example_generator(json_queue, example_queue, consumer_num=1):
     # print('[Example Generator] example generator process quit!')
 
 
-def get_batch_size(batch_examples, use_seq_encoder=False):
-    if not use_seq_encoder:
-        return len(batch_examples) * max(e.target_prediction_seq_length for e in batch_examples)
-    else:
-        return len(batch_examples) * max(e.source_seq_length for e in batch_examples)
-
-
-def train_example_sort_key(example, use_seq_model=False):
-    return example.target_prediction_seq_length if not use_seq_model else example.source_seq_length
-
-
 def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config, worker_manager_lock):
-    do_all = config['encoder']['type'] == 'EnsembleModel'  # for ensembling
-
-    use_seq_encoder = config['encoder']['type'] == 'SequentialEncoder'
-    use_hybrid_encoder = config['encoder']['type'] == 'HybridEncoder'
-    init_with_seq_encoding = config['encoder']['type'] == 'GraphASTEncoder' and config['encoder']['init_with_seq_encoding']
     batcher = Batcher(config, train)
-    tgt_bpe_model = batcher.vocab.target.subtoken_model
-    vocab = batcher.vocab
 
     buffer_size = config['train']['buffer_size']
     buffer = []
     print(f'[ExampleToBatch] pid={os.getpid()}', file=sys.stderr)
 
     def _generate_batches():
-        buffer.sort(key=train_example_sort_key)
+        # buffer.sort(key=batcher.train_example_sort_key)
+        batcher.sort_training_examples(buffer)
 
         batches = []
         batch_examples = []
 
         for example in buffer:
-            batch_size_with_example = get_batch_size(batch_examples + [example], use_seq_encoder or use_hybrid_encoder)
+            batch_size_with_example = batcher.get_batch_size(batch_examples + [example])
             if batch_examples and batch_size_with_example > batch_size:
                 batches.append(batch_examples)
                 batch_examples = []
@@ -364,30 +421,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
             else:
                 example = Example.from_json_dict(tree_json_dict, binary_file=meta)
 
-            if use_seq_encoder or use_hybrid_encoder or init_with_seq_encoding or do_all:
-                bpe_model = batcher.vocab.source_tokens.subtoken_model
-                snippet = example.code_tokens
-                snippet = ' '.join(snippet)
-                sub_tokens = ['<s>'] + bpe_model.encode_as_pieces(snippet) + ['</s>']
-                sub_token_ids = [bpe_model.bos_id()] + bpe_model.encode_as_ids(snippet) + [bpe_model.eos_id()]
-                setattr(example, 'sub_tokens', sub_tokens)
-                setattr(example, 'sub_token_ids', sub_token_ids)
-                setattr(example, 'source_seq_length', len(sub_tokens))
-
-            if tgt_bpe_model or do_all:
-                eov_id = tgt_bpe_model.eos_id()
-                variable_name_subtoken_map = dict()
-                tgt_pred_seq_len = 0
-                for old_name, new_name in example.variable_name_map.items():
-                    if old_name == new_name:
-                        subtoken_ids = [vocab.target[SAME_VARIABLE_TOKEN], eov_id]
-                    else:
-                        subtoken_ids = tgt_bpe_model.encode_as_ids(new_name) + [eov_id]
-                    variable_name_subtoken_map[old_name] = subtoken_ids
-                    tgt_pred_seq_len += len(subtoken_ids)
-
-                setattr(example, 'variable_name_subtoken_map', variable_name_subtoken_map)
-                setattr(example, 'target_prediction_seq_length', tgt_pred_seq_len)
+            batcher.annotate_example(example)
 
             if train:
                 if is_valid_training_example(example):
@@ -408,28 +442,6 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
         time.sleep(1)
 
     print(f'[ExampleToBatch] quit', file=sys.stderr)
-    sys.stderr.flush()
-
-
-def batch_generator(batched_examples_queue, batch_queue, return_examples, config):
-    batcher = Batcher(config, return_examples)
-
-    print(f'[BatchGenerator] pid={os.getpid()}', file=sys.stderr)
-
-    while True:
-        batched_examples = batched_examples_queue.get()
-        if batched_examples is None:
-            break
-        else:
-            batch = batcher.to_batch(batched_examples)
-            # print(f'[Batcher] Batch queue size {batch_queue.qsize()}', file=sys.stderr)
-            batch_queue.put(batch)
-
-    batch_queue.put(None)
-    while batcher_sync_msg.value == 0:
-        time.sleep(1)
-
-    print('[Batcher] Quit current batcher', file=sys.stderr)
     sys.stderr.flush()
 
 

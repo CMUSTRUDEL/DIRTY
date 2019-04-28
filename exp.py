@@ -12,6 +12,8 @@ Options:
     --seed=<int>                                Seed [default: 0]
     --work-dir=<dir>                            work dir [default: data/exp_runs/]
     --extra-config=<str>                        extra config [default: {}]
+    --ensemble                                  Use ensemble
+    --save-to=<str>                             Save decode results to path
 """
 import pickle
 import random
@@ -29,6 +31,7 @@ import psutil, gc
 
 import torch
 
+from model.ensemble_model import EnsembleModel
 from model.simple_decoder import SimpleDecoder
 from model.graph_encoder import GraphASTEncoder
 from model.gnn import AdjacencyList, GatedGraphNeuralNetwork
@@ -88,6 +91,7 @@ def train(args):
     cum_loss = 0.
     t_log = time.time()
 
+    history_accs = []
     while True:
         # load training dataset, which is a collection of ASTs and maps of gold-standard renamings
         train_set_iter = train_set.batch_iterator(batch_size=batch_size,
@@ -133,19 +137,21 @@ def train(args):
         if epoch % evaluate_every_nepoch == 0:
             print(f'[Learner] Perform evaluation', file=sys.stderr)
             t1 = time.time()
+            # ppl = Evaluator.evaluate_ppl(model, dev_set, config)
             eval_results = Evaluator.decode_and_evaluate(model, dev_set, config)
-            # metric = eval_results['corpus_need_rename_acc']['accuracy']
             print(f'[Learner] Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
-
-            model_save_path = os.path.join(work_dir, f'model.iter{train_iter}.bin')
-            model.save(model_save_path)
-            print(f'[Learner] Saved model to {model_save_path}', file=sys.stderr)
+            dev_metric = eval_results['func_body_not_in_train_acc']['accuracy']
+            if len(history_accs) or dev_metric > max(history_accs):
+                model_save_path = os.path.join(work_dir, f'model.bin')
+                model.save(model_save_path)
+                print(f'[Learner] Saved currently the best model to {model_save_path}', file=sys.stderr)
 
         t1 = time.time()
 
 
 def test(args):
     sys.setrecursionlimit(7000)
+    is_ensemble = args['--ensemble']
     model_path = args['MODEL_FILE']
     test_set_path = args['TEST_DATA_FILE']
 
@@ -155,7 +161,10 @@ def test(args):
         extra_config = json.loads(extra_config)
 
     print(f'loading model from [{model_path}]', file=sys.stderr)
-    model = RenamingModel.load(model_path, use_cuda=args['--cuda'], new_config=extra_config)
+    model_cls = EnsembleModel if is_ensemble else RenamingModel
+    if is_ensemble:
+        model_path = model_path.split(',')
+    model = model_cls.load(model_path, use_cuda=args['--cuda'], new_config=extra_config)
     model.eval()
 
     test_set = Dataset(test_set_path)
@@ -163,7 +172,9 @@ def test(args):
 
     print(eval_results, file=sys.stderr)
 
-    pickle.dump(decode_results, open(args['MODEL_FILE'] + f'.{test_set_path.split("/")[-1]}.decode_results.bin', 'wb'))
+    save_to = args['--save-to'] if args['--save-to'] else args['MODEL_FILE'] + f'.{test_set_path.split("/")[-1]}.decode_results.bin'
+    print(f'Save decode results to {save_to}', file=sys.stderr)
+    pickle.dump(decode_results, open(save_to, 'wb'))
 
 
 if __name__ == '__main__':

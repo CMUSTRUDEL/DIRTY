@@ -37,8 +37,9 @@ class Evaluator(object):
         return avg_results
 
     @staticmethod
-    def decode_and_evaluate(model: RenamingModel, dataset: Dataset, config: Dict, return_results=False):
-        eval_batch_size = config['train']['eval_batch_size'] if 'eval_batch_size' in config['train'] else config['train']['batch_size']
+    def decode_and_evaluate(model: RenamingModel, dataset: Dataset, config: Dict, return_results=False, eval_batch_size=None):
+        if eval_batch_size is None:
+            eval_batch_size = config['train']['eval_batch_size'] if 'eval_batch_size' in config['train'] else config['train']['batch_size']
         data_iter = dataset.batch_iterator(batch_size=eval_batch_size,
                                            train=False, progress=True,
                                            config=model.config,
@@ -56,12 +57,12 @@ class Evaluator(object):
         func_body_in_train_acc_list = []
         func_body_not_in_train_acc_list = []
 
-        all_examples = []
+        all_examples = dict()
 
         with torch.no_grad():
             for batch in data_iter:
                 examples = batch.examples
-                rename_results = model.decoder.predict(examples, model.encoder)
+                rename_results = model.predict(examples)
                 for example, rename_result in zip(examples, rename_results):
                     example_pred_accs = []
 
@@ -89,7 +90,8 @@ class Evaluator(object):
                     example_acc_list.append(example_pred_accs)
 
                     if return_results:
-                        all_examples.append((example, rename_result, example_pred_accs))
+                        all_examples[example.binary_file['file_name'] + '_' + str(example.binary_file['line_num'])] = (rename_result, Evaluator.average(example_pred_accs))
+                        # all_examples.append((example, rename_result, example_pred_accs))
 
         valid_example_num = len(example_acc_list)
         num_variables = len(variable_acc_list)

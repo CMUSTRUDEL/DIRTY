@@ -27,6 +27,7 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
     def default_params(cls):
         params = RecurrentSubtokenDecoder.default_params()
         params.update({
+            'remove_duplicates_in_prediction': True,
             'context_encoding_size': 128,
             'attention_target': 'ast_nodes'  # terminal_nodes
         })
@@ -78,12 +79,13 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
         beam_size = self.config['beam_size']
         same_variable_id = self.vocab.target[SAME_VARIABLE_TOKEN]
         end_of_variable_id = self.vocab.target[END_OF_VARIABLE_TOKEN]
+        remove_duplicate = self.config['remove_duplicates_in_prediction']
 
         variable_nums = []
         for ast_id, example in enumerate(examples):
             variable_nums.append(len(example.ast.variables))
 
-        beams = OrderedDict((ast_id, [self.Hypothesis([], 0, 0.)]) for ast_id in range(batch_size))
+        beams = OrderedDict((ast_id, [self.Hypothesis([[]], 0, 0.)]) for ast_id in range(batch_size))
         hyp_scores_tm1 = torch.zeros(len(beams), device=self.device)
         completed_hyps = [[] for _ in range(batch_size)]
         tgt_vocab_size = len(self.vocab.target)
@@ -157,14 +159,24 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
                     new_hyp_score = _new_hyp_scores[i].item()
 
                     variable_ptr = prev_hyp.variable_ptr
-                    if hyp_var_name_id == end_of_variable_id:
-                        variable_ptr += 1
+                    new_variable_list = list(prev_hyp.variable_list)
+                    new_variable_list[-1] = list(new_variable_list[-1] + [hyp_var_name_id])
 
+                    if hyp_var_name_id == end_of_variable_id:
                         # remove empty cases
-                        if len(prev_hyp.variable_list) == 0 or prev_hyp.variable_list[-1] == end_of_variable_id:
+                        if new_variable_list[-1] == [end_of_variable_id]:
                             continue
 
-                    new_hyp = self.Hypothesis(variable_list=list(prev_hyp.variable_list) + [hyp_var_name_id],
+                        if remove_duplicate:
+                            last_pred = new_variable_list[-1]
+                            if any(x == last_pred for x in new_variable_list[:-1] if x != [same_variable_id, end_of_variable_id]):
+                                # print('found a duplicate!', ', '.join([str(x) for x in last_pred]))
+                                continue
+
+                        variable_ptr += 1
+                        new_variable_list.append([])
+
+                    new_hyp = self.Hypothesis(variable_list=new_variable_list,
                                               variable_ptr=variable_ptr,
                                               score=new_hyp_score)
 
@@ -220,22 +232,31 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
                                                         'prob': 0.}
             else:
                 top_hyp = hyps[0]
-                sub_token_ptr = 0
-                for old_name in ast.variables:
-                    sub_token_begin = sub_token_ptr
-                    while top_hyp.variable_list[sub_token_ptr] != end_of_variable_id:
-                        sub_token_ptr += 1
-                    sub_token_ptr += 1  # point to first sub-token of next variable
-                    sub_token_end = sub_token_ptr
+                # sub_token_ptr = 0
+                # for old_name in ast.variables:
+                #     sub_token_begin = sub_token_ptr
+                #     while top_hyp.variable_list[sub_token_ptr] != end_of_variable_id:
+                #         sub_token_ptr += 1
+                #     sub_token_ptr += 1  # point to first sub-token of next variable
+                #     sub_token_end = sub_token_ptr
+                #
+                #     var_name_token_ids = top_hyp.variable_list[sub_token_begin: sub_token_end]  # include ending </s>
+                #     if var_name_token_ids == [same_variable_id, end_of_variable_id]:
+                #         new_var_name = old_name
+                #     else:
+                #         new_var_name = self.vocab.target.subtoken_model.decode_ids(var_name_token_ids)
+                #
+                #     variable_rename_result[old_name] = {'new_name': new_var_name,
+                #                                         'prob': top_hyp.score}
 
-                    var_name_token_ids = top_hyp.variable_list[sub_token_begin: sub_token_end]  # include ending </s>
+                for var_id, old_name in enumerate(ast.variables):
+                    var_name_token_ids = top_hyp.variable_list[var_id]
                     if var_name_token_ids == [same_variable_id, end_of_variable_id]:
                         new_var_name = old_name
                     else:
                         new_var_name = self.vocab.target.subtoken_model.decode_ids(var_name_token_ids)
 
-                    variable_rename_result[old_name] = {'new_name': new_var_name,
-                                                        'prob': top_hyp.score}
+                    variable_rename_result[old_name] = {'new_name': new_var_name, 'prob': top_hyp.score}
 
             variable_rename_results.append(variable_rename_result)
 

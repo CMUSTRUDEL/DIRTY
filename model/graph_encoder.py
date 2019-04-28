@@ -86,6 +86,8 @@ class GraphASTEncoder(Encoder):
     def build(cls, config):
         params = util.update(GraphASTEncoder.default_params(), config)
 
+        print(params)
+
         connections = params['connections']
         connection2edge_type = {
             'top_down': 1,
@@ -113,8 +115,7 @@ class GraphASTEncoder(Encoder):
                     node_type_embedder,
                     node_content_embedder,
                     vocab,
-                    config=config)
-        model.config = params
+                    config=params)
 
         return model
 

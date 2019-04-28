@@ -163,6 +163,7 @@ def main(args):
             test_files = [os.path.join(file_prefix, x.name.split('/')[-1]) for x in f.getmembers() if x.name.endswith('.jsonl')]
         dev_file_num = 0
     else:
+        print(f'randomly sample test file {test_file}')
         test_file_num = int(file_num * 0.1)
         dev_file_num = int(file_num * 0.1)
         test_files = list(np.random.choice(all_files, size=test_file_num, replace=False))
