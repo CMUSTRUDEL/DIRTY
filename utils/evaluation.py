@@ -1,10 +1,11 @@
-from typing import Dict, List
+from typing import Dict, List, Any
 
 import numpy as np
 import torch
 
 import editdistance
 
+from utils import nn_util
 from utils.dataset import Dataset
 from model.model import RenamingModel
 
@@ -37,11 +38,48 @@ class Evaluator(object):
         return avg_results
 
     @staticmethod
+    def evaluate_ppl(model: RenamingModel, dataset: Dataset, config: Dict, predicate: Any = None):
+        if predicate is None:
+            predicate = lambda e: True
+
+        eval_batch_size = config['train']['batch_size']
+        data_iter = dataset.batch_iterator(batch_size=eval_batch_size,
+                                           train=False, progress=True,
+                                           return_examples=False,
+                                           return_prediction_target=True,
+                                           config=model.config,
+                                           num_readers=config['train']['num_readers'],
+                                           num_batchers=config['train']['num_batchers'])
+
+        was_training = model.training
+        model.eval()
+        cum_log_probs = 0.
+        cum_num_examples = 0
+        with torch.no_grad():
+            for batch in data_iter:
+                nn_util.to(batch.tensor_dict, model.device)
+                result = model(batch.tensor_dict, batch.tensor_dict['prediction_target'])
+                log_probs = result['batch_log_prob'].cpu().tolist()
+                for e_id, test_meta in enumerate(batch.tensor_dict['test_meta']):
+                    if predicate(test_meta):
+                        log_prob = log_probs[e_id]
+                        cum_log_probs += log_prob
+                        cum_num_examples += 1
+
+        ppl = np.exp(-cum_log_probs / cum_num_examples)
+
+        if was_training:
+            model.train()
+
+        return ppl
+
+    @staticmethod
     def decode_and_evaluate(model: RenamingModel, dataset: Dataset, config: Dict, return_results=False, eval_batch_size=None):
         if eval_batch_size is None:
             eval_batch_size = config['train']['eval_batch_size'] if 'eval_batch_size' in config['train'] else config['train']['batch_size']
         data_iter = dataset.batch_iterator(batch_size=eval_batch_size,
                                            train=False, progress=True,
+                                           return_examples=True,
                                            config=model.config,
                                            num_readers=config['train']['num_readers'],
                                            num_batchers=config['train']['num_batchers'])
@@ -66,8 +104,9 @@ class Evaluator(object):
                 for example, rename_result in zip(examples, rename_results):
                     example_pred_accs = []
 
+                    top_rename_result = rename_result[0]
                     for old_name, gold_new_name in example.variable_name_map.items():
-                        pred = rename_result[old_name]
+                        pred = top_rename_result[old_name]
                         pred_new_name = pred['new_name']
                         var_metric = Evaluator.get_soft_metrics(pred_new_name, gold_new_name)
                         # is_correct = pred_new_name == gold_new_name

@@ -14,13 +14,20 @@ from utils.vocab import Vocab, SAME_VARIABLE_TOKEN, END_OF_VARIABLE_TOKEN
 
 
 class RecurrentSubtokenDecoder(Decoder):
-    def __init__(self, variable_encoding_size: int, hidden_size: int, dropout: float, vocab: Vocab):
+    def __init__(self, variable_encoding_size: int, hidden_size: int, dropout: float, tie_embed: bool, input_feed: bool, vocab: Vocab):
         super(Decoder, self).__init__()
 
         self.vocab = vocab
 
-        self.lstm_cell = nn.LSTMCell(variable_encoding_size + hidden_size, hidden_size)  # v_encoding_t + e(y_tm1)
+        lstm_x_dim = variable_encoding_size + hidden_size
+        if input_feed:
+            lstm_x_dim += hidden_size
+
+        self.lstm_cell = nn.LSTMCell(lstm_x_dim, hidden_size)  # v_encoding_t + e(y_tm1)
         self.state2names = nn.Linear(hidden_size, len(vocab.target), bias=True)
+        if not tie_embed:
+            self.var_name_embed = nn.Embedding(len(vocab.target), hidden_size)
+
         self.dropout = nn.Dropout(dropout)
         self.config: Dict = None
 
@@ -37,6 +44,7 @@ class RecurrentSubtokenDecoder(Decoder):
             'variable_encoding_size': 128,
             'hidden_size': 128,
             'input_feed': False,
+            'tie_embedding': True,
             'dropout': 0.2,
             'beam_size': 5,
             'max_prediction_time_step': 1200,
@@ -53,7 +61,7 @@ class RecurrentSubtokenDecoder(Decoder):
 
         vocab = Vocab.load(params['vocab_file'])
         model = cls(params['variable_encoding_size'],
-                    params['hidden_size'], params['dropout'], vocab)
+                    params['hidden_size'], params['dropout'], params['tie_embedding'], params['input_feed'], vocab)
         model.config = params
 
         return model
@@ -106,7 +114,10 @@ class RecurrentSubtokenDecoder(Decoder):
             h_tm1 = h_t
             query_vecs.append(q_t)
             v_tm1_name_id = variable_tgt_name_id[:, t]
-            v_tm1_name_embed = self.state2names.weight[v_tm1_name_id]
+            if self.config['tie_embedding']:
+                v_tm1_name_embed = self.state2names.weight[v_tm1_name_id]
+            else:
+                v_tm1_name_embed = self.var_name_embed(v_tm1_name_id)
 
             if self.independent_prediction_for_each_variable and t < max_time_step - 1:
                 # (batch_size, )

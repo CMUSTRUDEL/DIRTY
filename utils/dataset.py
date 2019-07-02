@@ -143,7 +143,7 @@ class Batcher(object):
         else:
             return len(examples) * max(e.target_prediction_seq_length for e in examples)
 
-    def to_tensor_dict(self, examples: List[Example]) -> Dict[str, torch.Tensor]:
+    def to_tensor_dict(self, examples: List[Example], return_prediction_target=True) -> Dict[str, torch.Tensor]:
         from model.sequential_encoder import SequentialEncoder
         from model.graph_encoder import GraphASTEncoder
 
@@ -179,9 +179,13 @@ class Batcher(object):
         else:
             raise ValueError('UnknownEncoderType')
 
-        if self.train:
+        if self.train or return_prediction_target:
             prediction_target = self.to_batched_prediction_target(examples)
             tensor_dict['prediction_target'] = prediction_target
+
+        if not self.train:
+            if hasattr(examples[0], 'test_meta'):
+                tensor_dict['test_meta'] = [e.test_meta for e in examples]
 
         tensor_dict['batch_size'] = len(examples)
         num_elements = nn_util.get_tensor_dict_size(tensor_dict)
@@ -189,15 +193,15 @@ class Batcher(object):
 
         return tensor_dict
 
-    def to_batch(self, examples: List[Example]) -> Batch:
+    def to_batch(self, examples: List[Example], return_examples=False, return_prediction_target=True) -> Batch:
         if self.is_ensemble:
             # do not perform tensorization for the parent ensemble model
             tensor_dict = None
         else:
             with torch.no_grad():
-                tensor_dict = self.to_tensor_dict(examples)
+                tensor_dict = self.to_tensor_dict(examples, return_prediction_target)
 
-        if self.train:
+        if not return_examples:
             batch = Batch(None, tensor_dict)
             del examples[:]
         else:
@@ -280,15 +284,17 @@ class Batcher(object):
                     target_variable_encoding_indices_mask=target_variable_encoding_indices_mask)
 
 
-def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, group_by=None) -> Iterable:
+def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, group_by=None, buffer=True) -> Iterable:
     assert group_by in (None, 'binary_file')
+
+    if shuffle:
+        assert buffer is False
 
     if isinstance(file_paths, str):
         file_paths = [file_paths]
 
     if shuffle:
         np.random.shuffle(file_paths)
-
     for file_path in file_paths:
         payloads = []
         t1 = time.time()
@@ -308,8 +314,11 @@ def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, g
                             # if tree_encoding_line.decode().startswith('{'):
                             # tree_json_dict = json.loads(tree_encoding_line)
                             payload = tree_encoding_line, dict(file_name=filename, line_num=line_no)
-                            # yield payload
-                            payloads.append(payload)
+                            if buffer:
+                                payloads.append(payload)
+                            else:
+                                yield payload
+
                     elif group_by == 'binary_file':
                         lines = [(l.decode().strip(), dict(file_name=filename, line_num=line_no))
                                  for line_no, l in enumerate(jsonl_file)]
@@ -324,8 +333,8 @@ def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, g
             yield payload
 
 
-def json_line_reader(file_path, queue, worker_num, shuffle, progress, group_by=None):
-    for json_str in get_json_iterator_from_tar_file(file_path, shuffle, progress, group_by=group_by):
+def json_line_reader(file_path, queue, worker_num, shuffle, progress, group_by=None, buffer=True):
+    for json_str in get_json_iterator_from_tar_file(file_path, shuffle, progress, group_by=group_by, buffer=buffer):
         queue.put(json_str)
 
     for i in range(worker_num):
@@ -361,7 +370,7 @@ def example_generator(json_queue, example_queue, consumer_num=1):
     # print('[Example Generator] example generator process quit!')
 
 
-def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config, worker_manager_lock):
+def example_to_batch(json_queue, batched_examples_queue, batch_size, train, config, worker_manager_lock, return_examples=False, return_prediction_target=True):
     batcher = Batcher(config, train)
 
     buffer_size = config['train']['buffer_size']
@@ -390,7 +399,7 @@ def example_to_batch(json_queue, batched_examples_queue, batch_size, train, conf
             random.shuffle(batches)
 
         for batch_examples in batches:
-            batch = batcher.to_batch(batch_examples)
+            batch = batcher.to_batch(batch_examples, return_examples=return_examples, return_prediction_target=return_prediction_target)
             # while batched_examples_queue.qsize() > 100:
             #     time.sleep(10)
             # print(batch.tensor_dict['num_elements'])
@@ -526,7 +535,7 @@ class Dataset(object):
         example_queue = multiprocessing.Queue(maxsize=5000)
 
         json_loader = multiprocessing.Process(target=json_line_reader, args=(self.file_paths, json_enc_queue, num_workers,
-                                                                             shuffle, False))
+                                                                             shuffle, False, None, False))
         json_loader.daemon = True
         example_generators = []
         for i in range(num_workers):
@@ -559,7 +568,8 @@ class Dataset(object):
         return it_func(self._get_iterator(shuffle, num_workers))
 
     def batch_iterator(self, batch_size: int, config: Dict,
-                       return_examples=True,
+                       return_examples=False,
+                       return_prediction_target=None,
                        num_readers=3,
                        num_batchers=3,
                        progress=True, train=False, single_batcher=False) -> Iterable[Union[Batch, Dict[str, torch.Tensor]]]:
@@ -571,9 +581,9 @@ class Dataset(object):
         if single_batcher:
             return it_func(self._single_process_batch_iter(batch_size, config, num_readers, train))
         else:
-            return it_func(self._batch_iterator(batch_size, config, num_readers, num_batchers, train, return_examples))
+            return it_func(self._batch_iterator(batch_size, config, num_readers, num_batchers, train, return_examples, return_prediction_target))
 
-    def _batch_iterator(self, batch_size: int, config: Dict, num_readers, num_batchers, train=False, return_examples=True) -> Iterable[Batch]:
+    def _batch_iterator(self, batch_size: int, config: Dict, num_readers, num_batchers, train=False, return_examples=False, return_prediction_target=None) -> Iterable[Batch]:
         global batcher_sync_msg
         batcher_sync_msg = multiprocessing.Value('i', 0)
         json_enc_queue = multiprocessing.Queue(maxsize=10000)
@@ -585,9 +595,13 @@ class Dataset(object):
         json_loader.daemon = True
         example_generators = []
         worker_result_queue = torch_mp.Queue(maxsize=150)
+
+        if return_prediction_target is None:
+            return_prediction_target = train
+
         for i in range(num_readers):
             p = multiprocessing.Process(target=example_to_batch,
-                                        args=(json_enc_queue, worker_result_queue, batch_size, train, config, worker_manager_lock))
+                                        args=(json_enc_queue, worker_result_queue, batch_size, train, config, worker_manager_lock, return_examples, return_prediction_target))
             p.daemon = True
             example_generators.append(p)
 

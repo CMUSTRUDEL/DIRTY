@@ -49,7 +49,9 @@ class RenamingModel(nn.Module):
     def default_params(cls):
         return {
             'train': {
-                'unchanged_variable_weight': 1.0
+                'unchanged_variable_weight': 1.0,
+                'max_epoch': 30,
+                'patience': 5
             },
             'decoder': {
                 'type': 'SimpleDecoder'

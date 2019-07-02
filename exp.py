@@ -66,6 +66,7 @@ def train(args):
     json.dump(config, open(os.path.join(work_dir, 'config.json'), 'w'), indent=2)
 
     model = RenamingModel.build(config)
+    config = model.config
     model.train()
 
     if args['--cuda']:
@@ -88,7 +89,10 @@ def train(args):
     train_iter = epoch = cum_examples = 0
     log_every = config['train']['log_every']
     evaluate_every_nepoch = config['train']['evaluate_every_nepoch']
+    max_epoch = config['train']['max_epoch']
+    max_patience = config['train']['patience']
     cum_loss = 0.
+    patience = 0.
     t_log = time.time()
 
     history_accs = []
@@ -137,14 +141,29 @@ def train(args):
         if epoch % evaluate_every_nepoch == 0:
             print(f'[Learner] Perform evaluation', file=sys.stderr)
             t1 = time.time()
-            # ppl = Evaluator.evaluate_ppl(model, dev_set, config)
+            # ppl = Evaluator.evaluate_ppl(model, dev_set, config, predicate=lambda e: not e['function_body_in_train'])
             eval_results = Evaluator.decode_and_evaluate(model, dev_set, config)
+            # print(f'[Learner] Evaluation result ppl={ppl} (took {time.time() - t1}s)', file=sys.stderr)
             print(f'[Learner] Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
             dev_metric = eval_results['func_body_not_in_train_acc']['accuracy']
-            if len(history_accs) or dev_metric > max(history_accs):
+            # dev_metric = -ppl
+            if len(history_accs) == 0 or dev_metric > max(history_accs):
+                patience = 0
                 model_save_path = os.path.join(work_dir, f'model.bin')
                 model.save(model_save_path)
                 print(f'[Learner] Saved currently the best model to {model_save_path}', file=sys.stderr)
+            else:
+                patience += 1
+                if patience == max_patience:
+                    print(f'[Learner] Reached max patience {max_patience}, exiting...', file=sys.stderr)
+                    patience = 0
+                    exit()
+
+            history_accs.append(dev_metric)
+
+        if epoch == max_epoch:
+            print(f'[Learner] Reached max epoch', file=sys.stderr)
+            exit()
 
         t1 = time.time()
 

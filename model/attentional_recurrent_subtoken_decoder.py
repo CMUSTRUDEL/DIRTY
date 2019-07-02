@@ -1,6 +1,6 @@
 import sys
 from collections import namedtuple, OrderedDict
-from typing import Dict, List
+from typing import Dict, List, Any
 
 import torch
 from torch import nn as nn
@@ -17,8 +17,9 @@ from utils.vocab import Vocab
 
 
 class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
-    def __init__(self, variable_encoding_size: int, context_encoding_size: int, hidden_size: int, dropout: float, vocab: Vocab):
-        super(AttentionalRecurrentSubtokenDecoder, self).__init__(variable_encoding_size, hidden_size, dropout, vocab)
+    def __init__(self, variable_encoding_size: int, context_encoding_size: int, hidden_size: int, dropout: float,
+                 tie_embed: bool, input_feed: bool, vocab: Vocab):
+        super(AttentionalRecurrentSubtokenDecoder, self).__init__(variable_encoding_size, hidden_size, dropout, tie_embed, input_feed, vocab)
 
         self.att_src_linear = nn.Linear(context_encoding_size, hidden_size, bias=False)
         self.att_vec_linear = nn.Linear(context_encoding_size + hidden_size, hidden_size, bias=False)
@@ -27,7 +28,7 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
     def default_params(cls):
         params = RecurrentSubtokenDecoder.default_params()
         params.update({
-            'remove_duplicates_in_prediction': True,
+            'remove_duplicates_in_prediction': False,
             'context_encoding_size': 128,
             'attention_target': 'ast_nodes'  # terminal_nodes
         })
@@ -40,7 +41,7 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
         vocab = Vocab.load(params['vocab_file'])
         model = cls(params['variable_encoding_size'], params['context_encoding_size'],
-                    params['hidden_size'], params['dropout'], vocab)
+                    params['hidden_size'], params['dropout'], params['tie_embedding'], params['input_feed'], vocab)
         model.config = params
 
         return model
@@ -74,7 +75,7 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
         return RecurrentSubtokenDecoder.forward(self, src_ast_encoding, prediction_target)
 
-    def predict(self, examples: List[Example], encoder: Encoder) -> List[Dict]:
+    def predict(self, examples: List[Example], encoder: Encoder) -> List[Any]:
         batch_size = len(examples)
         beam_size = self.config['beam_size']
         same_variable_id = self.vocab.target[SAME_VARIABLE_TOKEN]
@@ -199,7 +200,11 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
                 h_tm1 = (h_t[0][live_prev_hyp_ids], h_t[1][live_prev_hyp_ids])
                 att_tm1 = q_t[live_prev_hyp_ids]
 
-                variable_name_embed_tm1 = self.state2names.weight[new_hyp_var_name_ids]
+                if self.config['tie_embedding']:
+                    variable_name_embed_tm1 = self.state2names.weight[new_hyp_var_name_ids]
+                else:
+                    variable_name_embed_tm1 = self.var_name_embed.weight[new_hyp_var_name_ids]
+
                 hyp_ast_ids_t = new_hyp_ast_ids
                 hyp_variable_ptrs_t = new_hyp_variable_ptrs
 
@@ -220,18 +225,20 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
         variable_rename_results = []
         for i, hyps in enumerate(completed_hyps):
-            variable_rename_result = dict()
             ast = examples[i].ast
             hyps = sorted(hyps, key=lambda hyp: -hyp.score)
 
             if not hyps:
                 # return identity renamings
                 print(f'Failed to found a hypothesis for function {ast.compilation_unit}', file=sys.stderr)
+                variable_rename_result = dict()
                 for old_name in ast.variables:
                     variable_rename_result[old_name] = {'new_name': old_name,
                                                         'prob': 0.}
+
+                example_rename_results = [variable_rename_result]
             else:
-                top_hyp = hyps[0]
+                # top_hyp = hyps[0]
                 # sub_token_ptr = 0
                 # for old_name in ast.variables:
                 #     sub_token_begin = sub_token_ptr
@@ -249,15 +256,21 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
                 #     variable_rename_result[old_name] = {'new_name': new_var_name,
                 #                                         'prob': top_hyp.score}
 
-                for var_id, old_name in enumerate(ast.variables):
-                    var_name_token_ids = top_hyp.variable_list[var_id]
-                    if var_name_token_ids == [same_variable_id, end_of_variable_id]:
-                        new_var_name = old_name
-                    else:
-                        new_var_name = self.vocab.target.subtoken_model.decode_ids(var_name_token_ids)
+                example_rename_results = []
 
-                    variable_rename_result[old_name] = {'new_name': new_var_name, 'prob': top_hyp.score}
+                for hyp in hyps:
+                    variable_rename_result = dict()
+                    for var_id, old_name in enumerate(ast.variables):
+                        var_name_token_ids = hyp.variable_list[var_id]
+                        if var_name_token_ids == [same_variable_id, end_of_variable_id]:
+                            new_var_name = old_name
+                        else:
+                            new_var_name = self.vocab.target.subtoken_model.decode_ids(var_name_token_ids)
 
-            variable_rename_results.append(variable_rename_result)
+                        variable_rename_result[old_name] = {'new_name': new_var_name, 'prob': hyp.score}
+
+                    example_rename_results.append(variable_rename_result)
+
+            variable_rename_results.append(example_rename_results)
 
         return variable_rename_results
