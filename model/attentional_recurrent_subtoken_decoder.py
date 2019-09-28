@@ -28,7 +28,7 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
     def default_params(cls):
         params = RecurrentSubtokenDecoder.default_params()
         params.update({
-            'remove_duplicates_in_prediction': False,
+            'remove_duplicates_in_prediction': True,
             'context_encoding_size': 128,
             'attention_target': 'ast_nodes'  # terminal_nodes
         })

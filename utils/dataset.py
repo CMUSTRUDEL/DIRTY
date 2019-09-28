@@ -287,8 +287,8 @@ class Batcher(object):
 def get_json_iterator_from_tar_file(file_paths, shuffle=False, progress=False, group_by=None, buffer=True) -> Iterable:
     assert group_by in (None, 'binary_file')
 
-    if shuffle:
-        assert buffer is False
+    # if shuffle:
+    #     assert buffer is False
 
     if isinstance(file_paths, str):
         file_paths = [file_paths]
