@@ -36,7 +36,7 @@ python -m utils.preprocess \
 
 All scripts are documented using [`docopt`](http://docopt.org/), please refer to the docstring of `utils/preprocess.py` for its complete usage.
 
-You may also download our pre-processed dataset along with the training/testing partitions from [here](mailto:pcyin@cs.cmu.edu). The pre-processing scripts also support fixing the testing set to be a pre-defined partition. For example, to use the same testing partition as the one used in our paper during pre-processing, you may run:
+**Our Preprocessed Splits** You may also download our pre-processed dataset along with the training/testing splits from [here](https://drive.google.com/drive/folders/19Rf7NtW56r6fz-ycldZq9hjxNr5osAJW?usp=sharing). The pre-processing scripts also support fixing the testing set to be a pre-defined partition. For example, to use the same testing partition as the one used in our paper during pre-processing, you may run:
 
 ```bash
 python -m utils.preprocess \
