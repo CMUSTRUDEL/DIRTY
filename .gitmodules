@@ -1,0 +1,3 @@
+[submodule "neural-model"]
+	path = neural-model
+	url = https://github.com/pcyin/dire.git
