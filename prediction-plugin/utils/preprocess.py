@@ -142,7 +142,7 @@ def main(args):
 
         json_loader.join()
         for p in example_generators: p.join()
-p
+
     cur_dir = os.getcwd()
     all_files = glob.glob(os.path.join(tgt_folder, 'files/*.jsonl'))
     file_prefix = os.path.join(tgt_folder, 'files/')
