@@ -24,7 +24,11 @@ class PackedGraph(object):
         for node in ast:
             self.register_node(ast_id, node.node_id)
 
-    def register_node(self, tree_id, node, group='ast_nodes', return_node_index_in_group=False):
+    def register_node(self,
+                      tree_id,
+                      node,
+                      group='ast_nodes',
+                      return_node_index_in_group=False):
         if group not in self.node_groups[tree_id]:
             self.node_groups[tree_id][group] = OrderedDict()
 
