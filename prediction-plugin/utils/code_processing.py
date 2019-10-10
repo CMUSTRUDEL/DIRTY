@@ -1,8 +1,8 @@
 import re
-from typing import List, Set
+from typing import Set
 
 from utils.ast import SyntaxNode
-from utils.lexer import *
+from utils.lexer import Lexer, Token
 
 
 VARIABLE_ANNOTATION = re.compile(r'@@\w+@@(\w+)@@\w+')
@@ -35,7 +35,8 @@ def canonicalize_constants(root: SyntaxNode) -> None:
 def annotate_type(root: SyntaxNode) -> None:
     def _visit(node):
         if hasattr(node, 'type'):
-            type_tokens = [t[1].lstrip('_') for t in Lexer(node.type).get_tokens()]
+            type_tokens = [t[1].lstrip('_')
+                           for t in Lexer(node.type).get_tokens()]
             type_tokens = [t for t in type_tokens if t not in ('(', ')')]
             node.named_fields.add('type_tokens')
             setattr(node, 'type_tokens', type_tokens)
@@ -49,9 +50,15 @@ def annotate_type(root: SyntaxNode) -> None:
 VAR_ID_REGEX = re.compile(r"@@(VAR_\d+)@@")
 
 
-def preprocess_ast(root: SyntaxNode, preprocessors: Set[str] = None, code: str = None) -> None:
+def preprocess_ast(root: SyntaxNode,
+                   preprocessors: Set[str] = None,
+                   code: str = None) -> None:
     if preprocessors is None:
-        preprocessors = {'annotate_type', 'canonicalize_constant', 'annotate_arg'}
+        preprocessors = {
+            'annotate_type',
+            'canonicalize_constant',
+            'annotate_arg'
+        }
 
     arg_var_ids = None
     if 'annotate_arg' in preprocessors:
@@ -69,7 +76,8 @@ def preprocess_ast(root: SyntaxNode, preprocessors: Set[str] = None, code: str =
 
         if 'canonicalize_constant' in preprocessors:
             if hasattr(node, 'type'):
-                type_tokens = [t[1].lstrip('_') for t in Lexer(node.type).get_tokens()]
+                type_tokens = [t[1].lstrip('_')
+                               for t in Lexer(node.type).get_tokens()]
                 type_tokens = [t for t in type_tokens if t not in ('(', ')')]
                 node.named_fields.add('type_tokens')
                 setattr(node, 'type_tokens', type_tokens)
@@ -100,4 +108,3 @@ def tokenize_raw_code(raw_code):
         tokens.append(token)
 
     return tokens
-
