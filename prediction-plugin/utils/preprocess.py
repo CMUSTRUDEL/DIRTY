@@ -11,21 +11,15 @@ Options:
 
 import glob
 import multiprocessing
-import tarfile
-from collections import Iterable
-from typing import Tuple
 import ujson as json
 
 from docopt import docopt
-import os, sys
-from multiprocessing import Process
-import numpy as np
+import os
 
 from utils.ast import SyntaxNode
-from utils.code_processing import canonicalize_code, annotate_type, canonicalize_constants, preprocess_ast, \
-    tokenize_raw_code
+from utils.code_processing import \
+    canonicalize_code, preprocess_ast, tokenize_raw_code
 from utils.dataset import Example, json_line_reader
-from tqdm import tqdm
 
 all_functions = dict()  # indexed by binaries
 
@@ -45,7 +39,8 @@ def example_generator(json_queue, example_queue, args, consumer_num=1):
     enable_filter = not args['--no-filtering']
     while True:
         payload = json_queue.get()
-        if payload is None: break
+        if payload is None:
+            break
 
         examples = []
         for json_str, meta in payload:
@@ -67,7 +62,9 @@ def example_generator(json_queue, example_queue, args, consumer_num=1):
             tree_json_dict['ast'] = new_json_dict
             json_str = json.dumps(tree_json_dict)
 
-            example = Example.from_json_dict(tree_json_dict, binary_file=meta, json_str=json_str)
+            example = Example.from_json_dict(tree_json_dict,
+                                             binary_file=meta,
+                                             json_str=json_str)
 
             is_valid = is_valid_example(example) if enable_filter else True
             if is_valid:
@@ -90,7 +87,6 @@ def main(args):
     for pattern in pattern_list:
         tar_files.extend(glob.glob(pattern))
     print(tar_files)
-    shard_size = int(args['--shard-size'])
 
     os.system(f'mkdir -p {tgt_folder}')
     os.system(f'mkdir -p {tgt_folder}/files')
@@ -103,14 +99,24 @@ def main(args):
         json_enc_queue = multiprocessing.Queue()
         example_queue = multiprocessing.Queue(maxsize=2000)
 
-        json_loader = multiprocessing.Process(target=json_line_reader,
-                                              args=(os.path.expanduser(tar_file), json_enc_queue, num_workers, False, False, 'binary_file'))
+        json_loader = multiprocessing.Process(
+            target=json_line_reader,
+            args=(os.path.expanduser(tar_file),
+                  json_enc_queue,
+                  num_workers,
+                  False,
+                  False,
+                  'binary_file')
+        )
         json_loader.daemon = True
         json_loader.start()
 
         example_generators = []
         for i in range(num_workers):
-            p = multiprocessing.Process(target=example_generator, args=(json_enc_queue, example_queue, args, 1))
+            p = multiprocessing.Process(
+                target=example_generator,
+                args=(json_enc_queue, example_queue, args, 1)
+            )
             p.daemon = True
             p.start()
             example_generators.append(p)
@@ -121,17 +127,24 @@ def main(args):
             if payload is None:
                 print('received None!')
                 n_finished += 1
-                if n_finished == num_workers: break
+                if n_finished == num_workers:
+                    break
                 continue
 
             examples = payload
 
             if examples:
-                json_file_name = examples[0].binary_file['file_name'].split('/')[-1]
-                with open(os.path.join(tgt_folder, 'files/', json_file_name), 'w') as f:
+                json_file_name = \
+                    examples[0].binary_file['file_name'].split('/')[-1]
+                with open(os.path.join(tgt_folder, 'files/', json_file_name),
+                          'w') as f:
                     for example in examples:
                         f.write(example.json_str + '\n')
-                        all_functions.setdefault(json_file_name, dict())[example.ast.compilation_unit] = example.canonical_code
+                        all_functions.setdefault(
+                            json_file_name,
+                            dict()
+                        )[example.ast.compilation_unit] = \
+                            example.canonical_code
 
                 valid_example_count += len(examples)
 
@@ -141,11 +154,11 @@ def main(args):
         example_queue.close()
 
         json_loader.join()
-        for p in example_generators: p.join()
+        for p in example_generators:
+            p.join()
 
     cur_dir = os.getcwd()
     all_files = glob.glob(os.path.join(tgt_folder, 'files/*.jsonl'))
-    file_prefix = os.path.join(tgt_folder, 'files/')
     sorted(all_files)  # sort all files by names
     all_files = list(all_files)
     file_num = len(all_files)
@@ -163,8 +176,6 @@ def main(args):
                 replace_lines = []
                 for line in all_lines:
                     json_dict = json.loads(line.strip())
-                    func_name = json_dict['function']
-                    canonical_code = all_functions[last_file_name][func_name]
                     new_json_str = json.dumps(json_dict)
                     replace_lines.append(new_json_str.strip())
 
