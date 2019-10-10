@@ -13,8 +13,6 @@ Options:
 from collections import Counter
 from itertools import chain
 
-import torch
-import pickle
 from docopt import docopt
 import json
 import sentencepiece as spm
@@ -36,7 +34,9 @@ class VocabEntry:
             self.subtoken_model = spm.SentencePieceProcessor()
             self.subtoken_model.load(subtoken_model_path)
 
-            vocab_path = subtoken_model_path[: subtoken_model_path.rfind('.model')] + '.vocab'
+            subtoken_model = \
+                subtoken_model_path[:subtoken_model_path.rfind('.model')]
+            vocab_path = f'{subtoken_model}.vocab'
             for i, line in enumerate(open(vocab_path)):
                 word, prob = line.strip().split('\t')
                 self.word2id[word] = len(self.word2id)
@@ -122,10 +122,13 @@ class VocabEntry:
 
         word_freq = Counter(chain(*corpus))
         freq_words = [w for w in word_freq if word_freq[w] >= freq_cutoff]
-        print('number of word types: %d, number of word types w/ frequency >= %d: %d' % (len(word_freq), freq_cutoff,
-                                                                                       len(freq_words)))
-
-        top_k_words = sorted(word_freq, key=lambda x: (-word_freq[x], x))[:size]
+        print(f'number of word types: {len(word_freq)}, '
+              f'number of word types w/ frequency >= {freq_cutoff}: '
+              f'{freq_words}')
+        top_k_words = sorted(
+            word_freq,
+            key=lambda x: (-word_freq[x], x)
+        )[:size]
         print('top 30 words: %s' % ', '.join(top_k_words[:30]))
 
         if predefined_tokens:
@@ -152,7 +155,9 @@ class Vocab(object):
             self.entries.append(key)
 
     def __repr__(self):
-        return 'Vocab(%s)' % (', '.join('%s %swords' % (entry, getattr(self, entry)) for entry in self.entries))
+        words = ', '.join(f'{entry} {getattr(self, entry)}words'
+                          for entry in self.entries)
+        return f'Vocab({words})'
 
     @property
     def params(self):
@@ -209,22 +214,26 @@ if __name__ == '__main__':
                 if old_var_name != new_var_name:
                     tgt_words.append(new_var_name)
 
-            if node.node_type == 'obj' or node.node_type == 'block' and hasattr(node, 'name'):
+            if node.node_type == 'obj' \
+               or node.node_type == 'block' \
+               and hasattr(node, 'name'):
                 identifier_names.append(node.name)
 
             if hasattr(node, 'type_tokens'):
                 type_tokens.extend(node.type_tokens)
 
         code_tokens = example.code_tokens
-        preserved_tokens = [token for token in code_tokens if token.startswith('@@') and token.endswith('@@')]
+        preserved_tokens = [token for token in code_tokens
+                            if token.startswith('@@') and token.endswith('@@')]
         src_preserved_tokens.update(preserved_tokens)
         f_src_token.write(' '.join(code_tokens) + '\n')
 
     f_src_token.close()
 
     print('building source words vocabulary')
-    src_var_vocab_entry = VocabEntry.from_corpus([src_words], size=vocab_size,
-                                                 freq_cutoff=int(args['--freq-cutoff']))
+    src_var_vocab_entry = VocabEntry.from_corpus(
+        [src_words], size=vocab_size, freq_cutoff=int(args['--freq-cutoff'])
+    )
 
     if args['--use-bpe']:
         print('use bpe')
@@ -232,12 +241,20 @@ if __name__ == '__main__':
         print('building source code tokens vocabulary')
         # train subtoken models
         src_preserved_tokens = ','.join(src_preserved_tokens)
-        spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id={PAD_ID} --bos_id=1 --eos_id=2 --unk_id=3 '
-                                       f'--user_defined_symbols={src_preserved_tokens} '
-                                       f'--vocab_size={vocab_size} '
-                                       f'--model_prefix={vocab_file}.src_code_tokens --model_type=bpe '
-                                       f'--input={src_code_tokens_file}')
-        src_code_tokens_vocab_entry = VocabEntry(vocab_file + '.src_code_tokens.model')
+        spm.SentencePieceTrainer.Train(
+            '--add_dummy_prefix=false '
+            f'--pad_id={PAD_ID} '
+            '--bos_id=1 '
+            '--eos_id=2 '
+            '--unk_id=3 '
+            f'--user_defined_symbols={src_preserved_tokens} '
+            f'--vocab_size={vocab_size} '
+            f'--model_prefix={vocab_file}.src_code_tokens '
+            '--model_type=bpe '
+            f'--input={src_code_tokens_file}'
+        )
+        src_code_tokens_vocab_entry = \
+            VocabEntry(f'{vocab_file}.src_code_tokens.model')
 
         print('building target words vocabulary')
         tgt_word_file = args['VOCAB_FILE'] + '.var_names.txt'
@@ -245,16 +262,26 @@ if __name__ == '__main__':
             for name in tgt_words:
                 f.write(name + '\n')
 
-        spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id={PAD_ID} --bos_id=1 --eos_id=2 --unk_id=3 '
-                                       f'--control_symbols=<IDENTITY> '
-                                       f'--vocab_size={vocab_size} '
-                                       f'--model_prefix={vocab_file}.tgt --model_type=bpe '
-                                       f'--input={tgt_word_file}')
-        tgt_var_vocab_entry = VocabEntry(vocab_file + '.tgt.model')
+        spm.SentencePieceTrainer.Train(
+            '--add_dummy_prefix=false '
+            f'--pad_id={PAD_ID} '
+            '--bos_id=1 '
+            '--eos_id=2 '
+            '--unk_id=3 '
+            '--control_symbols=<IDENTITY> '
+            f'--vocab_size={vocab_size} '
+            f'--model_prefix={vocab_file}.tgt '
+            '--model_type=bpe '
+            f'--input={tgt_word_file}'
+        )
+        tgt_var_vocab_entry = VocabEntry(f'{vocab_file}.tgt.model')
     else:
-        tgt_var_vocab_entry = VocabEntry.from_corpus([tgt_words], size=vocab_size,
-                                                     freq_cutoff=int(args['--freq-cutoff']),
-                                                     predefined_tokens=[SAME_VARIABLE_TOKEN])
+        tgt_var_vocab_entry = VocabEntry.from_corpus(
+            [tgt_words],
+            size=vocab_size,
+            freq_cutoff=int(args['--freq-cutoff']),
+            predefined_tokens=[SAME_VARIABLE_TOKEN]
+        )
 
     id_names_file = vocab_file + '.id_names.txt'
     with open(id_names_file, 'w') as f:
@@ -263,11 +290,19 @@ if __name__ == '__main__':
 
     print('train subtoken model for obj names')
     # train subtoken models
-    spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id={PAD_ID} --bos_id=1 --eos_id=2 --unk_id=3 '
-                                   f'--control_symbols=<IDENTITY> --vocab_size={vocab_size} '
-                                   f'--model_prefix={vocab_file}.obj_name --model_type=bpe '
-                                   f'--input={id_names_file}')
-    obj_name_vocab_entry = VocabEntry(vocab_file + '.obj_name.model')
+    spm.SentencePieceTrainer.Train(
+        '--add_dummy_prefix=false '
+        f'--pad_id={PAD_ID} '
+        '--bos_id=1 '
+        '--eos_id=2 '
+        '--unk_id=3 '
+        '--control_symbols=<IDENTITY> '
+        f'--vocab_size={vocab_size} '
+        f'--model_prefix={vocab_file}.obj_name '
+        '--model_type=bpe '
+        f'--input={id_names_file}'
+    )
+    obj_name_vocab_entry = VocabEntry(f'{vocab_file}.obj_name.model')
 
     type_vocab = Counter(type_tokens)
     num_types = 100
