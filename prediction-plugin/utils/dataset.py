@@ -1,32 +1,29 @@
-import glob
-import sys
-import os
 import gc
-import time
-import ujson as json
-import tarfile
-from typing import Iterable, List, Dict, Union
+import glob
 import multiprocessing
-import threading
+import os
 import queue
+import resource
+import sys
+import tarfile
+import threading
+import time
+import torch
 
-from tqdm import tqdm
 import numpy as np
+import torch.multiprocessing as torch_mp
+import ujson as json
 
+import random
+from tqdm import tqdm
+from typing import Iterable, List, Dict, Union
 from utils import nn_util
 from utils.ast import AbstractSyntaxTree
 from utils.vocab import SAME_VARIABLE_TOKEN, Vocab
-import random
-
-import torch
-import torch.multiprocessing as torch_mp
 
 
 batcher_sync_msg = None
-
 torch.multiprocessing.set_sharing_strategy('file_system')
-
-import resource
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (4096, rlimit[1]))
 
@@ -522,7 +519,7 @@ def worker_manager(worker_result_queue,
         # t0 = time.time()
         try:
             queue_size = worker_result_queue.qsize()
-        except:
+        except Exception:
             # just trigger data loading, for max os X
             queue_size = 999999
         if (queue_size > buffer_size or patience >= 10) \
@@ -641,9 +638,11 @@ class Dataset(object):
                        single_batcher=False):
         # type: (...) -> Iterable[Union[Batch, Dict[str, torch.Tensor]]]
         if progress:
-            it_func = lambda x: tqdm(x, file=sys.stdout)
+            def it_func(x):
+                tqdm(x, file=sys.stdout)
         else:
-            it_func = lambda x: x
+            def it_func(x):
+                x
 
         if single_batcher:
             return it_func(
@@ -742,7 +741,7 @@ class Dataset(object):
         batch_node_num = 0
 
         # if example.ast.size < 300 and len(example.variable_name_map) > 0:
-        for example in filter(is_valid_example, example_iter):
+        for example in filter(is_valid_training_example, example_iter):
             batch_examples.append(example)
             batch_node_num += example.ast.size
 
