@@ -68,20 +68,23 @@ def get_tensor_dict_size(tensor_dict):
 def dot_prod_attention(h_t: torch.Tensor,
                        src_encoding: torch.Tensor,
                        src_encoding_att_linear: torch.Tensor,
-                       mask: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
-        # (batch_size, src_sent_len)
-        att_weight = torch.bmm(src_encoding_att_linear, h_t.unsqueeze(2)).squeeze(2)
+                       mask: torch.Tensor = None):
+    # type: (...) -> Tuple[torch.Tensor, torch.Tensor]
+    att_weight = \
+        torch.bmm(src_encoding_att_linear, h_t.unsqueeze(2)).squeeze(2)
+    if mask is not None:
+        att_weight.data.masked_fill_((1. - mask).byte(), -float('inf'))
 
-        if mask is not None:
-            att_weight.data.masked_fill_((1. - mask).byte(), -float('inf'))
+    softmaxed_att_weight = torch.softmax(att_weight, dim=-1)
 
-        softmaxed_att_weight = torch.softmax(att_weight, dim=-1)
+    att_view = (att_weight.size(0), 1, att_weight.size(1))
+    # (batch_size, hidden_size)
+    ctx_vec = torch.bmm(
+        softmaxed_att_weight.view(*att_view),
+        src_encoding
+    ).squeeze(1)
 
-        att_view = (att_weight.size(0), 1, att_weight.size(1))
-        # (batch_size, hidden_size)
-        ctx_vec = torch.bmm(softmaxed_att_weight.view(*att_view), src_encoding).squeeze(1)
-
-        return ctx_vec, softmaxed_att_weight
+    return ctx_vec, softmaxed_att_weight
 
 
 def get_lengths_from_binary_sequence_mask(mask: torch.Tensor):
@@ -102,8 +105,7 @@ def get_lengths_from_binary_sequence_mask(mask: torch.Tensor):
 
 
 def sort_batch_by_length(tensor: torch.Tensor, sequence_lengths: torch.Tensor):
-    """
-    Sort a batch first tensor by some specified lengths.
+    """Sort a batch first tensor by some specified lengths.
     Parameters
     ----------
     tensor : torch.FloatTensor, required.
@@ -114,26 +116,38 @@ def sort_batch_by_length(tensor: torch.Tensor, sequence_lengths: torch.Tensor):
     Returns
     -------
     sorted_tensor : torch.FloatTensor
-        The original tensor sorted along the batch dimension with respect to sequence_lengths.
+        The original tensor sorted along the batch dimension with respect to
+        sequence_lengths.
     sorted_sequence_lengths : torch.LongTensor
         The original sequence_lengths sorted by decreasing size.
     restoration_indices : torch.LongTensor
         Indices into the sorted_tensor such that
-        ``sorted_tensor.index_select(0, restoration_indices) == original_tensor``
+        ``sorted_tensor.index_select(0, restoration_indices) ==
+        original_tensor``
     permuation_index : torch.LongTensor
-        The indices used to sort the tensor. This is useful if you want to sort many
-        tensors using the same ordering.
+        The indices used to sort the tensor. This is useful if you want to sort
+        many tensors using the same ordering.
+
     """
 
-    if not isinstance(tensor, torch.Tensor) or not isinstance(sequence_lengths, torch.Tensor):
-        raise ValueError("Both the tensor and sequence lengths must be torch.Tensors.")
+    if not isinstance(tensor, torch.Tensor) \
+       or not isinstance(sequence_lengths, torch.Tensor):
+        raise ValueError(
+            "Both the tensor and sequence lengths must be torch.Tensors."
+        )
 
-    sorted_sequence_lengths, permutation_index = sequence_lengths.sort(0, descending=True)
+    sorted_sequence_lengths, permutation_index = \
+        sequence_lengths.sort(0, descending=True)
     sorted_tensor = tensor.index_select(0, permutation_index)
 
-    index_range = torch.arange(0, len(sequence_lengths), device=sequence_lengths.device)
+    index_range = torch.arange(
+        0, len(sequence_lengths), device=sequence_lengths.device
+    )
     # This is the equivalent of zipping with index, sorting by the original
     # sequence lengths and returning the now sorted indices.
     _, reverse_mapping = permutation_index.sort(0, descending=False)
     restoration_indices = index_range.index_select(0, reverse_mapping)
-    return sorted_tensor, sorted_sequence_lengths, restoration_indices, permutation_index
+    return (sorted_tensor,
+            sorted_sequence_lengths,
+            restoration_indices,
+            permutation_index)
