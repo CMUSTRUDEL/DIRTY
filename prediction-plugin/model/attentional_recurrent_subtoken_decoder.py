@@ -1,28 +1,46 @@
 import sys
-from collections import namedtuple, OrderedDict
-from typing import Dict, List, Any
+from collections import OrderedDict
+from typing import List, Any
 
 import torch
 from torch import nn as nn
 
-from model.decoder import Decoder
 from model.encoder import Encoder
 from utils import util, nn_util
-from utils.ast import AbstractSyntaxTree
 from utils.dataset import Example
 from utils.vocab import Vocab, SAME_VARIABLE_TOKEN, END_OF_VARIABLE_TOKEN
 
 from model.recurrent_subtoken_decoder import RecurrentSubtokenDecoder
-from utils.vocab import Vocab
 
 
 class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
-    def __init__(self, variable_encoding_size: int, context_encoding_size: int, hidden_size: int, dropout: float,
-                 tie_embed: bool, input_feed: bool, vocab: Vocab):
-        super(AttentionalRecurrentSubtokenDecoder, self).__init__(variable_encoding_size, hidden_size, dropout, tie_embed, input_feed, vocab)
+    def __init__(self,
+                 variable_encoding_size: int,
+                 context_encoding_size: int,
+                 hidden_size: int,
+                 dropout: float,
+                 tie_embed: bool,
+                 input_feed: bool,
+                 vocab: Vocab):
+        super(AttentionalRecurrentSubtokenDecoder, self).__init__(
+            variable_encoding_size,
+            hidden_size,
+            dropout,
+            tie_embed,
+            input_feed,
+            vocab
+        )
 
-        self.att_src_linear = nn.Linear(context_encoding_size, hidden_size, bias=False)
-        self.att_vec_linear = nn.Linear(context_encoding_size + hidden_size, hidden_size, bias=False)
+        self.att_src_linear = nn.Linear(
+            context_encoding_size,
+            hidden_size,
+            bias=False
+        )
+        self.att_vec_linear = nn.Linear(
+            context_encoding_size + hidden_size,
+            hidden_size,
+            bias=False
+        )
 
     @classmethod
     def default_params(cls):
@@ -40,8 +58,15 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
         params = util.update(cls.default_params(), config)
 
         vocab = Vocab.load(params['vocab_file'])
-        model = cls(params['variable_encoding_size'], params['context_encoding_size'],
-                    params['hidden_size'], params['dropout'], params['tie_embedding'], params['input_feed'], vocab)
+        model = cls(
+            params['variable_encoding_size'],
+            params['context_encoding_size'],
+            params['hidden_size'],
+            params['dropout'],
+            params['tie_embedding'],
+            params['input_feed'],
+            vocab
+        )
         model.config = params
 
         return model
@@ -49,10 +74,12 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
     def rnn_step(self, x, h_tm1, context_encoding):
         h_t, cell_t = self.lstm_cell(x, h_tm1)
 
-        ctx_t, alpha_t = nn_util.dot_prod_attention(h_t,
-                                                    context_encoding['attention_value'],
-                                                    context_encoding['attention_key'],
-                                                    context_encoding['attention_value_mask'])
+        ctx_t, alpha_t = nn_util.dot_prod_attention(
+            h_t,
+            context_encoding['attention_value'],
+            context_encoding['attention_key'],
+            context_encoding['attention_value_mask']
+        )
 
         att_t = torch.tanh(self.att_vec_linear(torch.cat([h_t, ctx_t], 1)))
         att_t = self.dropout(att_t)
@@ -61,7 +88,8 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
     def get_attention_memory(self, context_encoding):
         att_tgt = self.config['attention_target']
-        value, mask = self.encoder.get_attention_memory(context_encoding, att_tgt)
+        value, mask = \
+            self.encoder.get_attention_memory(context_encoding, att_tgt)
         key = self.att_src_linear(value)
 
         return {'attention_key': key,
@@ -73,7 +101,11 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
         attention_memory = self.get_attention_memory(src_ast_encoding)
         src_ast_encoding.update(attention_memory)
 
-        return RecurrentSubtokenDecoder.forward(self, src_ast_encoding, prediction_target)
+        return RecurrentSubtokenDecoder.forward(
+            self,
+            src_ast_encoding,
+            prediction_target
+        )
 
     def predict(self, examples: List[Example], encoder: Encoder) -> List[Any]:
         batch_size = len(examples)
@@ -86,7 +118,10 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
         for ast_id, example in enumerate(examples):
             variable_nums.append(len(example.ast.variables))
 
-        beams = OrderedDict((ast_id, [self.Hypothesis([[]], 0, 0.)]) for ast_id in range(batch_size))
+        beams = OrderedDict(
+            (ast_id, [self.Hypothesis([[]], 0, 0.)])
+            for ast_id in range(batch_size)
+        )
         hyp_scores_tm1 = torch.zeros(len(beams), device=self.device)
         completed_hyps = [[] for _ in range(batch_size)]
         tgt_vocab_size = len(self.vocab.target)
@@ -99,33 +134,47 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
         attention_memory = self.get_attention_memory(context_encoding)
         context_encoding_t = attention_memory
 
-        h_tm1 = h_0 = self.get_init_state(context_encoding)
+        h_tm1 = self.get_init_state(context_encoding)
 
-        # Note that we are using the `restoration_indices` from `context_encoding`, which is the word-level restoration index
+        # Note that we are using the `restoration_indices` from
+        # `context_encoding`, which is the word-level restoration index
         # (batch_size, variable_master_node_num, encoding_size)
         variable_encoding = context_encoding['variable_encoding']
         # (batch_size, encoding_size)
-        variable_name_embed_tm1 = att_tm1 = torch.zeros(batch_size, self.lstm_cell.hidden_size, device=self.device)
+        variable_name_embed_tm1 = att_tm1 = torch.zeros(
+            batch_size,
+            self.lstm_cell.hidden_size,
+            device=self.device
+        )
 
         max_prediction_time_step = self.config['max_prediction_time_step']
         for t in range(0, max_prediction_time_step):
             # (total_live_hyp_num, encoding_size)
             if t > 0:
-                variable_encoding_t = variable_encoding[hyp_ast_ids_t, hyp_variable_ptrs_t]
+                variable_encoding_t = \
+                    variable_encoding[hyp_ast_ids_t, hyp_variable_ptrs_t]
             else:
                 variable_encoding_t = variable_encoding[:, 0]
 
             if self.config['input_feed']:
-                x = torch.cat([variable_encoding_t, variable_name_embed_tm1, att_tm1], dim=-1)
+                x = torch.cat(
+                    [variable_encoding_t, variable_name_embed_tm1, att_tm1],
+                    dim=-1
+                )
             else:
-                x = torch.cat([variable_encoding_t, variable_name_embed_tm1], dim=-1)
+                x = torch.cat(
+                    [variable_encoding_t, variable_name_embed_tm1],
+                    dim=-1
+                )
 
             h_t, q_t, alpha_t = self.rnn_step(x, h_tm1, context_encoding_t)
 
             # (total_live_hyp_num, vocab_size)
-            hyp_var_name_scores_t = torch.log_softmax(self.state2names(q_t), dim=-1)
+            hyp_var_name_scores_t = \
+                torch.log_softmax(self.state2names(q_t), dim=-1)
 
-            cont_cand_hyp_scores = hyp_scores_tm1.unsqueeze(-1) + hyp_var_name_scores_t
+            cont_cand_hyp_scores = \
+                hyp_scores_tm1.unsqueeze(-1) + hyp_var_name_scores_t
 
             new_beams = OrderedDict()
             live_beam_ids = []
@@ -139,11 +188,13 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
             for beam_id, (ast_id, beam) in enumerate(beams.items()):
                 beam_end_hyp_pos = beam_start_hyp_pos + len(beam)
                 # (live_beam_size, vocab_size)
-                beam_cont_cand_hyp_scores = cont_cand_hyp_scores[beam_start_hyp_pos: beam_end_hyp_pos]
+                beam_cont_cand_hyp_scores = \
+                    cont_cand_hyp_scores[beam_start_hyp_pos: beam_end_hyp_pos]
                 cont_beam_size = beam_size - len(completed_hyps[ast_id])
-                beam_new_hyp_scores, beam_new_hyp_positions = torch.topk(beam_cont_cand_hyp_scores.view(-1),
-                                                                         k=cont_beam_size,
-                                                                         dim=-1)
+                beam_new_hyp_scores, beam_new_hyp_positions = \
+                    torch.topk(beam_cont_cand_hyp_scores.view(-1),
+                               k=cont_beam_size,
+                               dim=-1)
 
                 # (cont_beam_size)
                 beam_prev_hyp_ids = beam_new_hyp_positions / tgt_vocab_size
@@ -161,7 +212,8 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
                     variable_ptr = prev_hyp.variable_ptr
                     new_variable_list = list(prev_hyp.variable_list)
-                    new_variable_list[-1] = list(new_variable_list[-1] + [hyp_var_name_id])
+                    new_variable_list[-1] = \
+                        list(new_variable_list[-1] + [hyp_var_name_id])
 
                     if hyp_var_name_id == end_of_variable_id:
                         # remove empty cases
@@ -170,8 +222,10 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
                         if remove_duplicate:
                             last_pred = new_variable_list[-1]
-                            if any(x == last_pred for x in new_variable_list[:-1] if x != [same_variable_id, end_of_variable_id]):
-                                # print('found a duplicate!', ', '.join([str(x) for x in last_pred]))
+                            if any(x == last_pred
+                                   for x in new_variable_list[:-1]
+                                   if x != [same_variable_id, end_of_variable_id]
+                            ):
                                 continue
 
                         variable_ptr += 1
@@ -238,26 +292,7 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
 
                 example_rename_results = [variable_rename_result]
             else:
-                # top_hyp = hyps[0]
-                # sub_token_ptr = 0
-                # for old_name in ast.variables:
-                #     sub_token_begin = sub_token_ptr
-                #     while top_hyp.variable_list[sub_token_ptr] != end_of_variable_id:
-                #         sub_token_ptr += 1
-                #     sub_token_ptr += 1  # point to first sub-token of next variable
-                #     sub_token_end = sub_token_ptr
-                #
-                #     var_name_token_ids = top_hyp.variable_list[sub_token_begin: sub_token_end]  # include ending </s>
-                #     if var_name_token_ids == [same_variable_id, end_of_variable_id]:
-                #         new_var_name = old_name
-                #     else:
-                #         new_var_name = self.vocab.target.subtoken_model.decode_ids(var_name_token_ids)
-                #
-                #     variable_rename_result[old_name] = {'new_name': new_var_name,
-                #                                         'prob': top_hyp.score}
-
                 example_rename_results = []
-
                 for hyp in hyps:
                     variable_rename_result = dict()
                     for var_id, old_name in enumerate(ast.variables):
