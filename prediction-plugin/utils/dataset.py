@@ -625,8 +625,7 @@ class Dataset(object):
         iterator = self._get_iterator(shuffle, num_workers)
         if progress:
             return tqdm(iterator, total=len(self), file=sys.stdout)
-        else:
-            return iterator
+        return iterator
 
     def batch_iterator(self, batch_size: int, config: Dict,
                        return_examples=False,
@@ -638,11 +637,9 @@ class Dataset(object):
                        single_batcher=False):
         # type: (...) -> Iterable[Union[Batch, Dict[str, torch.Tensor]]]
         if progress:
-            def it_func(x):
-                tqdm(x, file=sys.stdout)
+            it_func = lambda x: tqdm(x, file=sys.stdout)
         else:
-            def it_func(x):
-                x
+            it_func = lambda x: x
 
         if single_batcher:
             return it_func(
