@@ -5,8 +5,6 @@ Usage:
 
 Options:
     -h --help                  Show this screen.
-    --shard-size=<int>         shard size [default: 3000]
-    --no-filtering             do not filter files
 """
 
 import glob
@@ -27,8 +25,7 @@ all_functions = dict()  # indexed by binaries
 def is_valid_example(example):
     try:
         is_valid = example.ast.size < 300 and \
-               len(example.variable_name_map) > 0 and \
-               any(k != v for k, v in example.variable_name_map.items())
+               len(example.variable_name_map) > 0
     except RecursionError:
         is_valid = False
 
@@ -36,7 +33,6 @@ def is_valid_example(example):
 
 
 def example_generator(json_queue, example_queue, args, consumer_num=1):
-    enable_filter = not args['--no-filtering']
     while True:
         payload = json_queue.get()
         if payload is None:
@@ -66,8 +62,7 @@ def example_generator(json_queue, example_queue, args, consumer_num=1):
                                              binary_file=meta,
                                              json_str=json_str)
 
-            is_valid = is_valid_example(example) if enable_filter else True
-            if is_valid:
+            if is_valid_example(example):
                 canonical_code = canonicalize_code(example.ast.code)
                 example.canonical_code = canonical_code
                 examples.append(example)
