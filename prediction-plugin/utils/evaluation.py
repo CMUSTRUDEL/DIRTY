@@ -118,7 +118,8 @@ class Evaluator(object):
                         example_pred_accs.append(var_metric)
                     file_name = example.binary_file['file_name']
                     line_num = example.binary_file['line_num']
-                    all_examples[f'{file_name}_{line_num}'] = \
+                    fun_name = example.ast.compilation_unit
+                    all_examples[f'{file_name}_{line_num}_{fun_name}'] = \
                         (rename_result, Evaluator.average(example_pred_accs))
 
         return all_examples

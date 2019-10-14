@@ -59,7 +59,8 @@ class PackedGraph(object):
 
     def get_nodes_by_group(self, group):
         for i in range(self.tree_num):
-            for node, packed_node_id in self.node_groups[i][group].items():
+            node_group = self.node_groups[i]
+            for node, packed_node_id in node_group[group].items():
                 yield node, packed_node_id
 
     @property

@@ -15,6 +15,7 @@ import json
 import numpy as np
 import os
 import pickle
+import pprint
 import random
 import sys
 import torch
@@ -60,7 +61,8 @@ test_set_path = cmd_args['TEST_DATA_FILE']
 test_set = Dataset(test_set_path)
 decode_results = \
     Evaluator.decode(model, test_set, model.config)
-print(decode_results, file=sys.stderr)
+pp = pprint.PrettyPrinter(stream=sys.stderr)
+pp.pprint(decode_results)
 
 if cmd_args['--save-to'] is not None:
     save_to = cmd_args['--save-to']
