@@ -22,7 +22,7 @@ sudo pip install jsonlines
 
 ```
 wget -O pretrained_model.tar.gz https://www.dropbox.com/s/2b4c9ba2g0nhe7q/pretrained_model.tar.gz\?dl\=1
-tar -xf pretrained_model.tar.gz
+tar -xzf pretrained_model.tar.gz
 ```
 
 ## Create a working directory
