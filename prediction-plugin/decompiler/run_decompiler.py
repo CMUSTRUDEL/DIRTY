@@ -88,7 +88,10 @@ with tempfile.TemporaryDirectory() as tempdir:
             subprocess.check_output(['cp', file_path, orig.name])
             # Timeout after 10 minutes
             try:
-                run_decompiler(orig.name, env, DUMP_TREES, timeout=600)
+                output = run_decompiler(orig.name, env, DUMP_TREES, timeout=600)
+                if not os.path.isfile(os.path.join(args.output_dir, binary+".jsonl")):
+                    print("Something bad happened: ", output)
+                    assert False
             except subprocess.TimeoutExpired:
                 print("Timed out\n")
                 continue

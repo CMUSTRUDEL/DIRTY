@@ -11,6 +11,13 @@ conda env create -f env.yml
 conda activate dire_prediction
 ```
 
+## Hex-Rays Python Environment
+
+Install `jsonlines` so that the IDApython script can see it:
+```
+sudo pip install jsonlines
+```
+
 ## Download the pretrained models
 
 ```
