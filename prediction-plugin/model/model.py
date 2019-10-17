@@ -66,9 +66,10 @@ class RenamingModel(nn.Module):
         encoder.batcher = model.batcher
         decoder.batcher = model.batcher
 
-        print('Current Configuration:', file=sys.stderr)
-        pp = pprint.PrettyPrinter(indent=2, stream=sys.stderr)
-        pp.pprint(model.config)
+        if False:
+            print('Current Configuration:', file=sys.stderr)
+            pp = pprint.PrettyPrinter(indent=2, stream=sys.stderr)
+            pp.pprint(model.config)
 
         return model
 
