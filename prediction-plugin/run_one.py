@@ -77,5 +77,6 @@ model = RenamingModel.load(args.model,
 
 decode_results = \
     decode(model, examples, model.config)
-pp = pprint.PrettyPrinter(stream=sys.stderr)
-pp.pprint(decode_results)
+# Get the first function.  There should be only one.
+decode_results = list(decode_results.values())[0]
+print(json.dumps(decode_results))
