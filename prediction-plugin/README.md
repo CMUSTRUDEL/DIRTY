@@ -25,6 +25,17 @@ wget -O pretrained_model.tar.gz https://www.dropbox.com/s/2b4c9ba2g0nhe7q/pretra
 tar -xzf pretrained_model.tar.gz
 ```
 
+## Use Hex-Rays script
+
+Open Hex-Rays, select "Script file" under the "File" menu, and select
+`prediction-plugin/decompiler/decompiler-scripts/predict_names.py`.
+Open a Pseudocode window for any function (e.g., by pressing F5).  Use
+the "Predict variable names" action that is available from the
+right-click context menu of the Pseudocode window.
+
+Note that Hex-Rays must be loaded from the `dire_prediction` Conda
+environment.
+
 ## Create a working directory
 
 I start by creating a working directory with subfolders for each step of the
