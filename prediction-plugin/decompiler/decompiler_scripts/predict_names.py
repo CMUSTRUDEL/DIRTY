@@ -13,6 +13,7 @@ import cStringIO
 
 # Dictionary mapping variable ids to (orig, orig) pairs
 varnames = dict()
+oldvarnames = dict()
 var_id = 0
 sentinel_vars = re.compile('@@VAR_[0-9]+')
 
@@ -20,6 +21,7 @@ dire_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__
 RUN_ONE = os.path.join(dire_dir, "run_one.py")
 MODEL = os.path.join(dire_dir, 'data', 'saved_models', 'model.hybrid.bin')
 
+# Rename variables to sentinel representation
 class RenamedGraphBuilder(GraphBuilder):
     def __init__(self, cg, func):
         self.func = func
@@ -32,12 +34,30 @@ class RenamedGraphBuilder(GraphBuilder):
             original_name = get_expr_name(e)
             if not sentinel_vars.match(original_name):
                 # Save names
-                varnames[var_id] = (original_name, original_name)
+                #varnames[var_id] = (original_name, original_name)
                 # Rename variables to @@VAR_[id]@@[orig name]@@[orig name]
                 self.func.get_lvars()[e.v.idx].name = \
                     '@@VAR_' + str(var_id) + '@@' + original_name + '@@' + original_name
+                varnames[original_name] = self.func.get_lvars()[e.v.idx].name
+                oldvarnames[self.func.get_lvars()[e.v.idx].name] = original_name
                 var_id += 1
         return self.process(e)
+
+# Rename variables to predicted names
+class FinalRename(ida_hexrays.ctree_visitor_t):
+    def __init__(self, renamings, func):
+        super(FinalRename, self).__init__(0)
+        self.renamings = renamings
+        self.func = func
+
+    def visit_expr(self, e):
+        if e.op is ida_hexrays.cot_var:
+            original_name = get_expr_name(e)
+            if original_name in self.renamings:
+                new_name = self.renamings[original_name]
+                self.func.get_lvars()[e.v.idx].name = str(new_name)
+                print("Renaming %s to %s"%(oldvarnames[original_name],new_name))
+        return 0
 
 # Process a single function given its EA
 def func(ea):
@@ -74,7 +94,7 @@ def func(ea):
     for line in cfunc.get_pseudocode():
         raw_code += idaapi.tag_remove(line.line) + '\n'
     function_info["raw_code"] = raw_code
-    return function_info
+    return function_info, cfunc
 
 class custom_action_handler(ida_kernwin.action_handler_t):
     def __init__(self):
@@ -89,22 +109,25 @@ class collect_vars(custom_action_handler):
             f = cStringIO.StringIO()
             with jsonlines.Writer(f) as writer:
                 try:
-                    info = func(ea)
+                    info, cfunc = func(ea)
                     # We must set the working directory to the dire dir to open the model correctly
                     os.chdir(dire_dir)
                     p = subprocess.Popen([RUN_ONE, '--model', MODEL], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.STDOUT)
                     #print(info)
                     writer.write(info)
                     json_results = p.communicate(input=f.getvalue())[0].decode()
-                    print(json_results)
+                    #print(json_results)
                     results = json.loads(json_results)
                     best_results = results[0][0]
                     #print("best: ", best_results)
-                    tuples = map(lambda x: (x[0], x[1]['new_name']), best_results.items())
-                    for x, y in tuples:
-                        print('I should rename %s to %s'%(x,y))
-                    #print(tuples)
-                    #writer.write(func(ea))
+                    tuples = map(lambda x: (varnames[x[0]] if x[0] in varnames else x[0], x[1]['new_name']), best_results.items())
+
+                    FinalRename(dict(tuples), cfunc).apply_to(cfunc.body, None)
+
+                    # Force the UI to update
+                    cfunc.build_c_tree()
+                    cfunc.get_pseudocode()
+
                 except ida_hexrays.DecompilationFailure:
                     warning("Decompilation failed")
         return 1
