@@ -111,11 +111,15 @@ class predict_names_ah_t(idaapi.action_handler_t):
                     info, cfunc = func(ea)
                     # We must set the working directory to the dire dir to open the model correctly
                     os.chdir(dire_dir)
-                    p = subprocess.Popen([RUN_ONE, '--model', MODEL], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    p = subprocess.Popen([RUN_ONE, '--model', MODEL], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
                     #print(info)
                     writer.write(info)
-                    json_results = p.communicate(input=f.getvalue())[0].decode()
-                    #print(json_results)
+                    comm = p.communicate(input=f.getvalue())
+                    json_results = comm[0].decode()
+                    stderr = comm[1].decode()
+                    if p.returncode != 0:
+                        print(stderr)
+                        raise ValueError("Variable prediction failed")
                     results = json.loads(json_results)
                     best_results = results[0][0]
                     #print("best: ", best_results)
@@ -128,6 +132,9 @@ class predict_names_ah_t(idaapi.action_handler_t):
 
                 except ida_hexrays.DecompilationFailure:
                     warning("Decompilation failed")
+
+                except ValueError as e:
+                    warning(str(e) + ". See output window for more details.")
         return 1
 
     def update(self, ctx):

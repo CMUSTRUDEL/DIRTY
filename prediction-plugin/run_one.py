@@ -76,7 +76,9 @@ model = RenamingModel.load(args.model,
                            new_config=extra_config)
 
 decode_results = \
-    decode(model, examples, model.config)
+    list(decode(model, examples, model.config).values())
 # Get the first function.  There should be only one.
-decode_results = list(decode_results.values())[0]
-print(json.dumps(decode_results))
+if len(decode_results) == 0:
+    raise ValueError("The decoder did not return any variable names.")
+else:
+    print(json.dumps(decode_results[0]))
