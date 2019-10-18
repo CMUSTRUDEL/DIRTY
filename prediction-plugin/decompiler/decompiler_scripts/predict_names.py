@@ -2,8 +2,6 @@ from collections import defaultdict
 from util import UNDEF_ADDR, CFuncGraph, GraphBuilder, hexrays_vars, get_expr_name
 import idaapi
 import ida_hexrays
-import ida_kernwin
-import ida_pro
 import json
 import jsonlines
 import os
@@ -16,6 +14,8 @@ varnames = dict()
 oldvarnames = dict()
 var_id = 0
 sentinel_vars = re.compile('@@VAR_[0-9]+')
+
+actname = "predict:varnames"
 
 dire_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 RUN_ONE = os.path.join(dire_dir, "run_one.py")
@@ -96,11 +96,10 @@ def func(ea):
     function_info["raw_code"] = raw_code
     return function_info, cfunc
 
-class custom_action_handler(ida_kernwin.action_handler_t):
+class predict_names_ah_t(idaapi.action_handler_t):
     def __init__(self):
-        ida_kernwin.action_handler_t.__init__(self)
+        idaapi.action_handler_t.__init__(self)
 
-class collect_vars(custom_action_handler):
     def activate(self, ctx):
         ea = ScreenEA()
         if ea is None:
@@ -125,24 +124,32 @@ class collect_vars(custom_action_handler):
                     FinalRename(dict(tuples), cfunc).apply_to(cfunc.body, None)
 
                     # Force the UI to update
-                    cfunc.build_c_tree()
-                    cfunc.get_pseudocode()
+                    ida_hexrays.get_widget_vdui(ctx.widget).refresh_ctext()
 
                 except ida_hexrays.DecompilationFailure:
                     warning("Decompilation failed")
         return 1
 
-def main():
-    # Collect decompilation info
-    cv = collect_vars()
-    cv.activate(None)
+    def update(self, ctx):
+        return idaapi.AST_ENABLE_FOR_WIDGET if \
+            ctx.widget_type == idaapi.BWN_PSEUDOCODE else \
+            idaapi.AST_DISABLE_FOR_WIDGET
 
-idaapi.autoWait()
-if not idaapi.init_hexrays_plugin():
-    idaapi.load_plugin('hexrays')
-    idaapi.load_plugin('hexx64')
-    if not idaapi.init_hexrays_plugin():
-        print('Unable to load Hex-rays')
-    else:
-        print('Hex-rays version %s has been detected' % idaapi.get_hexrays_version())
-main()
+class name_hooks_t(idaapi.Hexrays_Hooks):
+    def __init__(self):
+        idaapi.Hexrays_Hooks.__init__(self)
+    def populating_popup(self, widget, phandle, vu):
+        idaapi.attach_action_to_popup(vu.ct, None, actname)
+        return 0
+
+if idaapi.init_hexrays_plugin():
+    idaapi.register_action(
+        idaapi.action_desc_t(
+            actname,
+            "Predict variable names",
+            predict_names_ah_t(),
+            "P"))
+    name_hooks = name_hooks_t()
+    name_hooks.hook()
+else:
+    print('Predict variable names: hexrays is not available.')
