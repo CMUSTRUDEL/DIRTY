@@ -53,7 +53,7 @@ def generate_example(json_str, binary_file):
                                      json_str=json_str,
                                      code_tokens=code_tokens)
 
-    if is_valid_example(example):
+    if True or is_valid_example(example):
         canonical_code = canonicalize_code(example.ast.code)
         example.canonical_code = canonical_code
         return example
