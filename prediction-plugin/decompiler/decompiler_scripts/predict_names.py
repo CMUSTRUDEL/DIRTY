@@ -23,8 +23,9 @@ MODEL = os.path.join(dire_dir, 'data', 'saved_models', 'model.hybrid.bin')
 
 # Rename variables to sentinel representation
 class RenamedGraphBuilder(GraphBuilder):
-    def __init__(self, cg, func):
+    def __init__(self, cg, func, vuu):
         self.func = func
+        self.vuu = vuu
         super(RenamedGraphBuilder, self).__init__(cg)
 
     def visit_expr(self, e):
@@ -33,34 +34,46 @@ class RenamedGraphBuilder(GraphBuilder):
             # Save original name of variable
             original_name = get_expr_name(e)
             if not sentinel_vars.match(original_name):
-                # Save names
-                #varnames[var_id] = (original_name, original_name)
                 # Rename variables to @@VAR_[id]@@[orig name]@@[orig name]
-                self.func.get_lvars()[e.v.idx].name = \
-                    '@@VAR_' + str(var_id) + '@@' + original_name + '@@' + original_name
-                varnames[original_name] = self.func.get_lvars()[e.v.idx].name
-                oldvarnames[self.func.get_lvars()[e.v.idx].name] = original_name
+                new_name = '@@VAR_' + str(var_id) + '@@' + original_name + '@@' + original_name
+                self.vuu.rename_lvar(self.vuu.cfunc.get_lvars()[e.v.idx],
+                                     str(new_name),
+                                     True)
+                # This is needed so that the NN graph sees the new
+                # name without visiting the entire expression again.
+                self.func.get_lvars()[e.v.idx].name = str(new_name)
+                varnames[original_name] = new_name
+                oldvarnames[new_name] = original_name
                 var_id += 1
         return self.process(e)
 
 # Rename variables to predicted names
 class FinalRename(ida_hexrays.ctree_visitor_t):
-    def __init__(self, renamings, func):
+    def __init__(self, renamings, func, vuu):
         super(FinalRename, self).__init__(0)
         self.renamings = renamings
         self.func = func
+        self.vuu = vuu
 
     def visit_expr(self, e):
         if e.op is ida_hexrays.cot_var:
             original_name = get_expr_name(e)
             if original_name in self.renamings:
                 new_name = self.renamings[original_name]
+
+                if oldvarnames[original_name] != new_name:
+                    print("Renaming %s to %s"%(oldvarnames[original_name],new_name))
+                # This one refreshes the pseudo-code window
+                self.vuu.rename_lvar(self.vuu.cfunc.get_lvars()[e.v.idx],
+                                str(new_name),
+                                True)
+                # This one stops us from renaming the same variable
+                # over and over. Otherwise it's not needed.
                 self.func.get_lvars()[e.v.idx].name = str(new_name)
-                print("Renaming %s to %s"%(oldvarnames[original_name],new_name))
         return 0
 
 # Process a single function given its EA
-def func(ea):
+def func(ea, vuu):
     f = idaapi.get_func(ea)
     function_name = GetFunctionName(ea)
     if f is None:
@@ -79,9 +92,9 @@ def func(ea):
     gb.apply_to(cfunc.body, None)
     #ac = AddressCollector(cg)
     #ac.collect()
-    rg = RenamedGraphBuilder(cg, cfunc)
+    rg = RenamedGraphBuilder(cg, cfunc, vuu)
     rg.apply_to(cfunc.body, None)
-
+    
     # Create tree from collected names
     cfunc.build_c_tree()
     new_graph = CFuncGraph(None)
@@ -101,14 +114,16 @@ class predict_names_ah_t(idaapi.action_handler_t):
         idaapi.action_handler_t.__init__(self)
 
     def activate(self, ctx):
+        print("Suggesting variable names...")
         ea = ScreenEA()
+        vuu = ida_hexrays.get_widget_vdui(ctx.widget)
         if ea is None:
             warning("Current function not found.")
         else:
             f = cStringIO.StringIO()
             with jsonlines.Writer(f) as writer:
                 try:
-                    info, cfunc = func(ea)
+                    info, cfunc = func(ea, vuu)
                     # We must set the working directory to the dire dir to open the model correctly
                     os.chdir(dire_dir)
                     p = subprocess.Popen([RUN_ONE, '--model', MODEL], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -125,10 +140,10 @@ class predict_names_ah_t(idaapi.action_handler_t):
                     #print("best: ", best_results)
                     tuples = map(lambda x: (varnames[x[0]] if x[0] in varnames else x[0], x[1]['new_name']), best_results.items())
 
-                    FinalRename(dict(tuples), cfunc).apply_to(cfunc.body, None)
+                    FinalRename(dict(tuples), cfunc, vuu).apply_to(cfunc.body, None)
 
                     # Force the UI to update
-                    ida_hexrays.get_widget_vdui(ctx.widget).refresh_ctext()
+                    #vuu.refresh_ctext()
 
                 except ida_hexrays.DecompilationFailure:
                     warning("Decompilation failed")
