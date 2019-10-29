@@ -1,5 +1,4 @@
 * 5a70: v3 not renamed
-* 6bd0: v3 and v4 not renamed
 * 6db0: Many variables not renamed
 * 7ff0: Many variables not renamed
 * 8f50: No variables renamed (but one argument is)
