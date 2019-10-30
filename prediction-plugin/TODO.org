@@ -1,5 +1,2 @@
-* Bug: Sometimes renaming do not show in pseudocode window
 * Enhancement: Predict variable names in the background as soon as the script is loaded
-* Enhancement: Convert to a plugin so it doesn't have to be loaded every time
-* Enhancement: Enable "undo" of suggested names
 * Enhacement: Enable selection of suggestions
