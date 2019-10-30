@@ -17,7 +17,7 @@ sentinel_vars = re.compile('@@VAR_[0-9]+')
 
 actname = "predict:varnames"
 
-dire_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+dire_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', '..'))
 RUN_ONE = os.path.join(dire_dir, "run_one.py")
 MODEL = os.path.join(dire_dir, 'data', 'saved_models', 'model.hybrid.bin')
 
@@ -75,7 +75,7 @@ class FinalRename(ida_hexrays.ctree_visitor_t):
 # Process a single function given its EA
 def func(ea, vuu):
     f = idaapi.get_func(ea)
-    function_name = GetFunctionName(ea)
+    function_name = idaapi.get_func_name(ea)
     if f is None:
         print('Please position the cursor within a function')
 
@@ -115,7 +115,7 @@ class predict_names_ah_t(idaapi.action_handler_t):
 
     def activate(self, ctx):
         print("Suggesting variable names...")
-        ea = ScreenEA()
+        ea = idaapi.get_screen_ea()
         vuu = ida_hexrays.get_widget_vdui(ctx.widget)
         if ea is None:
             warning("Current function not found.")
@@ -175,3 +175,16 @@ if idaapi.init_hexrays_plugin():
     name_hooks.hook()
 else:
     print('Predict variable names: hexrays is not available.')
+
+class plugin(idaapi.plugin_t):
+    flags = 0
+    comment = "Predicts variable names in decompiled code"
+
+    wanted_name = "Predict variable names"
+    #wanted_hotkey = "P"
+
+    def init(self):
+        return idaapi.PLUGIN_KEEP
+
+def PLUGIN_ENTRY():
+    return plugin()

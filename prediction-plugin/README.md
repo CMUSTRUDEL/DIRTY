@@ -25,16 +25,35 @@ wget -O pretrained_model.tar.gz https://www.dropbox.com/s/2b4c9ba2g0nhe7q/pretra
 tar -xzf pretrained_model.tar.gz
 ```
 
-## Use Hex-Rays script
+## Use Hex-Rays script/plugin
 
-Open Hex-Rays, select "Script file" under the "File" menu, and select
+### Plugin
+
+To install the script as a plugin, create a symbolic link to
+`prediction-plugin/decompiler/decompiler-scripts/predict_names.py`
+from your Hex-Rays `plugins` directory.  For example:
+
+```bash
+ln -s /path/to/prediction-plugin/decompiler/decompiler-scripts/predict_names.py /path/to/idapro-7.3/plugins/predict_names.py
+```
+
+You only need to do this once.
+
+### Script
+
+To load the script without installing it as a plugin, open Hex-Rays,
+select "Script file" from the "File" menu, and then select
 `prediction-plugin/decompiler/decompiler-scripts/predict_names.py`.
-Open a Pseudocode window for any function (e.g., by pressing F5).  Use
+
+### Usage
+
+Once installed as plugin or loaded as a script, open a Pseudocode
+window for any function (e.g., by pressing F5) inside Hex-Rays.  Use
 the "Predict variable names" action that is available from the
 right-click context menu of the Pseudocode window.
 
-Note that Hex-Rays must be loaded from the `dire_prediction` Conda
-environment.
+Note that Hex-Rays must always be loaded from the `dire_prediction`
+Conda environment.
 
 ## Create a working directory
 
