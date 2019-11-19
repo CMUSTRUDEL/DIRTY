@@ -55,6 +55,14 @@ right-click context menu of the Pseudocode window.
 Note that Hex-Rays must always be loaded from the `dire_prediction`
 Conda environment.
 
+# Running the scripts manually
+
+For debugging or development purposes, you may also wish to run the
+prediction plugin through scripts.  Before starting, you must first
+follow the directions above to [setup the `dire_prediction` conda
+environment](#conda-environment) and [download the pretrained
+models](#download-the-pretrained-models).
+
 ## Create a working directory
 
 I start by creating a working directory with subfolders for each step of the
