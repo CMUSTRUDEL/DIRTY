@@ -112,7 +112,7 @@ class collect_vars(custom_action_handler):
                     try:
                         info = func(ea)
                         writer.write(func(ea))
-                    except ida_hexrays.DecompilationFailure:
+                    except (ida_hexrays.DecompilationFailure, ValueError):
                         continue
         print('Vars collected.')
         return 1
