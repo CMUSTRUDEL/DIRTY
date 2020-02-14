@@ -18,7 +18,7 @@ def get_expr_name(expr):
 class CFuncGraph:
     def __init__(self, highlight):
         self.items = [] # list of citem_t
-        self.reverse = dict() # citem_t -> node #
+        self.reverse = [] # citem_t -> node #
         self.succs = [] # list of lists of next nodes
         self.preds = [] # list of lists of previous nodes
         self.highlight = highlight
@@ -148,7 +148,7 @@ class CFuncGraph:
         x_successor = None
         y_successor = None
         z_successor = None
-        for i in xrange(self.nsucc(n)):
+        for i in range(self.nsucc(n)):
             successors.append(self.succ(n, i))
         successor_trees = []
         if item.is_expr():
@@ -213,7 +213,7 @@ class GraphBuilder(ida_hexrays.ctree_parentee_t):
         if n <= len(self.cg.items):
             self.cg.items.append(i)
         self.cg.items[n] = i
-        self.cg.reverse[i] = n
+        self.cg.reverse.append((i, n))
         return n
 
     def process(self, i):
@@ -222,7 +222,7 @@ class GraphBuilder(ida_hexrays.ctree_parentee_t):
             return n
         if len(self.parents) > 1:
             lp = self.parents.back().obj_id
-            for k, v in self.cg.reverse.items():
+            for k, v in self.cg.reverse:
                 if k.obj_id == lp:
                     p = v
                     break
