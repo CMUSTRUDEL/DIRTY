@@ -1,0 +1,12 @@
+docopt
+torch
+editdistance
+jsonnet
+psutil
+sentencepiece
+tensorboard
+tensorboardX
+tqdm
+ujson
+pygments
+# cpu: torch==1.4.0+cpu torchvision==0.5.0+cpu
