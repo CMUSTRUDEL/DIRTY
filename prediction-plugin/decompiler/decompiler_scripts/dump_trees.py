@@ -45,7 +45,7 @@ class AddressCollector:
                 if item.ea != UNDEF_ADDR:
                     self.addresses[name].add(item.ea)
                 else:
-                    item_id = self.cg.reverse[item]
+                    item_id = next(b for a, b in self.cg.reverse if a == item)
                     ea = self.cg.get_pred_ea(item_id)
                     if ea != UNDEF_ADDR:
                         self.addresses[name].add(ea)
@@ -53,7 +53,10 @@ class AddressCollector:
 # Process a single function given its EA
 def func(ea):
     f = idaapi.get_func(ea)
-    function_name = GetFunctionName(ea)
+    if hasattr(idaapi, "GetFunctionName"):
+        function_name = GetFunctionName(ea)
+    else:
+        function_name = get_func_name(ea)
     if f is None:
         print('Please position the cursor within a function')
 
@@ -119,7 +122,10 @@ def main():
     cv = collect_vars()
     cv.activate(None)
 
-idaapi.autoWait()
+if hasattr(idaapi, "auto_wait"): # IDA 7.4
+    idaapi.auto_wait()
+else:
+    idaapi.autoWait() # Old IDA
 if not idaapi.init_hexrays_plugin():
     idaapi.load_plugin('hexrays')
     idaapi.load_plugin('hexx64')
