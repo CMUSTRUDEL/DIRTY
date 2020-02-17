@@ -1,7 +1,7 @@
 docopt
-torch
 editdistance
 jsonnet
+jsonlines
 psutil
 sentencepiece
 tensorboard
@@ -9,4 +9,9 @@ tensorboardX
 tqdm
 ujson
 pygments
-# cpu: torch==1.4.0+cpu torchvision==0.5.0+cpu
+# if you want to use the gpu, use:
+#torch
+#torchvision
+# if you want to use the cpu, run pip install --find-links https://download.pytorch.org/whl/torch_stable.html -r requirements.txt
+torch==1.4.0+cpu
+torchvision==0.5.0+cpu

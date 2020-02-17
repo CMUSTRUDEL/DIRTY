@@ -2,7 +2,7 @@
 
 This code loads a provided model and generates predictions from Hex-Rays ASTs.
 
-## Conda Environment
+## Python Environment
 
 To install and activate the conda environment:
 
@@ -10,6 +10,16 @@ To install and activate the conda environment:
 conda env create -f env.yml
 conda activate dire_prediction
 ```
+
+You can also setup the environment using `pip`:
+
+```
+pip install -r requirements.txt --find-links https://download.pytorch.org/whl/torch_stable.html
+```
+
+Note: If you are using virtual environments with python3, you should
+use `venv` instead of `virtualenv` to avoid (this
+bug)[https://github.com/pypa/virtualenv/issues/737].
 
 ## Hex-Rays Python Environment
 

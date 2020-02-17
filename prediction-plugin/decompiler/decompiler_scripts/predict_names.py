@@ -7,7 +7,12 @@ import jsonlines
 import os
 import re
 import subprocess
-import cStringIO
+import sys
+
+try:
+    from CStringIO import StringIO ## for Python 2
+except ImportError:
+    from io import StringIO ## for Python 3
 
 # Dictionary mapping variable ids to (orig, orig) pairs
 varnames = dict()
@@ -118,20 +123,20 @@ class predict_names_ah_t(idaapi.action_handler_t):
         ea = idaapi.get_screen_ea()
         vuu = ida_hexrays.get_widget_vdui(ctx.widget)
         if ea is None:
-            warning("Current function not found.")
+            idaapi.warning("Current function not found.")
         else:
-            f = cStringIO.StringIO()
+            f = StringIO()
             with jsonlines.Writer(f) as writer:
                 try:
                     info, cfunc = func(ea, vuu)
                     # We must set the working directory to the dire dir to open the model correctly
                     os.chdir(dire_dir)
-                    p = subprocess.Popen([RUN_ONE, '--model', MODEL], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+                    p = subprocess.Popen([RUN_ONE, '--model', MODEL], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE, encoding=sys.getdefaultencoding())
                     #print(info)
                     writer.write(info)
                     comm = p.communicate(input=f.getvalue())
-                    json_results = comm[0].decode()
-                    stderr = comm[1].decode()
+                    json_results = comm[0]
+                    stderr = comm[1]
                     if p.returncode != 0:
                         print(stderr)
                         raise ValueError("Variable prediction failed")
@@ -146,10 +151,10 @@ class predict_names_ah_t(idaapi.action_handler_t):
                     #vuu.refresh_ctext()
 
                 except ida_hexrays.DecompilationFailure:
-                    warning("Decompilation failed")
+                    idaapi.warning("Decompilation failed")
 
                 except ValueError as e:
-                    warning(str(e) + ". See output window for more details.")
+                    idaapi.warning(str(e) + ". See output window for more details.")
         return 1
 
     def update(self, ctx):
