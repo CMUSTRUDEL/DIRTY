@@ -81,7 +81,7 @@ To evaluate a saved or pretrained model, run the following command.
 python exp.py \
     test \
     --cuda \
-    --extra-config='{"decoder": {"remove_duplicates_in_prediction": true} }' \
+    --extra-config='{"data": {"vocab_file": "data/vocab.bpe10000/vocab"}, "decoder": {"remove_duplicates_in_prediction": true} }' \
     exp_runs/dire.hybrid/model.iter_number.bin \   # path to the saved model under the work directory
     data/preprocessed_data/test.tar
 ```

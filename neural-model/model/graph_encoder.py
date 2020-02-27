@@ -429,7 +429,7 @@ class GraphASTEncoder(Encoder):
 
         # (batch_size, max_node_num, node_encoding_size)
         batch_node_encoding = flattened_node_encodings[torch.from_numpy(index).to(flattened_node_encodings.device)]
-        batch_node_encoding.data.masked_fill_((1. - batch_tree_node_masks).byte().unsqueeze(-1), 0.)
+        batch_node_encoding.data.masked_fill_((1. - batch_tree_node_masks).bool().unsqueeze(-1), 0.)
 
         return dict(batch_tree_node_encoding=batch_node_encoding,
                     batch_tree_node_masks=batch_tree_node_masks)
