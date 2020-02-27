@@ -82,7 +82,7 @@ python exp.py \
     test \
     --cuda \
     --extra-config='{"data": {"vocab_file": "data/vocab.bpe10000/vocab"}, "decoder": {"remove_duplicates_in_prediction": true} }' \
-    exp_runs/dire.hybrid/model.iter_number.bin \   # path to the saved model under the work directory
+    data/saved_models/model.hybrid.bin \   # path to the pretrained models at `data/saved_models` or the saved model under the user-specified work directory
     data/preprocessed_data/test.tar
 ```
 
