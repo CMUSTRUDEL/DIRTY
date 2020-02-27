@@ -141,9 +141,10 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
                 # (live_beam_size, vocab_size)
                 beam_cont_cand_hyp_scores = cont_cand_hyp_scores[beam_start_hyp_pos: beam_end_hyp_pos]
                 cont_beam_size = beam_size - len(completed_hyps[ast_id])
-                beam_new_hyp_scores, beam_new_hyp_positions = torch.topk(beam_cont_cand_hyp_scores.view(-1),
-                                                                         k=cont_beam_size,
-                                                                         dim=-1)
+                # Take `len(beam)` more candidates to account for possible duplicate
+                k = min(beam_cont_cand_hyp_scores.numel(), cont_beam_size + len(beam))
+                beam_new_hyp_scores, beam_new_hyp_positions = torch.topk(
+                    beam_cont_cand_hyp_scores.view(-1), k=k, dim=-1)
 
                 # (cont_beam_size)
                 beam_prev_hyp_ids = beam_new_hyp_positions / tgt_vocab_size
@@ -153,7 +154,8 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
                 _hyp_var_name_ids = beam_hyp_var_name_ids.cpu()
                 _new_hyp_scores = beam_new_hyp_scores.cpu()
 
-                for i in range(cont_beam_size):
+                beam_cnt = 0
+                for i in range(len(beam_new_hyp_positions)):
                     prev_hyp_id = _prev_hyp_ids[i].item()
                     prev_hyp = beam[prev_hyp_id]
                     hyp_var_name_id = _hyp_var_name_ids[i].item()
@@ -177,6 +179,7 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
                         variable_ptr += 1
                         new_variable_list.append([])
 
+                    beam_cnt += 1
                     new_hyp = self.Hypothesis(variable_list=new_variable_list,
                                               variable_ptr=variable_ptr,
                                               score=new_hyp_score)
@@ -192,6 +195,9 @@ class AttentionalRecurrentSubtokenDecoder(RecurrentSubtokenDecoder):
                         new_hyp_ast_ids.append(ast_id)
                         new_hyp_variable_ptrs.append(variable_ptr)
                         is_same_variable_mask.append(1. if prev_hyp.variable_ptr == variable_ptr else 0.)
+
+                    if beam_cnt >= cont_beam_size:
+                        break
 
                 beam_start_hyp_pos = beam_end_hyp_pos
 

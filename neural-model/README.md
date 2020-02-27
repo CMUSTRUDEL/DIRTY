@@ -24,9 +24,11 @@ We created a corpus of 164,632 unique x86-64 binaries generated from C projects 
 
 ### Pre-process the Github Binaries Dataset for DIRE
 
-To train and test DIRE model using the collected binaries dataset, first run the following pre-process script `utils.preprocess` to (1) filter invalid examples (e.g., code with too-large ASTs), and (2) randomly partition the entire dataset into training/development/test sets:
+**Clearning Binary Data** To train and test DIRE model using the collected binaries dataset, first run the following pre-process script `utils.preprocess` to (1) filter invalid examples (e.g., code with too-large ASTs), and (2) randomly partition the entire dataset into training/development/test sets:
 
 ```bash
+mkdir -p data/preprocessed_data
+
 python -m utils.preprocess \
     "path/to/binary/dataset/*.tar.gz" \   # use wild-card to match all tar files
     data/preprocessed_data
@@ -34,7 +36,7 @@ python -m utils.preprocess \
 
 All scripts are documented using [`docopt`](http://docopt.org/), please refer to the docstring of `utils/preprocess.py` for its complete usage.
 
-You may also download our pre-processed dataset along with the training/testing partitions from [here](mailto:pcyin@cs.cmu.edu). The pre-processing scripts also support fixing the testing set to be a pre-defined partition. For example, to use the same testing partition as the one used in our paper during pre-processing, you may run:
+**Our Preprocessed Splits** You may also download our pre-processed dataset along with the training/testing splits from [here](https://drive.google.com/drive/folders/19Rf7NtW56r6fz-ycldZq9hjxNr5osAJW?usp=sharing). The pre-processing scripts also support fixing the testing set to be a pre-defined partition. For example, to use the same testing partition as the one used in our paper during pre-processing, you may run:
 
 ```bash
 python -m utils.preprocess \
@@ -44,27 +46,29 @@ python -m utils.preprocess \
     data/preprocessed_data
 ```
 
-Next, to create the vocabulary files:
+**Vocabulary Files** We've included the vocabulary file in the release (under `data/vocab.bpe10000`). If you would like to create your own vocabulary (e.g., to try a different BPE vocabulary size), simply run:
 
 ```bash
 python -m utils.vocab \
     --use-bpe \
     --size=10000 \
     "data/preprocessed_data/train-shard-*.tar" \
-    data/preprocessed_data/vocab.bpe10000
+    data/vocab.bpe10000
 ```
 
-Again, please refer to the script file's docstring for its complete usage. We've also included the vocabulary file in the release (under `data/vocab.bpe10000`).
+Again, please refer to the script file's docstring for its complete usage. 
 
 ## Running DIRE
 
 `exp.py` is the entry script for training and evaluating the DIRE model. Below is an example training script:
 
 ```bash
+mkdir -p exp_runs/dire.hybrid   # create a work directory
+
 python exp.py \
     train \
     --cuda \
-    --work-dir=path/to/the/work/folder \
+    --work-dir=exp_runs/dire.hybrid \
     --extra-config='{ "data": {"train_file": "data/preprocessed_data/train-shard-*.tar" }, "decoder": { "input_feed": false, "tie_embedding": true }, "train": { "evaluate_every_nepoch": 5, "max_epoch": 60 } }' \
     data/config/model.hybrid.jsonnet
 ```
@@ -78,7 +82,7 @@ python exp.py \
     test \
     --cuda \
     --extra-config='{"decoder": {"remove_duplicates_in_prediction": true} }' \
-    path/to/work/folder/model.iter_number.bin \
+    exp_runs/dire.hybrid/model.iter_number.bin \   # path to the saved model under the work directory
     data/preprocessed_data/test.tar
 ```
 
