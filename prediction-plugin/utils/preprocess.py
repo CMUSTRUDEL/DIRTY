@@ -31,6 +31,34 @@ def is_valid_example(example):
 
     return is_valid
 
+def generate_example(json_str, binary_file):
+    tree_json_dict = json.loads(json_str)
+
+    root = SyntaxNode.from_json_dict(tree_json_dict['ast'])
+
+    preprocess_ast(root, code=tree_json_dict['raw_code'])
+    code_tokens = tokenize_raw_code(tree_json_dict['raw_code'])
+    tree_json_dict['code_tokens'] = code_tokens
+
+    # add function name to the name field of the root block
+    root.name = tree_json_dict['function']
+    root.named_fields.add('name')
+
+    new_json_dict = root.to_json_dict()
+    tree_json_dict['ast'] = new_json_dict
+    json_str = json.dumps(tree_json_dict)
+
+    example = Example.from_json_dict(tree_json_dict,
+                                     binary_file=binary_file,
+                                     json_str=json_str,
+                                     code_tokens=code_tokens)
+
+    if True or is_valid_example(example):
+        canonical_code = canonicalize_code(example.ast.code)
+        example.canonical_code = canonical_code
+        return example
+    else:
+        return None
 
 def example_generator(json_queue, example_queue, args, consumer_num=1):
     while True:

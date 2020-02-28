@@ -1,0 +1,2 @@
+* Enhancement: Predict variable names in the background as soon as the script is loaded
+* Enhacement: Enable selection of suggestions

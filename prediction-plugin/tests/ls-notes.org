@@ -1,0 +1,12 @@
+* 5a70: v3 not renamed
+* 6db0: Many variables not renamed
+* 7ff0: Many variables not renamed
+* 8f50: No variables renamed (but one argument is)
+* 9790: Most not renamed
+* b7e0: Most not renamed
+* bf80: No variables renamed
+* c300: Most not renamed
+* cc20: No variables renamed
+* cfe0: Interesting start/end renaming
+* d410: Good: timestamp & time_time
+* e070: No variables renamed

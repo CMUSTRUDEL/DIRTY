@@ -105,7 +105,8 @@ class GraphASTEncoder(Encoder):
     def build(cls, config):
         params = util.update(GraphASTEncoder.default_params(), config)
 
-        print(params)
+        if False:
+            print(params)
 
         connections = params['connections']
         connection2edge_type = {
