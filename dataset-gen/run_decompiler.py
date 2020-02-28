@@ -32,6 +32,7 @@ parser.add_argument('output_dir',
                     metavar='OUTPUT_DIR',
                     help="output directory",
 )
+parser.add_argument('--verbose', '-v', action='store_true')
 
 args = parser.parse_args()
 env = os.environ.copy()
@@ -73,7 +74,8 @@ def run_decompiler(file_name, env, script, timeout=None):
     except subprocess.CalledProcessError as e:
         output = e.output
         subprocess.call(['rm', '-f', f'{file_name}.i64'])
-    return output
+    if args.verbose:
+        print(output.decode('unicode_escape'))
 
 # Create a temporary directory, since the decompiler makes a lot of additional
 # files that we can't clean up from here
