@@ -32,7 +32,7 @@ class CollectGraph(CFuncGraph):
         # ::NONE:: is a sentinel value used to indicate that two different
         # variables map to the same set of addresses. This happens in small
         # functions that use all of their arguments to call another function.
-        for name, addrs in rev_dict.iteritems():
+        for name, addrs in rev_dict.items():
             addrs = frozenset(addrs)
             if (addrs in varmap):
                 varmap[addrs] = '::NONE::'
