@@ -1,3 +1,4 @@
+from collections import defaultdict
 import ida_hexrays
 import ida_lines
 import ida_pro
@@ -16,55 +17,42 @@ def get_expr_name(expr):
     return name
 
 
-class CFuncGraph:
-    def __init__(self, highlight):
+class CFuncTree:
+    def __init__(self):
+        self.next_node_num = 0
         # list of citem_t
         self.items = []
         # (citem_t, node#) tuples
         self.reverse = []
-        # list of lists of next nodes
-        self.succs = []
-        # list of lists of previous nodes
-        self.preds = []
-        self.highlight = highlight
+        # dict of sets of next nodes
+        self.succs = defaultdict(set)
+        # previous node number (or None)
+        self.pred = defaultdict(lambda: None)
 
     def nsucc(self, n):
-        return len(self.succs[n]) if self.size() else 0
-
-    def npred(self, n):
-        return len(self.preds[n]) if self.size() else 0
-
-    def succ(self, n, i):
-        return self.succs[n][i]
-
-    def pred(self, n, i):
-        return self.preds[n][i]
+        return len(self.succs[n])
 
     def size(self):
-        return len(self.preds)
+        return len(self.items)
 
-    def add_node(self):
-        n = self.size()
-
-        def resize(array, new_size):
-            if new_size > len(array):
-                while len(array) < new_size:
-                    array.append([])
-            else:
-                array = array[:new_size]
-            return array
-
-        self.preds = resize(self.preds, n+1)
-        self.succs = resize(self.succs, n+1)
-        return n
+    def add_node(self, i):
+        cur_node_num = self.next_node_num
+        self.next_node_num += 1
+        self.items.append(i)
+        self.reverse.append((i, cur_node_num))
+        return cur_node_num
 
     def add_edge(self, x, y):
-        self.preds[y].append(x)
-        self.succs[x].append(y)
+        if self.pred[y]:
+            raise ValueError(
+                f"Cannot add edge ({x} -> {y}), ({self.pred[y]} -> {y}) exists"
+            )
+        self.pred[y] = x
+        self.succs[x].add(y)
 
     def get_pred_ea(self, n):
-        if self.npred(n) == 1:
-            pred = self.pred(n, 0)
+        pred = self.pred[n]
+        if pred:
             pred_item = self.items[pred]
             if pred_item.ea == UNDEF_ADDR:
                 return self.get_pred_ea(pred)
@@ -142,43 +130,26 @@ class CFuncGraph:
                          ida_hexrays.cot_helper]:
             node_info["name"] = get_expr_name(item.cexpr)
         # Get info for children of this node
-        successors = []
-        x_successor = None
-        y_successor = None
-        z_successor = None
-        for i in range(self.nsucc(n)):
-            successors.append(self.succ(n, i))
+        successors = set(self.succs[n])
         successor_trees = []
         if item.is_expr():
-            if item.x:
-                for s in successors:
-                    if item.x == self.items[s]:
-                        successors.remove(s)
-                        x_successor = self.json_tree(s)
-                        break
-            if item.y:
-                for s in successors:
-                    if item.y == self.items[s]:
-                        successors.remove(s)
-                        y_successor = self.json_tree(s)
-                        break
-            if item.z:
-                for s in successors:
-                    if item.z == self.items[s]:
-                        successors.remove(s)
-                        z_successor = self.json_tree(s)
-                        break
+            to_remove = set()
+            for s in successors:
+                if item.x == self.items[s]:
+                    to_remove.add(s)
+                    node_info["x"] = self.json_tree(s)
+                if item.y == self.items[s]:
+                    to_remove.add(s)
+                    node_info["y"] = self.json_tree(s)
+                if item.z == self.items[s]:
+                    to_remove.add(s)
+                    node_info["z"] = self.json_tree(s)
+            successors.difference_update(to_remove)
         if successors:
             for succ in successors:
                 successor_trees.append(self.json_tree(succ))
         if successor_trees != []:
             node_info["children"] = successor_trees
-        if x_successor:
-            node_info["x"] = x_successor
-        if y_successor:
-            node_info["y"] = y_successor
-        if z_successor:
-            node_info["z"] = z_successor
         return node_info
 
     def print_tree(self):
@@ -186,43 +157,34 @@ class CFuncGraph:
         print(tree)
 
     def dump(self):
-        print(f"{len(self.items)} items:")
-        for idx, item in enumerate(self.items):
-            print(f"\t{idx}: {ida_hexrays.get_ctype_name(item.op)}")
+        print(f"{self.size()} items:")
+        for n in range(self.size()):
+            print(f"\t{n}: {ida_hexrays.get_ctype_name(self.items[n].op)}")
+
+        print("pred:")
+        for child in range (self.size()):
+            print(f"\t{child}: {self.pred[child]}")
 
         print("succs:")
-        for parent, s in enumerate(self.succs):
-            print(f"\t{parent}: {s}")
-
-        print("preds:")
-        for child, p in enumerate(self.preds):
-            print(f"\t{child}: {p}")
+        for parent in range(self.size()):
+            print(f"\t{parent}: {self.succs[parent]}")
 
 
-class GraphBuilder(ida_hexrays.ctree_parentee_t):
-    def __init__(self, cg):
+
+class TreeBuilder(ida_hexrays.ctree_parentee_t):
+    def __init__(self, ct):
         ida_hexrays.ctree_parentee_t.__init__(self)
-        self.cg = cg
-
-    def add_node(self, i):
-        n = self.cg.add_node()
-        if n <= len(self.cg.items):
-            self.cg.items.append(i)
-        self.cg.items[n] = i
-        self.cg.reverse.append((i, n))
-        return n
+        self.ct = ct
 
     def process(self, i):
-        n = self.add_node(i)
-        if n < 0:
-            return n
+        n = self.ct.add_node(i)
         if len(self.parents) > 1:
             lp = self.parents.back().obj_id
-            for k, v in self.cg.reverse:
+            for k, v in self.ct.reverse:
                 if k.obj_id == lp:
                     p = v
                     break
-            self.cg.add_edge(p, n)
+            self.ct.add_edge(p, n)
         return 0
 
     def visit_insn(self, i):

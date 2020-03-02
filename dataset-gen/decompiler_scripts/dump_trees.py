@@ -1,5 +1,5 @@
 from collections import defaultdict
-from util import UNDEF_ADDR, CFuncGraph, GraphBuilder, get_expr_name
+from util import UNDEF_ADDR, CFuncTree, TreeBuilder, get_expr_name
 import idaapi
 import idautils
 import ida_auto
@@ -19,11 +19,11 @@ var_id = 0
 sentinel_vars = re.compile('@@VAR_[0-9]+')
 
 
-class RenamedGraphBuilder(GraphBuilder):
-    def __init__(self, cg, func, addresses):
+class RenamedTreeBuilder(TreeBuilder):
+    def __init__(self, ct, func, addresses):
         self.func = func
         self.addresses = addresses
-        super(RenamedGraphBuilder, self).__init__(cg)
+        super(RenamedTreeBuilder, self).__init__(ct)
 
     def visit_expr(self, e):
         global var_id
@@ -47,21 +47,21 @@ class RenamedGraphBuilder(GraphBuilder):
 
 
 class AddressCollector:
-    def __init__(self, cg):
-        self.cg = cg
+    def __init__(self, ct):
+        self.ct = ct
         self.addresses = defaultdict(set)
 
     def collect(self):
-        for item in self.cg.items:
+        for item in self.ct.items:
             if item.op is ida_hexrays.cot_var:
                 name = get_expr_name(item)
                 if item.ea != UNDEF_ADDR:
                     self.addresses[name].add(item.ea)
                 else:
-                    item_id = [item_id for (i, item_id) in self.cg.reverse
+                    item_id = [item_id for (i, item_id) in self.ct.reverse
                                if i == item][0]
-                    # item_id = self.cg.reverse[item]
-                    ea = self.cg.get_pred_ea(item_id)
+                    # item_id = self.ct.reverse[item]
+                    ea = self.ct.get_pred_ea(item_id)
                     if ea != UNDEF_ADDR:
                         self.addresses[name].add(ea)
 
@@ -80,23 +80,23 @@ def func(ea):
         print(f"Failed to decompile {ea:x}: {function_name}!")
         raise e
 
-    # Rename decompilation graph
-    cg = CFuncGraph(None)
-    gb = GraphBuilder(cg)
-    gb.apply_to(cfunc.body, None)
-    ac = AddressCollector(cg)
+    # Rename decompilation tree
+    ct = CFuncTree()
+    tb = TreeBuilder(ct)
+    tb.apply_to(cfunc.body, None)
+    ac = AddressCollector(ct)
     ac.collect()
-    rg = RenamedGraphBuilder(cg, cfunc, ac.addresses)
-    rg.apply_to(cfunc.body, None)
+    rt = RenamedTreeBuilder(ct, cfunc, ac.addresses)
+    rt.apply_to(cfunc.body, None)
 
     # Create tree from collected names
     cfunc.build_c_tree()
-    new_graph = CFuncGraph(None)
-    new_builder = GraphBuilder(new_graph)
+    new_tree = CFuncTree()
+    new_builder = TreeBuilder(new_tree)
     new_builder.apply_to(cfunc.body, None)
     function_info = dict()
     function_info["function"] = function_name
-    function_info["ast"] = new_graph.json_tree(0)
+    function_info["ast"] = new_tree.json_tree(0)
     raw_code = ""
     for line in cfunc.get_pseudocode():
         raw_code += f'{idaapi.tag_remove(line.line)}\n'

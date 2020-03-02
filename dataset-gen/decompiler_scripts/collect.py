@@ -1,7 +1,7 @@
 # Usage: IDALOG=/dev/stdout ./idat64 -B -S/path/to/collect.py /path/to/binary
 
 from collections import defaultdict
-from util import UNDEF_ADDR, CFuncGraph, GraphBuilder, \
+from util import UNDEF_ADDR, CFuncTree, TreeBuilder, \
     hexrays_vars, get_expr_name
 import idaapi
 from idautils import Functions
@@ -16,7 +16,7 @@ import os
 varmap = dict()
 
 
-class CollectGraph(CFuncGraph):
+class CollectTree(CFuncTree):
     """Collects a map of a set of addresses to a variable name.
     For each variable, this collects the addresses corresponding to its uses.
     """
@@ -59,11 +59,11 @@ def func(ea):
         print(f"Failed to decompile {ea:x}!")
         return True
 
-    # Build decompilation graph
-    cg = CollectGraph(None)
-    gb = GraphBuilder(cg)
-    gb.apply_to(cfunc.body, None)
-    cg.collect_vars()
+    # Build decompilation tree
+    ct = CollectTree()
+    tb = TreeBuilder(ct)
+    tb.apply_to(cfunc.body, None)
+    ct.collect_vars()
 
 
 class custom_action_handler(ida_kernwin.action_handler_t):
