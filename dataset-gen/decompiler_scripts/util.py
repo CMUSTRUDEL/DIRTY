@@ -1,4 +1,3 @@
-from collections import defaultdict
 import ida_hexrays
 import ida_lines
 import ida_pro
@@ -9,18 +8,24 @@ UNDEF_ADDR = 0xFFFFFFFFFFFFFFFF
 
 hexrays_vars = re.compile("^(v|a)[0-9]+$")
 
+
 def get_expr_name(expr):
     name = expr.print1(None)
     name = ida_lines.tag_remove(name)
     name = ida_pro.str2user(name)
     return name
 
+
 class CFuncGraph:
     def __init__(self, highlight):
-        self.items = [] # list of citem_t
-        self.reverse = [] # (citem_t, node#) tuples
-        self.succs = [] # list of lists of next nodes
-        self.preds = [] # list of lists of previous nodes
+        # list of citem_t
+        self.items = []
+        # (citem_t, node#) tuples
+        self.reverse = []
+        # list of lists of next nodes
+        self.succs = []
+        # list of lists of previous nodes
+        self.preds = []
         self.highlight = highlight
 
     def nsucc(self, n):
@@ -73,49 +78,41 @@ class CFuncGraph:
         expr = item.cexpr
         parts = [ida_hexrays.get_ctype_name(op)]
         if op == ida_hexrays.cot_ptr:
-            parts.append(".%d" % expr.ptrsize)
+            parts.append(f".{expr.ptrsize}")
         elif op == ida_hexrays.cot_memptr:
-            parts.append(".%d (m=%d)" % (expr.ptrsize, expr.m))
+            parts.append(f".{expr.ptrsize} (m={expr.m})")
         elif op == ida_hexrays.cot_memref:
-            parts.append(" (m=%d)" % (expr.m,))
-        elif op in [
-                ida_hexrays.cot_obj,
-                ida_hexrays.cot_var]:
-            name = get_expr_name(expr)
-            parts.append(".%d %s" % (expr.refwidth, name))
-        elif op in [
-                ida_hexrays.cot_num,
-                ida_hexrays.cot_helper,
-                ida_hexrays.cot_str]:
-            name = get_expr_name(expr)
-            parts.append(" %s" % (name,))
+            parts.append(f" (m={expr.m})")
+        elif op in [ida_hexrays.cot_obj, ida_hexrays.cot_var]:
+            parts.append(f".{expr.refwidth} {get_expr_name(expr)}")
+        elif op in [ida_hexrays.cot_num,
+                    ida_hexrays.cot_helper,
+                    ida_hexrays.cot_str]:
+            parts.append(f" {get_expr_name(expr)}")
         elif op == ida_hexrays.cit_goto:
-            parts.append(" LABEL_%d" % insn.cgoto.label_num)
+            parts.append(f" LABEL_{insn.cgoto.label_num}")
         elif op == ida_hexrays.cit_asm:
-            parts.append("<asm statements; unsupported ATM>")
-            # parts.append(" %a.%d" % ())
-        parts.append(", ")
-        parts.append("ea: %08X" % item.ea)
-        if item.is_expr() and not expr is None and not expr.type.empty():
+            parts.append("<asm statements; unsupported>")
+        parts.append(f", ea: {item.ea:08x}")
+        if item.is_expr() and expr is not None and not expr.type.empty():
             parts.append(", ")
             tstr = expr.type._print()
             parts.append(tstr if tstr else "?")
         return "".join(parts)
 
-
-    # Puts the tree in a format suitable for JSON
     def json_tree(self, n):
+        """Puts the tree in a format suitable for JSON"""
         # Each node has a unique ID
-        node_info = { "node_id" : n }
+        node_info = {"node_id": n}
         item = self.items[n]
         # This is the type of ctree node
         node_info["node_type"] = ida_hexrays.get_ctype_name(item.op)
         # This is the type of the data (in C-land)
         if item.is_expr() and not item.cexpr.type.empty():
             node_info["type"] = item.cexpr.type._print()
-        node_info["address"] = "%08X" % item.ea
+        node_info["address"] = f"{item.ea:08x}"
         if item.ea == UNDEF_ADDR:
-            node_info["parent_address"] = "%08X" % self.get_pred_ea(n)
+            node_info["parent_address"] = f"{self.get_pred_ea(n):08x}"
         # Specific info for different node types
         if item.op == ida_hexrays.cot_ptr:
             node_info["pointer_size"] = item.cexpr.ptrsize
@@ -132,7 +129,8 @@ class CFuncGraph:
                 "ref_width": item.cexpr.refwidth
             })
         elif item.op == ida_hexrays.cot_var:
-            _, var_id, old_name, new_name = get_expr_name(item.cexpr).split("@@")
+            _, var_id, old_name, new_name = \
+                get_expr_name(item.cexpr).split("@@")
             node_info.update({
                 "var_id": var_id,
                 "old_name": old_name,
@@ -148,7 +146,7 @@ class CFuncGraph:
         x_successor = None
         y_successor = None
         z_successor = None
-        for i in xrange(self.nsucc(n)):
+        for i in range(self.nsucc(n)):
             successors.append(self.succ(n, i))
         successor_trees = []
         if item.is_expr():
@@ -188,25 +186,23 @@ class CFuncGraph:
         print(tree)
 
     def dump(self):
-        print("%d items:" % len(self.items))
+        print(f"{len(self.items)} items:")
         for idx, item in enumerate(self.items):
-            print("\t%d: %s" % (idx, ida_hexrays.get_ctype_name(item.op)))
-            # print("\t%d: %s" % (idx, self.get_node_label(idx)))
+            print(f"\t{idx}: {ida_hexrays.get_ctype_name(item.op)}")
 
         print("succs:")
         for parent, s in enumerate(self.succs):
-            print("\t%d: %s" % (parent, s))
+            print(f"\t{parent}: {s}")
 
         print("preds:")
         for child, p in enumerate(self.preds):
-            print("\t%d: %s" % (child, p))
+            print(f"\t{child}: {p}")
 
 
 class GraphBuilder(ida_hexrays.ctree_parentee_t):
     def __init__(self, cg):
         ida_hexrays.ctree_parentee_t.__init__(self)
         self.cg = cg
-
 
     def add_node(self, i):
         n = self.cg.add_node()

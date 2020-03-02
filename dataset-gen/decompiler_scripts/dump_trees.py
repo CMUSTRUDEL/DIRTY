@@ -1,11 +1,12 @@
 from collections import defaultdict
-from util import UNDEF_ADDR, CFuncGraph, GraphBuilder, hexrays_vars, get_expr_name
+from util import UNDEF_ADDR, CFuncGraph, GraphBuilder, get_expr_name
 import idaapi
+import idautils
 import ida_auto
+import ida_funcs
 import ida_hexrays
 import ida_kernwin
 import ida_pro
-import json
 import jsonlines
 import pickle
 import os
@@ -16,6 +17,7 @@ varmap = dict()
 varnames = dict()
 var_id = 0
 sentinel_vars = re.compile('@@VAR_[0-9]+')
+
 
 class RenamedGraphBuilder(GraphBuilder):
     def __init__(self, cg, func, addresses):
@@ -38,9 +40,11 @@ class RenamedGraphBuilder(GraphBuilder):
                 # Save names
                 varnames[var_id] = (original_name, new_name)
                 # Rename variables to @@VAR_[id]@@[orig name]@@[new name]
-                self.func.get_lvars()[e.v.idx].name = '@@VAR_' + str(var_id) + '@@' + original_name + '@@' + new_name
+                self.func.get_lvars()[e.v.idx].name = \
+                    f"@@VAR_{var_id}@@{original_name}@@{new_name}"
                 var_id += 1
         return self.process(e)
+
 
 class AddressCollector:
     def __init__(self, cg):
@@ -54,26 +58,27 @@ class AddressCollector:
                 if item.ea != UNDEF_ADDR:
                     self.addresses[name].add(item.ea)
                 else:
-                    item_id = self.cg.reverse[item]
+                    item_id = [item_id for (i, item_id) in self.cg.reverse
+                               if i == item][0]
+                    # item_id = self.cg.reverse[item]
                     ea = self.cg.get_pred_ea(item_id)
                     if ea != UNDEF_ADDR:
                         self.addresses[name].add(ea)
 
-# Process a single function given its EA
+
 def func(ea):
+    """Process a single function given its EA"""
     f = idaapi.get_func(ea)
-    function_name = GetFunctionName(ea)
+    function_name = ida_funcs.get_func_name(ea)
     if f is None:
-        print('Please position the cursor within a function')
+        print("Please position the cursor within a function")
 
     cfunc = None
     try:
         cfunc = idaapi.decompile(f)
     except ida_hexrays.DecompilationFailure as e:
-        print('Failed to decompile %x: %s!' % (ea, function_name))
+        print(f"Failed to decompile {ea:x}: {function_name}!")
         raise e
-
-    renamed_file = renamed_prefix + '_' + function_name + '.c'
 
     # Rename decompilation graph
     cg = CFuncGraph(None)
@@ -94,29 +99,32 @@ def func(ea):
     function_info["ast"] = new_graph.json_tree(0)
     raw_code = ""
     for line in cfunc.get_pseudocode():
-        raw_code += idaapi.tag_remove(line.line) + '\n'
+        raw_code += f'{idaapi.tag_remove(line.line)}\n'
     function_info["raw_code"] = raw_code
     return function_info
+
 
 class custom_action_handler(ida_kernwin.action_handler_t):
     def __init__(self):
         ida_kernwin.action_handler_t.__init__(self)
 
+
 class collect_vars(custom_action_handler):
     def activate(self, ctx):
         print('Collecting vars.')
-        jsonl_file_name = os.path.join(os.environ['OUTPUT_DIR'],
-                                       os.environ['PREFIX']) + '.jsonl'
+        file_name = os.path.join(os.environ['OUTPUT_DIR'],
+                                 os.environ['PREFIX'])
+        jsonl_file_name = f"{file_name}.jsonl"
         with open(jsonl_file_name, 'w+') as jsonl_file:
             with jsonlines.Writer(jsonl_file) as writer:
-                for ea in Functions():
+                for ea in idautils.Functions():
                     try:
-                        info = func(ea)
                         writer.write(func(ea))
                     except (ida_hexrays.DecompilationFailure, ValueError):
                         continue
         print('Vars collected.')
         return 1
+
 
 def main():
     global renamed_prefix
@@ -132,13 +140,14 @@ def main():
     cv = collect_vars()
     cv.activate(None)
 
+
 ida_auto.auto_wait()
 if not idaapi.init_hexrays_plugin():
     idaapi.load_plugin('hexrays')
     idaapi.load_plugin('hexx64')
     if not idaapi.init_hexrays_plugin():
-        print('Unable to load Hex-rays')
+        print("Unable to load Hex-rays")
     else:
-        print('Hex-rays version %s has been detected' % idaapi.get_hexrays_version())
+        print(f"Hex-rays version {idaapi.get_hexrays_version()} detected")
 main()
 ida_pro.qexit(0)

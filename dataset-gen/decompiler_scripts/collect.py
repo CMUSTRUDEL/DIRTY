@@ -1,21 +1,25 @@
 # Usage: IDALOG=/dev/stdout ./idat64 -B -S/path/to/collect.py /path/to/binary
 
 from collections import defaultdict
-from util import UNDEF_ADDR, CFuncGraph, GraphBuilder, hexrays_vars, get_expr_name
+from util import UNDEF_ADDR, CFuncGraph, GraphBuilder, \
+    hexrays_vars, get_expr_name
 import idaapi
+from idautils import Functions
 import ida_auto
 import ida_hexrays
 import ida_kernwin
 import ida_pro
-import ida_gdl
 import pickle
 import os
 
-varmap = dict()                 # frozenset of addrs -> varname
+# frozenset of addrs -> varname
+varmap = dict()
 
-# Collect a map of a set of addresses to a variable name.
-# For each variable, this collects the addresses corresponding to its uses.
+
 class CollectGraph(CFuncGraph):
+    """Collects a map of a set of addresses to a variable name.
+    For each variable, this collects the addresses corresponding to its uses.
+    """
     def collect_vars(self):
         rev_dict = defaultdict(set)
         for n in range(len(self.items)):
@@ -39,10 +43,11 @@ class CollectGraph(CFuncGraph):
             else:
                 varmap[addrs] = name
 
+
 def func(ea):
     f = idaapi.get_func(ea)
     if f is None:
-        print('Please position the cursor within a function')
+        print("Please position the cursor within a function")
         return True
     cfunc = None
     try:
@@ -51,7 +56,7 @@ def func(ea):
         pass
 
     if cfunc is None:
-        print('Failed to decompile %x!' % ea)
+        print(f"Failed to decompile {ea:x}!")
         return True
 
     # Build decompilation graph
@@ -60,17 +65,20 @@ def func(ea):
     gb.apply_to(cfunc.body, None)
     cg.collect_vars()
 
+
 class custom_action_handler(ida_kernwin.action_handler_t):
     def __init__(self):
         ida_kernwin.action_handler_t.__init__(self)
 
+
 class collect_vars(custom_action_handler):
     def activate(self, ctx):
-        print('Collecting vars.')
+        print("Collecting vars.")
         for ea in Functions():
             func(ea)
-        print('Vars collected.')
+        print("Vars collected.")
         return 1
+
 
 class dump_info(custom_action_handler):
     def activate(self, ctx):
@@ -79,20 +87,23 @@ class dump_info(custom_action_handler):
             vars_fh.flush()
         return 1
 
+
 ida_auto.auto_wait()
 if not idaapi.init_hexrays_plugin():
     idaapi.load_plugin('hexrays')
     idaapi.load_plugin('hexx64')
     if not idaapi.init_hexrays_plugin():
-        print('Unable to load Hex-rays')
+        print("Unable to load Hex-rays")
     else:
-        print('Hex-rays version %s has been detecetd' % idaapi.get_hexrays_version())
+        print(f"Hex-rays version {idaapi.get_hexrays_version()}")
+
 
 def main():
     cv = collect_vars()
     cv.activate(None)
     dv = dump_info()
     dv.activate(None)
+
 
 main()
 ida_pro.qexit(0)
