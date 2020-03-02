@@ -1,6 +1,7 @@
 from collections import defaultdict
 from util import UNDEF_ADDR, CFuncGraph, GraphBuilder, hexrays_vars, get_expr_name
 import idaapi
+import ida_auto
 import ida_hexrays
 import ida_kernwin
 import ida_pro
@@ -124,14 +125,14 @@ def main():
     renamed_prefix = os.path.join(os.environ['OUTPUT_DIR'], 'functions',
                                   os.environ['PREFIX'])
     # Load collected variables
-    with open(os.environ['COLLECTED_VARS']) as vars_fh:
+    with open(os.environ['COLLECTED_VARS'], 'rb') as vars_fh:
         varmap = pickle.load(vars_fh)
 
     # Collect decompilation info
     cv = collect_vars()
     cv.activate(None)
 
-idaapi.autoWait()
+ida_auto.auto_wait()
 if not idaapi.init_hexrays_plugin():
     idaapi.load_plugin('hexrays')
     idaapi.load_plugin('hexx64')
