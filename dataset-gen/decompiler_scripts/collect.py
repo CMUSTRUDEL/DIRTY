@@ -3,6 +3,7 @@
 from collections import defaultdict
 from util import UNDEF_ADDR, CFuncGraph, GraphBuilder, hexrays_vars, get_expr_name
 import idaapi
+import ida_auto
 import ida_hexrays
 import ida_kernwin
 import ida_pro
@@ -78,7 +79,7 @@ class dump_info(custom_action_handler):
             vars_fh.flush()
         return 1
 
-idaapi.autoWait()
+ida_auto.auto_wait()
 if not idaapi.init_hexrays_plugin():
     idaapi.load_plugin('hexrays')
     idaapi.load_plugin('hexx64')
