@@ -74,7 +74,7 @@ class collect_vars(custom_action_handler):
 
 class dump_info(custom_action_handler):
     def activate(self, ctx):
-        with open(os.environ['COLLECTED_VARS'], 'w') as vars_fh:
+        with open(os.environ['COLLECTED_VARS'], 'wb') as vars_fh:
             pickle.dump(varmap, vars_fh)
             vars_fh.flush()
         return 1
