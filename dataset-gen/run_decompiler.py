@@ -11,27 +11,27 @@ import errno
 import pickle
 import os
 import subprocess
-import sys
 import tempfile
 
 statyre_dir = os.path.dirname(os.path.abspath(__file__))
 COLLECT = os.path.join(statyre_dir, 'decompiler_scripts', 'collect.py')
 DUMP_TREES = os.path.join(statyre_dir, 'decompiler_scripts', 'dump_trees.py')
 
-parser = argparse.ArgumentParser(description="Run the decompiler to generate a corpus.")
+parser = argparse.ArgumentParser(
+    description="Run the decompiler to generate a corpus.")
 parser.add_argument('--ida',
                     metavar='IDA',
                     help="location of the idat64 binary",
                     default='/home/jlacomis/bin/ida/idat64',
-)
+                    )
 parser.add_argument('binaries_dir',
                     metavar='BINARIES_DIR',
                     help="directory containing binaries",
-)
+                    )
 parser.add_argument('output_dir',
                     metavar='OUTPUT_DIR',
                     help="output directory",
-)
+                    )
 parser.add_argument('--verbose', '-v', action='store_true')
 
 args = parser.parse_args()
@@ -41,6 +41,7 @@ env['IDALOG'] = '/dev/stdout'
 # Check for/create output directories
 output_dir = os.path.abspath(args.output_dir)
 env['OUTPUT_DIR'] = output_dir
+
 
 def make_directory(dir_path):
     """Make a directory, with clean error messages."""
@@ -52,11 +53,14 @@ def make_directory(dir_path):
         if e.errno != errno.EEXIST:
             raise
 
+
 make_directory(output_dir)
+
 
 # Use RAM-backed memory for tmp if available
 if os.path.exists('/dev/shm'):
     tempfile.tempdir = '/dev/shm'
+
 
 def run_decompiler(file_name, env, script, timeout=None):
     """Run a decompiler script.
@@ -77,13 +81,14 @@ def run_decompiler(file_name, env, script, timeout=None):
     if args.verbose:
         print(output.decode('unicode_escape'))
 
+
 # Create a temporary directory, since the decompiler makes a lot of additional
 # files that we can't clean up from here
 with tempfile.TemporaryDirectory() as tempdir:
     tempfile.tempdir = tempdir
 
     # File counts for progress output
-    num_files = sum(1 for x in os.listdir(args.binaries_dir) \
+    num_files = sum(1 for x in os.listdir(args.binaries_dir)
                     if os.path.isfile(os.path.join(args.binaries_dir, x)))
     file_count = 1
 
