@@ -18,7 +18,7 @@ varmap = dict()                 # frozenset of addrs -> varname
 class CollectGraph(CFuncGraph):
     def collect_vars(self):
         rev_dict = defaultdict(set)
-        for n in xrange(len(self.items)):
+        for n in range(len(self.items)):
             item = self.items[n]
             if item.op is ida_hexrays.cot_var:
                 name = get_expr_name(item.cexpr)
