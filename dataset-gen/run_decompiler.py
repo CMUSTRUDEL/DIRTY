@@ -100,9 +100,11 @@ with tempfile.TemporaryDirectory() as tempdir:
         env['PREFIX'] = binary
         file_path = os.path.join(args.binaries_dir, binary)
         print(f"Collecting from {file_path}")
-        with tempfile.NamedTemporaryFile() as collected_vars:
+        with tempfile.NamedTemporaryFile() as collected_vars, \
+             tempfile.NamedTemporaryFile() as fun_locals:
             # First collect variables
             env['COLLECTED_VARS'] = collected_vars.name
+            env['FUN_LOCALS'] = fun_locals.name
             with tempfile.NamedTemporaryFile() as orig:
                 subprocess.check_output(['cp', file_path, orig.name])
                 # Timeout after 30 seconds for first run

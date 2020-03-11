@@ -12,6 +12,7 @@ import pickle
 import os
 import re
 
+fun_locals = dict()
 varmap = dict()
 # Dictionary mapping variable ids to (orig, renamed) pairs
 varnames = dict()
@@ -39,9 +40,10 @@ class RenamedTreeBuilder(TreeBuilder):
                     new_name = original_name
                 # Save names
                 varnames[var_id] = (original_name, new_name)
+                score = e.type.calc_score()
                 # Rename variables to @@VAR_[id]@@[orig name]@@[new name]
                 self.func.get_lvars()[e.v.idx].name = \
-                    f"@@VAR_{var_id}@@{original_name}@@{new_name}"
+                    f"@@VAR_{var_id}@@{original_name}@@{new_name}:new_{score}"
                 var_id += 1
         return self.process(e)
 
@@ -90,13 +92,16 @@ def func(ea):
     rt.apply_to(cfunc.body, None)
 
     # Create tree from collected names
+    function_info = dict()
     cfunc.build_c_tree()
+    function_info["user_vars"] = fun_locals[ea]
+    function_info["lvars"] = [v.name for v in cfunc.get_lvars() if v.name != '']
     new_tree = CFuncTree()
     new_builder = TreeBuilder(new_tree)
     new_builder.apply_to(cfunc.body, None)
-    function_info = dict()
     function_info["function"] = function_name
     function_info["ast"] = new_tree.json_tree(0)
+
     raw_code = ""
     for line in cfunc.get_pseudocode():
         raw_code += f'{idaapi.tag_remove(line.line)}\n'
@@ -117,10 +122,14 @@ class collect_vars(custom_action_handler):
         jsonl_file_name = f"{file_name}.jsonl"
         with open(jsonl_file_name, 'w+') as jsonl_file:
             with jsonlines.Writer(jsonl_file) as writer:
-                for ea in idautils.Functions():
+                for ea in fun_locals:
                     try:
                         writer.write(func(ea))
-                    except (ida_hexrays.DecompilationFailure, ValueError):
+                    except ida_hexrays.DecompilationFailure:
+                        print("Decompilation failure")
+                        continue
+                    except ValueError as e:
+                        print(e)
                         continue
         print('Vars collected.')
         return 1
@@ -129,12 +138,15 @@ class collect_vars(custom_action_handler):
 def main():
     global renamed_prefix
     global varmap
+    global fun_locals
     global varnames
     renamed_prefix = os.path.join(os.environ['OUTPUT_DIR'], 'functions',
                                   os.environ['PREFIX'])
-    # Load collected variables
-    with open(os.environ['COLLECTED_VARS'], 'rb') as vars_fh:
+    # Load collected variables and function locals
+    with open(os.environ['COLLECTED_VARS'], 'rb') as vars_fh, \
+         open(os.environ['FUN_LOCALS'], 'rb') as locals_fh:
         varmap = pickle.load(vars_fh)
+        fun_locals = pickle.load(locals_fh)
 
     # Collect decompilation info
     cv = collect_vars()
