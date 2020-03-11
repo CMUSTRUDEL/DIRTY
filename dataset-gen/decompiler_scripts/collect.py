@@ -12,30 +12,25 @@ import ida_pro
 import pickle
 import os
 
-# frozenset of addrs -> varname
-varmap = dict()
-
 
 class CollectTree(CFuncTree):
     """Collects a map of a set of addresses to a variable name.
     For each variable, this collects the addresses corresponding to its uses.
     """
-    def __init__(self, fun_locals):
-        self.fun_locals = fun_locals
+    def __init__(self, user_locals, varmap):
+        # List of user-defined locals in this function
+        self.user_locals = user_locals
+        self.varmap = varmap
         super().__init__()
 
-    def collect_vars(self, ea):
-        # Don't care about this function if there aren't user-defined locals
-        if ea not in self.fun_locals:
-            return
-        user_locals = self.fun_locals[ea]
+    def collect_vars(self):
         rev_dict = defaultdict(set)
         for n in range(len(self.items)):
             item = self.items[n]
             if item.op is ida_hexrays.cot_var:
                 name = get_expr_name(item.cexpr)
                 score = item.cexpr.type.calc_score()
-                if name in user_locals:
+                if name in self.user_locals:
                 # if not hexrays_vars.match(name):
                     if item.ea != UNDEF_ADDR:
                         rev_dict[(name, score)].add(item.ea)
@@ -48,60 +43,60 @@ class CollectTree(CFuncTree):
         # functions that use all of their arguments to call another function.
         for (name, score), addrs in rev_dict.items():
             addrs = frozenset(addrs)
-            if (addrs in varmap):
+            if (addrs in self.varmap):
                 print("collision")
-                print(f"current: {varmap[addrs]}")
+                print(f"current: {self.varmap[addrs]}")
                 print(f"new: {name}, score: {score}")
-                varmap[addrs] = '::NONE::'
+                self.varmap[addrs] = '::NONE::'
             else:
-                varmap[addrs] = name
+                self.varmap[addrs] = name
+
 
 class Collector(ida_kernwin.action_handler_t):
     def __init__(self):
         # eas -> list of user defined locals
-        self.fun_locals = dict()
+        self.fun_locals = defaultdict(list)
+        # frozenset of addrs -> varname
+        self.varmap = dict()
         ida_kernwin.action_handler_t.__init__(self)
 
     def dump_info(self):
         print(self.fun_locals)
         with open(os.environ['COLLECTED_VARS'], 'wb') as vars_fh, \
              open(os.environ['FUN_LOCALS'], 'wb') as locals_fh:
-            pickle.dump(varmap, vars_fh)
+            pickle.dump(self.varmap, vars_fh)
             pickle.dump(self.fun_locals, locals_fh)
             vars_fh.flush()
             locals_fh.flush()
 
     def activate(self, ctx):
-        def func(ea):
+        print("Collecting vars.")
+        for ea in Functions():
             f = idaapi.get_func(ea)
-            if f is None:
-                print("Please position the cursor within a function")
-                return True
             cfunc = None
             try:
                 cfunc = idaapi.decompile(f)
             except ida_hexrays.DecompilationFailure:
-                pass
-
+                continue
             if cfunc is None:
-                # print(f"Failed to decompile {ea:x}!")
-                return True
-            cur_locals = [v.name for v in cfunc.get_lvars() if v.has_user_name]
-            if cur_locals == [] or cur_locals == ['']:
-                return True
+                continue
+            cur_locals = [v.name for v in cfunc.get_lvars() \
+                          if v.has_user_name and v.name != '']
+            if cur_locals == []:
+                continue
             self.fun_locals[ea] = cur_locals
             # Build decompilation tree
-            ct = CollectTree(self.fun_locals)
+            ct = CollectTree(self.fun_locals[ea], self.varmap)
             tb = TreeBuilder(ct)
             tb.apply_to(cfunc.body, None)
-            ct.collect_vars(ea)
-        print("Collecting vars.")
-        for ea in Functions():
-            func(ea)
-        print(f"{len(varmap)} vars collected in {len(self.fun_locals)}/{len(list(Functions()))} functions.")
-        print(f"{set(varmap.values())}")
+            ct.collect_vars()
+        print(f"{len(self.varmap)} vars collected in "
+              f"{len(self.fun_locals)}/{len(list(Functions()))} functions.")
+        if len(set(self.varmap.values())) > 0:
+            print(f"{set(self.varmap.values())}")
         self.dump_info()
         return 1
+
 
 ida_auto.auto_wait()
 if not idaapi.init_hexrays_plugin():
@@ -109,13 +104,10 @@ if not idaapi.init_hexrays_plugin():
     idaapi.load_plugin('hexx64')
     if not idaapi.init_hexrays_plugin():
         print("Unable to load Hex-rays")
+        ida_pro.qexit(1)
     else:
         print(f"Hex-rays version {idaapi.get_hexrays_version()}")
 
-
-def main():
-    cv = Collector()
-    cv.activate(None)
-
-main()
+cv = Collector()
+cv.activate(None)
 ida_pro.qexit(0)
