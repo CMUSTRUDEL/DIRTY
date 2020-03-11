@@ -3,11 +3,8 @@ import ida_hexrays
 import ida_lines
 import ida_pro
 import json
-import re
 
 UNDEF_ADDR = 0xFFFFFFFFFFFFFFFF
-
-hexrays_vars = re.compile("^(v|a)[0-9]+$")
 
 
 def get_expr_name(expr):
@@ -15,7 +12,6 @@ def get_expr_name(expr):
     name = ida_lines.tag_remove(name)
     name = ida_pro.str2user(name)
     return name
-
 
 class CFuncTree:
     def __init__(self):
@@ -29,9 +25,6 @@ class CFuncTree:
         # previous node number (or None)
         self.pred = defaultdict(lambda: None)
 
-    def nsucc(self, n):
-        return len(self.succs[n])
-
     def size(self):
         return len(self.items)
 
@@ -42,13 +35,14 @@ class CFuncTree:
         self.reverse.append((i, cur_node_num))
         return cur_node_num
 
-    def add_edge(self, x, y):
-        if self.pred[y]:
+    def add_edge(self, src, dest):
+        if self.pred[dest]:
             raise ValueError(
-                f"Cannot add edge ({x} -> {y}), ({self.pred[y]} -> {y}) exists"
+                f"Cannot add edge ({src} -> {dest}), "
+                f"({self.pred[dest]} -> {dest}) exists"
             )
-        self.pred[y] = x
-        self.succs[x].add(y)
+        self.pred[dest] = src
+        self.succs[src].add(dest)
 
     def get_pred_ea(self, n):
         pred = self.pred[n]
@@ -185,20 +179,22 @@ class CFuncTree:
 
 
 
-class TreeBuilder(ida_hexrays.ctree_parentee_t):
-    def __init__(self, ct):
+class CFuncTreeBuilder(ida_hexrays.ctree_parentee_t):
+    def __init__(self, tree):
         ida_hexrays.ctree_parentee_t.__init__(self)
-        self.ct = ct
+        self.tree = tree
 
-    def process(self, i):
-        n = self.ct.add_node(i)
+    def process(self, item):
+        new_node_id = self.tree.add_node(item)
         if len(self.parents) > 1:
-            lp = self.parents.back().obj_id
-            for k, v in self.ct.reverse:
-                if k.obj_id == lp:
-                    p = v
+            parent_id = None
+            parent_obj_id = self.parents.back().obj_id
+            for item, node_id in self.tree.reverse:
+                if item.obj_id == parent_obj_id:
+                    parent_id = node_id
                     break
-            self.ct.add_edge(p, n)
+            if parent_id is not None:
+                self.tree.add_edge(parent_id, new_node_id)
         return 0
 
     def visit_insn(self, i):

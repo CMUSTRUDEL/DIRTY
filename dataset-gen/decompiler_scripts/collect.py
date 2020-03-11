@@ -1,8 +1,8 @@
 # Usage: IDALOG=/dev/stdout ./idat64 -B -S/path/to/collect.py /path/to/binary
 
 from collections import defaultdict
-from util import UNDEF_ADDR, CFuncTree, TreeBuilder, \
-    hexrays_vars, get_expr_name
+from util import UNDEF_ADDR, CFuncTree, CFuncTreeBuilder, \
+    get_expr_name
 import idaapi
 from idautils import Functions
 import ida_auto
@@ -16,9 +16,12 @@ import os
 class CollectTree(CFuncTree):
     """Collects a map of a set of addresses to a variable name.
     For each variable, this collects the addresses corresponding to its uses.
+
+    Attributes
+    user_locals: List of names of user-defined locals in this function
+    varmap: Dictionary mapping frozensets of addresses to variable names
     """
     def __init__(self, user_locals, varmap):
-        # List of user-defined locals in this function
         self.user_locals = user_locals
         self.varmap = varmap
         super().__init__()
@@ -87,7 +90,7 @@ class Collector(ida_kernwin.action_handler_t):
             self.fun_locals[ea] = cur_locals
             # Build decompilation tree
             ct = CollectTree(self.fun_locals[ea], self.varmap)
-            tb = TreeBuilder(ct)
+            tb = CFuncTreeBuilder(ct)
             tb.apply_to(cfunc.body, None)
             ct.collect_vars()
         print(f"{len(self.varmap)} vars collected in "

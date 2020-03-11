@@ -1,5 +1,5 @@
 from collections import defaultdict
-from util import UNDEF_ADDR, CFuncTree, TreeBuilder, get_expr_name
+from util import UNDEF_ADDR, CFuncTree, CFuncTreeBuilder, get_expr_name
 import idaapi
 import idautils
 import ida_auto
@@ -20,11 +20,11 @@ var_id = 0
 sentinel_vars = re.compile('@@VAR_[0-9]+')
 
 
-class RenamedTreeBuilder(TreeBuilder):
-    def __init__(self, ct, func, addresses):
+class RenamedTreeBuilder(CFuncTreeBuilder):
+    def __init__(self, tree, func, addresses):
         self.func = func
         self.addresses = addresses
-        super(RenamedTreeBuilder, self).__init__(ct)
+        super(RenamedTreeBuilder, self).__init__(tree)
 
     def visit_expr(self, e):
         global var_id
@@ -84,7 +84,7 @@ def func(ea):
 
     # Rename decompilation tree
     ct = CFuncTree()
-    tb = TreeBuilder(ct)
+    tb = CFuncTreeBuilder(ct)
     tb.apply_to(cfunc.body, None)
     ac = AddressCollector(ct)
     ac.collect()
@@ -97,7 +97,7 @@ def func(ea):
     function_info["user_vars"] = fun_locals[ea]
     function_info["lvars"] = [v.name for v in cfunc.get_lvars() if v.name != '']
     new_tree = CFuncTree()
-    new_builder = TreeBuilder(new_tree)
+    new_builder = CFuncTreeBuilder(new_tree)
     new_builder.apply_to(cfunc.body, None)
     function_info["function"] = function_name
     function_info["ast"] = new_tree.json_tree(0)

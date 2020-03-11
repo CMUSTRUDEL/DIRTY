@@ -82,6 +82,58 @@ def run_decompiler(file_name, env, script, timeout=None):
         print(output.decode('unicode_escape'))
 
 
+class NoVarsError(Exception):
+    """Exception raised when no variables are defined"""
+    pass
+
+
+class Timer:
+    def __init__(self, num_files):
+        self.total_time = datetime.timedelta(0)
+        self.runs = 0
+        self.num_files = num_files
+
+    def average_time(self):
+        if self.runs == 0:
+            return datetime.timedelta(0)
+        return self.total_time / self.runs
+
+    def remaining_time(self):
+        return self.average_time() * (self.num_files - self.runs)
+
+    def update(self, start, end):
+        self.runs += 1
+        duration = end - start
+        self.total_time = self.total_time + duration
+        finish_time = datetime.datetime.now() + self.remaining_time()
+        print(f"Duration: {duration}\n"
+              f"Total time: {self.total_time}\n"
+              f"Average: {self.average_time()}\n"
+              f"Remaining: {self.remaining_time()}\n"
+              f"Projected finish time: {finish_time}\n")
+
+
+class TimedRun:
+    def __init__(self, timer):
+        self.start_time = datetime.datetime.now()
+        self.timer = timer
+        print(f"File {timer.runs + 1} of {timer.num_files}")
+        print(f"Started: {self.start_time}")
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, type, value, traceback):
+        if type is KeyboardInterrupt:
+            return False
+        if type is subprocess.TimeoutExpired:
+            print("Timed out")
+        if type in (pickle.UnpicklingError, NoVarsError):
+            print("No variables collected")
+        timer.update(self.start_time, datetime.datetime.now())
+        return True
+
+
 # Create a temporary directory, since the decompiler makes a lot of additional
 # files that we can't clean up from here
 with tempfile.TemporaryDirectory() as tempdir:
@@ -90,36 +142,24 @@ with tempfile.TemporaryDirectory() as tempdir:
     # File counts for progress output
     num_files = sum(1 for x in os.listdir(args.binaries_dir)
                     if os.path.isfile(os.path.join(args.binaries_dir, x)))
-    file_count = 1
+    timer = Timer(num_files)
 
     for binary in os.listdir(args.binaries_dir):
-        print(f"File {file_count} of {num_files}")
-        file_count += 1
-        start = datetime.datetime.now()
-        print(f"Started: {start}")
         env['PREFIX'] = binary
         file_path = os.path.join(args.binaries_dir, binary)
         print(f"Collecting from {file_path}")
         with tempfile.NamedTemporaryFile() as collected_vars, \
-             tempfile.NamedTemporaryFile() as fun_locals:
+             tempfile.NamedTemporaryFile() as fun_locals, \
+             TimedRun(timer):
             # First collect variables
             env['COLLECTED_VARS'] = collected_vars.name
             env['FUN_LOCALS'] = fun_locals.name
             with tempfile.NamedTemporaryFile() as orig:
                 subprocess.check_output(['cp', file_path, orig.name])
                 # Timeout after 30 seconds for first run
-                try:
-                    run_decompiler(orig.name, env, COLLECT, timeout=30)
-                except subprocess.TimeoutExpired:
-                    print("Timed out\n")
-                    continue
-                try:
-                    if not pickle.load(collected_vars):
-                        print("No variables collected\n")
-                        continue
-                except:
-                    print("No variables collected\n")
-                    continue
+                run_decompiler(orig.name, env, COLLECT, timeout=30)
+                if not pickle.load(collected_vars):
+                    raise NoVarsError
             # Make a new stripped copy and pass it the collected vars
             with tempfile.NamedTemporaryFile() as stripped:
                 subprocess.call(['cp', file_path, stripped.name])
@@ -129,6 +169,3 @@ with tempfile.TemporaryDirectory() as tempdir:
                 # No timeout here, we know it'll run in a reasonable amount of
                 # time and don't want mismatched files
                 run_decompiler(stripped.name, env, DUMP_TREES)
-        end = datetime.datetime.now()
-        duration = end-start
-        print(f"Duration: {duration}\n")
