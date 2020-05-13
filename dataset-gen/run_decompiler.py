@@ -41,7 +41,7 @@ env['IDALOG'] = '/dev/stdout'
 # Check for/create output directories
 output_dir = os.path.abspath(args.output_dir)
 env['OUTPUT_DIR'] = output_dir
-
+env['TYPE_DBASE'] = os.path.abspath(args.type_dbase)
 
 def make_directory(dir_path):
     """Make a directory, with clean error messages."""

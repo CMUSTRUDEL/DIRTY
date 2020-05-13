@@ -11,6 +11,7 @@ import ida_kernwin
 import ida_pro
 import pickle
 import os
+import yaml
 
 
 class CollectTree(CFuncTree):
@@ -61,28 +62,82 @@ class Collector(ida_kernwin.action_handler_t):
         self.fun_locals = defaultdict(list)
         # frozenset of addrs -> varname
         self.varmap = dict()
+        try:
+            with open(os.environ['TYPE_DBASE'], 'rb') as type_dbase:
+                self.type_dbase = pickle.load(type_dbase)
+        except Exception as e:
+            print(e)
+            self.type_dbase = defaultdict(set)
         ida_kernwin.action_handler_t.__init__(self)
 
     def dump_info(self):
+        """Dumps the collected variables and function locals to the files
+        specified by the environment variables `COLLECTED_VARS` and
+        `FUN_LOCALS` respectively.
+        """
         print(self.fun_locals)
         with open(os.environ['COLLECTED_VARS'], 'wb') as vars_fh, \
-             open(os.environ['FUN_LOCALS'], 'wb') as locals_fh:
+             open(os.environ['FUN_LOCALS'], 'wb') as locals_fh, \
+             open(os.environ['TYPE_DBASE'], 'wb') as type_dbase, \
+             open("types.yaml", 'w') as type_yaml:
             pickle.dump(self.varmap, vars_fh)
             pickle.dump(self.fun_locals, locals_fh)
+            pickle.dump(self.type_dbase, type_dbase)
+            yaml.dump(self.type_dbase, type_yaml, default_flow_style=False, allow_unicode=True)
             vars_fh.flush()
             locals_fh.flush()
+            type_dbase.flush()
+            type_yaml.flush()
+            for size in sorted([s for s in self.type_dbase]):
+                print(f"{size}: {self.type_dbase[size]}")
 
     def activate(self, ctx):
-        print("Collecting vars.")
+        """Runs the collector"""
+        print("Collecting vars and types.")
+        # `ea` is the start address of a single function
         for ea in Functions():
             f = idaapi.get_func(ea)
             cfunc = None
             try:
                 cfunc = idaapi.decompile(f)
             except ida_hexrays.DecompilationFailure:
+                # print(f"Could not decompile at address {ea:08x}")
                 continue
             if cfunc is None:
                 continue
+            # For each variable, store its base type
+            print(cfunc)
+            print(f"frame size: {f.frsize:#04x}, stackoff delta: {cfunc.get_stkoff_delta():#04x}")
+            # Collect all the locations
+            widths = dict()
+            for v in cfunc.get_lvars():
+                if v.is_stk_var():
+                    corrected = v.get_stkoff() - cfunc.get_stkoff_delta()
+                    bp_offset = f.frsize - corrected
+                    # Store the location and width
+                    widths[corrected] = v.width
+                    print(f"width: {v.width:#04x} offset: {v.get_stkoff():#04x} corrected: {corrected:#04x} bp_offset: {bp_offset:#04x} var: {v.type().dstr()} {v.name}")
+                if v.type() and not v.type().is_funcptr():
+                    cur_type = v.type().copy()
+                    while cur_type.is_ptr_or_array() and not cur_type.is_pvoid():
+                        cur_type.remove_ptr_or_array()
+                    if cur_type.is_const():
+                        cur_type.clr_const()
+                    self.type_dbase[cur_type.get_size()].add(cur_type.dstr())
+            # Divide up the locations into chunks
+            locations = sorted(widths.keys())
+            chunks = dict()
+            previous_loc = None
+            for loc in locations:
+                if previous_loc is not None \
+                   and previous_loc + chunks[previous_loc] == loc:
+                    chunks[previous_loc] += widths[loc]
+                else:
+                    chunks[loc] = widths[loc]
+                    previous_loc = loc
+
+            for loc in sorted(chunks.keys()):
+                print(f"loc: {loc:#04x}, size: {chunks[loc]:#04x}")
             cur_locals = [v.name for v in cfunc.get_lvars() \
                           if v.has_user_name and v.name != '']
             if cur_locals == []:
@@ -93,10 +148,10 @@ class Collector(ida_kernwin.action_handler_t):
             tb = CFuncTreeBuilder(ct)
             tb.apply_to(cfunc.body, None)
             ct.collect_vars()
-        print(f"{len(self.varmap)} vars collected in "
-              f"{len(self.fun_locals)}/{len(list(Functions()))} functions.")
-        if len(set(self.varmap.values())) > 0:
-            print(f"{set(self.varmap.values())}")
+        # print(f"{len(self.varmap)} vars collected in "
+        #       f"{len(self.fun_locals)}/{len(list(Functions()))} functions.")
+        # if len(set(self.varmap.values())) > 0:
+        #     print(f"{set(self.varmap.values())}")
         self.dump_info()
         return 1
 

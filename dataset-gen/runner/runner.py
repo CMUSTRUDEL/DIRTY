@@ -4,6 +4,7 @@ import pickle
 import os
 import subprocess
 import tempfile
+from tqdm import tqdm
 
 
 class NoVarsError(Exception):
@@ -13,9 +14,30 @@ class NoVarsError(Exception):
 
 class Timer:
     def __init__(self, num_files):
+        self._binary = ''
         self.total_time = datetime.timedelta(0)
         self.runs = 0
         self.num_files = num_files
+        self.file_log = tqdm(total=0, bar_format='{desc}')
+        self.file_log.set_description_str(f'Current file:')
+        self.progress_log = tqdm(total=num_files, unit='file')
+        self.last_log = tqdm(total=0, bar_format='{desc}')
+        self.total_time_log = tqdm(total=0, bar_format='{desc}')
+        self.average_time_log = tqdm(total=0, bar_format='{desc}')
+        self.remaining_time_log = tqdm(total=0, bar_format='{desc}')
+        self.projected_log = tqdm(total=0, bar_format='{desc}')
+        self._message = tqdm(total=0, bar_format='{desc}')
+        self._message.set_description_str('Message:')
+        self.update_logs()
+
+    @property
+    def binary(self):
+        return self._binary
+
+    @binary.setter
+    def binary(self, new_binary):
+        self._binary = new_binary
+        self.file_log.set_description_str(f'Current file: {self._binary}')
 
     def average_time(self):
         if self.runs == 0:
@@ -25,21 +47,37 @@ class Timer:
     def remaining_time(self):
         return self.average_time() * (self.num_files - self.runs)
 
+    def update_logs(self, last=''):
+        self.progress_log.update(1)
+        self.last_log.set_description_str(f'Last file time: {last}')
+        self.total_time_log.set_description_str(
+            f'Total time: {self.total_time}')
+        self.average_time_log.set_description_str(
+            f'Average time: {self.average_time()}')
+        self.remaining_time_log.set_description_str(
+            f'Remaining time: {self.remaining_time()}')
+        if self.runs == 0:
+            finish_time = ''
+        else:
+            finish_time = datetime.datetime.now() + self.remaining_time()
+        self.projected_log.set_description_str(
+            f'Projected finish time: {finish_time}')
+
+    def message(self, msg):
+        self._message.set_description_str(f'Message: {msg}')
+
     def update(self, start, end):
         self.runs += 1
         duration = end - start
         self.total_time = self.total_time + duration
         finish_time = datetime.datetime.now() + self.remaining_time()
-        print(f"Duration: {duration}\n"
-              f"Total time: {self.total_time}\n"
-              f"Average: {self.average_time()}\n"
-              f"Remaining: {self.remaining_time()}\n"
-              f"Projected finish time: {finish_time}\n")
+        self.update_logs(duration)
 
 
 class TimedRun:
-    def __init__(self, timer, env):
+    def __init__(self, timer, binary, env):
         self.timer = timer
+        timer.binary = binary
         self.env = env
         self.collected_vars = None
         self.fun_locals = None
@@ -54,8 +92,8 @@ class TimedRun:
         self.stripped = tempfile.NamedTemporaryFile()
         self.env['COLLECTED_VARS'] = self.collected_vars.name
         self.env['FUN_LOCALS'] = self.fun_locals.name
-        print(f"File {self.timer.runs + 1} of {self.timer.num_files}")
-        print(f"Started at {self.start_time}")
+        # print(f"File {self.timer.runs + 1} of {self.timer.num_files}")
+        # print(f"Started at {self.start_time}")
         return self
 
     def __exit__(self, type, value, traceback):
@@ -66,19 +104,22 @@ class TimedRun:
         if type is KeyboardInterrupt:
             return False
         elif type is subprocess.TimeoutExpired:
-            print("Timed out")
-        elif type in (pickle.UnpicklingError, NoVarsError):
-            print("No variables collected")
+            self.timer.message("Timed out")
+        elif type is pickle.UnpicklingError:
+            self.timer.message("Unpickling error")
+        elif type is NoVarsError:
+            self.timer.message("No vars collected")
         elif type is not None:
-            print(f"{Type}: value")
+            self.timer.message(f"{Type}: value")
             return False
         self.timer.update(self.start_time, datetime.datetime.now())
         return True
 
 
 class Runner:
-    def __init__(self, ida, binaries_dir, output_dir, verbose, COLLECT, DUMP_TREES):
+    def __init__(self, ida, type_dbase, binaries_dir, output_dir, verbose, COLLECT, DUMP_TREES):
         self.ida = ida
+        self.type_dbase = type_dbase
         self.binaries_dir = binaries_dir
         self.output_dir = output_dir
         self.verbose = verbose
@@ -88,6 +129,7 @@ class Runner:
         self.env = os.environ.copy()
         self.env['IDALOG'] = '/dev/stdout'
         self.env['OUTPUT_DIR'] = self.output_dir
+        self.env['TYPE_DBASE'] = self.type_dbase
 
         self.binaries = os.listdir(binaries_dir)
 
@@ -126,7 +168,8 @@ class Runner:
         output = ''
         try:
             output = subprocess.check_output(idacall, env=self.env, timeout=timeout)
-        except subprocess.CalledProcessError as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            print(e)
             output = e.output
             subprocess.call(['rm', '-f', f'{file_name}.i64'])
         if self.verbose:
@@ -142,17 +185,18 @@ class Runner:
             for binary in self.binaries:
                 self.env['PREFIX'] = binary
                 file_path = os.path.join(self.binaries_dir, binary)
-                print(f"Collecting from {file_path}")
 
-                with TimedRun(timer, self.env) as r:
+                with TimedRun(timer, binary, self.env) as r:
                     # Collect from original
                     subprocess.check_output(['cp', file_path, r.orig.name])
                     # Timeout after 30s for the collect run
                     self.run_decompiler(r.orig.name, self.COLLECT, timeout=30)
-                    if not pickle.load(r.collected_vars):
+                    try:
+                        if not pickle.load(r.collected_vars):
+                            raise NoVarsError
+                    except EOFError:
                         raise NoVarsError
-
                     # Dump trees
                     subprocess.call(['cp', file_path, r.stripped.name])
                     subprocess.call(['strip', '--strip-debug', r.stripped.name])
-                    self.run_decompiler(r.stripped.name, self.DUMP_TREES)
+                    self.run_decompiler(r.stripped.name, self.DUMP_TREES, timeout=300)

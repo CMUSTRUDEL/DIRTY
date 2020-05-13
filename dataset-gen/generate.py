@@ -21,6 +21,11 @@ parser.add_argument('--ida',
                     help="location of the idat64 binary",
                     default='/home/jlacomis/bin/ida/idat64',
                     )
+parser.add_argument('--type-dbase',
+                    metavar='TYPE',
+                    help="type database",
+                    default='types.txt',
+                    )
 parser.add_argument('binaries_dir',
                     metavar='BINARIES_DIR',
                     help="directory containing binaries",
@@ -33,4 +38,4 @@ parser.add_argument('--verbose', '-v', action='store_true')
 
 
 args = parser.parse_args()
-Runner(args.ida, args.binaries_dir, args.output_dir, args.verbose, COLLECT, DUMP_TREES)
+Runner(args.ida, args.type_dbase, args.binaries_dir, args.output_dir, args.verbose, COLLECT, DUMP_TREES)

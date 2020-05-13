@@ -40,10 +40,9 @@ class RenamedTreeBuilder(CFuncTreeBuilder):
                     new_name = original_name
                 # Save names
                 varnames[var_id] = (original_name, new_name)
-                score = e.type.calc_score()
                 # Rename variables to @@VAR_[id]@@[orig name]@@[new name]
                 self.func.get_lvars()[e.v.idx].name = \
-                    f"@@VAR_{var_id}@@{original_name}@@{new_name}:new_{score}"
+                    f"@@VAR_{var_id}@@{original_name}@@{new_name}"
                 var_id += 1
         return self.process(e)
 
@@ -93,6 +92,8 @@ def func(ea):
 
     # Create tree from collected names
     function_info = dict()
+    # print("Vars (name, on stack?, offset, typed?, user name?, noptr?):")
+    # print([(v.name, v.is_stk_var(), v.get_stkoff(), v.has_user_name, v.is_noptr_var) for v in cfunc.get_lvars()])
     cfunc.build_c_tree()
     function_info["user_vars"] = fun_locals[ea]
     function_info["lvars"] = [v.name for v in cfunc.get_lvars() if v.name != '']
@@ -101,7 +102,6 @@ def func(ea):
     new_builder.apply_to(cfunc.body, None)
     function_info["function"] = function_name
     function_info["ast"] = new_tree.json_tree(0)
-
     raw_code = ""
     for line in cfunc.get_pseudocode():
         raw_code += f'{idaapi.tag_remove(line.line)}\n'
@@ -147,7 +147,6 @@ def main():
          open(os.environ['FUN_LOCALS'], 'rb') as locals_fh:
         varmap = pickle.load(vars_fh)
         fun_locals = pickle.load(locals_fh)
-
     # Collect decompilation info
     cv = collect_vars()
     cv.activate(None)
