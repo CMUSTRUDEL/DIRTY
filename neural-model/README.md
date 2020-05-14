@@ -14,7 +14,7 @@ unzip dire_models.zip
 To install and activate the conda environment:
 
 ```
-conda env install -f data/env.yml
+conda env create -f data/env.yml
 conda activate var_rename
 ```
 
