@@ -13,6 +13,7 @@ def get_expr_name(expr):
     name = ida_pro.str2user(name)
     return name
 
+
 class CFuncTree:
     def __init__(self):
         self.next_node_num = 0
@@ -67,9 +68,7 @@ class CFuncTree:
             parts.append(f" (m={expr.m})")
         elif op in [ida_hexrays.cot_obj, ida_hexrays.cot_var]:
             parts.append(f".{expr.refwidth} {get_expr_name(expr)}")
-        elif op in [ida_hexrays.cot_num,
-                    ida_hexrays.cot_helper,
-                    ida_hexrays.cot_str]:
+        elif op in [ida_hexrays.cot_num, ida_hexrays.cot_helper, ida_hexrays.cot_str]:
             parts.append(f" {get_expr_name(expr)}")
         elif op == ida_hexrays.cit_goto:
             parts.append(f" LABEL_{insn.cgoto.label_num}")
@@ -82,11 +81,11 @@ class CFuncTree:
             parts.append(tstr if tstr else "?")
         return "".join(parts)
 
-
     # Takes a cexpr.type and returns info about it
     def serialize_type(self, t):
-        info = { "name": t._print(),
-                 "score": t.calc_score(),
+        info = {
+            "name": t._print(),
+            "score": t.calc_score(),
         }
         if not t.is_decl_void():
             info["size"] = t.get_size()
@@ -113,29 +112,28 @@ class CFuncTree:
         if item.op == ida_hexrays.cot_ptr:
             node_info["pointer_size"] = item.cexpr.ptrsize
         elif item.op == ida_hexrays.cot_memptr:
-            node_info.update({
-                "pointer_size": item.cexpr.ptrsize,
-                "m": item.cexpr.m
-                })
+            node_info.update({"pointer_size": item.cexpr.ptrsize, "m": item.cexpr.m})
         elif item.op == ida_hexrays.cot_memref:
             node_info["m"] = item.cexpr.m
         elif item.op == ida_hexrays.cot_obj:
-            node_info.update({
-                "name": get_expr_name(item.cexpr),
-                "ref_width": item.cexpr.refwidth
-            })
+            node_info.update(
+                {"name": get_expr_name(item.cexpr), "ref_width": item.cexpr.refwidth}
+            )
         elif item.op == ida_hexrays.cot_var:
-            _, var_id, old_name, new_name = \
-                get_expr_name(item.cexpr).split("@@")
-            node_info.update({
-                "var_id": var_id,
-                "old_name": old_name,
-                "new_name": new_name,
-                "ref_width": item.cexpr.refwidth
-            })
-        elif item.op in [ida_hexrays.cot_num,
-                         ida_hexrays.cot_str,
-                         ida_hexrays.cot_helper]:
+            _, var_id, old_name, new_name = get_expr_name(item.cexpr).split("@@")
+            node_info.update(
+                {
+                    "var_id": var_id,
+                    "old_name": old_name,
+                    "new_name": new_name,
+                    "ref_width": item.cexpr.refwidth,
+                }
+            )
+        elif item.op in [
+            ida_hexrays.cot_num,
+            ida_hexrays.cot_str,
+            ida_hexrays.cot_helper,
+        ]:
             node_info["name"] = get_expr_name(item.cexpr)
         # Get info for children of this node
         successors = set(self.succs[n])
@@ -170,13 +168,12 @@ class CFuncTree:
             print(f"\t{n}: {ida_hexrays.get_ctype_name(self.items[n].op)}")
 
         print("pred:")
-        for child in range (self.size()):
+        for child in range(self.size()):
             print(f"\t{child}: {self.pred[child]}")
 
         print("succs:")
         for parent in range(self.size()):
             print(f"\t{parent}: {self.succs[parent]}")
-
 
 
 class CFuncTreeBuilder(ida_hexrays.ctree_parentee_t):

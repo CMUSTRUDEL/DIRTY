@@ -1,8 +1,7 @@
 # Usage: IDALOG=/dev/stdout ./idat64 -B -S/path/to/collect.py /path/to/binary
 
 from collections import defaultdict
-from util import UNDEF_ADDR, CFuncTree, CFuncTreeBuilder, \
-    get_expr_name
+from util import UNDEF_ADDR, CFuncTree, CFuncTreeBuilder, get_expr_name
 import idaapi
 from idautils import Functions
 import ida_auto
@@ -22,6 +21,7 @@ class CollectTree(CFuncTree):
     user_locals: List of names of user-defined locals in this function
     varmap: Dictionary mapping frozensets of addresses to variable names
     """
+
     def __init__(self, user_locals, varmap):
         self.user_locals = user_locals
         self.varmap = varmap
@@ -35,7 +35,7 @@ class CollectTree(CFuncTree):
                 name = get_expr_name(item.cexpr)
                 score = item.cexpr.type.calc_score()
                 if name in self.user_locals:
-                # if not hexrays_vars.match(name):
+                    # if not hexrays_vars.match(name):
                     if item.ea != UNDEF_ADDR:
                         rev_dict[(name, score)].add(item.ea)
                     else:
@@ -47,11 +47,11 @@ class CollectTree(CFuncTree):
         # functions that use all of their arguments to call another function.
         for (name, score), addrs in rev_dict.items():
             addrs = frozenset(addrs)
-            if (addrs in self.varmap):
+            if addrs in self.varmap:
                 print("collision")
                 print(f"current: {self.varmap[addrs]}")
                 print(f"new: {name}, score: {score}")
-                self.varmap[addrs] = '::NONE::'
+                self.varmap[addrs] = "::NONE::"
             else:
                 self.varmap[addrs] = name
 
@@ -63,7 +63,7 @@ class Collector(ida_kernwin.action_handler_t):
         # frozenset of addrs -> varname
         self.varmap = dict()
         try:
-            with open(os.environ['TYPE_DBASE'], 'rb') as type_dbase:
+            with open(os.environ["TYPE_DBASE"], "rb") as type_dbase:
                 self.type_dbase = pickle.load(type_dbase)
         except Exception as e:
             print(e)
@@ -76,14 +76,17 @@ class Collector(ida_kernwin.action_handler_t):
         `FUN_LOCALS` respectively.
         """
         print(self.fun_locals)
-        with open(os.environ['COLLECTED_VARS'], 'wb') as vars_fh, \
-             open(os.environ['FUN_LOCALS'], 'wb') as locals_fh, \
-             open(os.environ['TYPE_DBASE'], 'wb') as type_dbase, \
-             open("types.yaml", 'w') as type_yaml:
+        with open(os.environ["COLLECTED_VARS"], "wb") as vars_fh, open(
+            os.environ["FUN_LOCALS"], "wb"
+        ) as locals_fh, open(os.environ["TYPE_DBASE"], "wb") as type_dbase, open(
+            "types.yaml", "w"
+        ) as type_yaml:
             pickle.dump(self.varmap, vars_fh)
             pickle.dump(self.fun_locals, locals_fh)
             pickle.dump(self.type_dbase, type_dbase)
-            yaml.dump(self.type_dbase, type_yaml, default_flow_style=False, allow_unicode=True)
+            yaml.dump(
+                self.type_dbase, type_yaml, default_flow_style=False, allow_unicode=True
+            )
             vars_fh.flush()
             locals_fh.flush()
             type_dbase.flush()
@@ -107,7 +110,9 @@ class Collector(ida_kernwin.action_handler_t):
                 continue
             # For each variable, store its base type
             print(cfunc)
-            print(f"frame size: {f.frsize:#04x}, stackoff delta: {cfunc.get_stkoff_delta():#04x}")
+            print(
+                f"frame size: {f.frsize:#04x}, stackoff delta: {cfunc.get_stkoff_delta():#04x}"
+            )
             # Collect all the locations
             widths = dict()
             for v in cfunc.get_lvars():
@@ -116,7 +121,9 @@ class Collector(ida_kernwin.action_handler_t):
                     bp_offset = f.frsize - corrected
                     # Store the location and width
                     widths[corrected] = v.width
-                    print(f"width: {v.width:#04x} offset: {v.get_stkoff():#04x} corrected: {corrected:#04x} bp_offset: {bp_offset:#04x} var: {v.type().dstr()} {v.name}")
+                    print(
+                        f"width: {v.width:#04x} offset: {v.get_stkoff():#04x} corrected: {corrected:#04x} bp_offset: {bp_offset:#04x} var: {v.type().dstr()} {v.name}"
+                    )
                 if v.type() and not v.type().is_funcptr():
                     cur_type = v.type().copy()
                     while cur_type.is_ptr_or_array() and not cur_type.is_pvoid():
@@ -129,8 +136,10 @@ class Collector(ida_kernwin.action_handler_t):
             chunks = dict()
             previous_loc = None
             for loc in locations:
-                if previous_loc is not None \
-                   and previous_loc + chunks[previous_loc] == loc:
+                if (
+                    previous_loc is not None
+                    and previous_loc + chunks[previous_loc] == loc
+                ):
                     chunks[previous_loc] += widths[loc]
                 else:
                     chunks[loc] = widths[loc]
@@ -138,8 +147,9 @@ class Collector(ida_kernwin.action_handler_t):
 
             for loc in sorted(chunks.keys()):
                 print(f"loc: {loc:#04x}, size: {chunks[loc]:#04x}")
-            cur_locals = [v.name for v in cfunc.get_lvars() \
-                          if v.has_user_name and v.name != '']
+            cur_locals = [
+                v.name for v in cfunc.get_lvars() if v.has_user_name and v.name != ""
+            ]
             if cur_locals == []:
                 continue
             self.fun_locals[ea] = cur_locals
@@ -158,8 +168,8 @@ class Collector(ida_kernwin.action_handler_t):
 
 ida_auto.auto_wait()
 if not idaapi.init_hexrays_plugin():
-    idaapi.load_plugin('hexrays')
-    idaapi.load_plugin('hexx64')
+    idaapi.load_plugin("hexrays")
+    idaapi.load_plugin("hexx64")
     if not idaapi.init_hexrays_plugin():
         print("Unable to load Hex-rays")
         ida_pro.qexit(1)

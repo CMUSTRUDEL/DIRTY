@@ -17,7 +17,7 @@ varmap = dict()
 # Dictionary mapping variable ids to (orig, renamed) pairs
 varnames = dict()
 var_id = 0
-sentinel_vars = re.compile('@@VAR_[0-9]+')
+sentinel_vars = re.compile("@@VAR_[0-9]+")
 
 
 class RenamedTreeBuilder(CFuncTreeBuilder):
@@ -34,15 +34,16 @@ class RenamedTreeBuilder(CFuncTreeBuilder):
             if not sentinel_vars.match(original_name):
                 # Get new name of variable
                 addresses = frozenset(self.addresses[original_name])
-                if addresses in varmap and varmap[addresses] != '::NONE::':
+                if addresses in varmap and varmap[addresses] != "::NONE::":
                     new_name = varmap[addresses]
                 else:
                     new_name = original_name
                 # Save names
                 varnames[var_id] = (original_name, new_name)
                 # Rename variables to @@VAR_[id]@@[orig name]@@[new name]
-                self.func.get_lvars()[e.v.idx].name = \
-                    f"@@VAR_{var_id}@@{original_name}@@{new_name}"
+                self.func.get_lvars()[
+                    e.v.idx
+                ].name = f"@@VAR_{var_id}@@{original_name}@@{new_name}"
                 var_id += 1
         return self.process(e)
 
@@ -59,8 +60,9 @@ class AddressCollector:
                 if item.ea != UNDEF_ADDR:
                     self.addresses[name].add(item.ea)
                 else:
-                    item_id = [item_id for (i, item_id) in self.ct.reverse
-                               if i == item][0]
+                    item_id = [
+                        item_id for (i, item_id) in self.ct.reverse if i == item
+                    ][0]
                     # item_id = self.ct.reverse[item]
                     ea = self.ct.get_pred_ea(item_id)
                     if ea != UNDEF_ADDR:
@@ -96,7 +98,7 @@ def func(ea):
     # print([(v.name, v.is_stk_var(), v.get_stkoff(), v.has_user_name, v.is_noptr_var) for v in cfunc.get_lvars()])
     cfunc.build_c_tree()
     function_info["user_vars"] = fun_locals[ea]
-    function_info["lvars"] = [v.name for v in cfunc.get_lvars() if v.name != '']
+    function_info["lvars"] = [v.name for v in cfunc.get_lvars() if v.name != ""]
     new_tree = CFuncTree()
     new_builder = CFuncTreeBuilder(new_tree)
     new_builder.apply_to(cfunc.body, None)
@@ -104,7 +106,7 @@ def func(ea):
     function_info["ast"] = new_tree.json_tree(0)
     raw_code = ""
     for line in cfunc.get_pseudocode():
-        raw_code += f'{idaapi.tag_remove(line.line)}\n'
+        raw_code += f"{idaapi.tag_remove(line.line)}\n"
     function_info["raw_code"] = raw_code
     return function_info
 
@@ -116,11 +118,10 @@ class custom_action_handler(ida_kernwin.action_handler_t):
 
 class collect_vars(custom_action_handler):
     def activate(self, ctx):
-        print('Collecting vars.')
-        file_name = os.path.join(os.environ['OUTPUT_DIR'],
-                                 os.environ['PREFIX'])
+        print("Collecting vars.")
+        file_name = os.path.join(os.environ["OUTPUT_DIR"], os.environ["PREFIX"])
         jsonl_file_name = f"{file_name}.jsonl"
-        with open(jsonl_file_name, 'w+') as jsonl_file:
+        with open(jsonl_file_name, "w+") as jsonl_file:
             with jsonlines.Writer(jsonl_file) as writer:
                 for ea in fun_locals:
                     try:
@@ -131,7 +132,7 @@ class collect_vars(custom_action_handler):
                     except ValueError as e:
                         print(e)
                         continue
-        print('Vars collected.')
+        print("Vars collected.")
         return 1
 
 
@@ -140,11 +141,13 @@ def main():
     global varmap
     global fun_locals
     global varnames
-    renamed_prefix = os.path.join(os.environ['OUTPUT_DIR'], 'functions',
-                                  os.environ['PREFIX'])
+    renamed_prefix = os.path.join(
+        os.environ["OUTPUT_DIR"], "functions", os.environ["PREFIX"]
+    )
     # Load collected variables and function locals
-    with open(os.environ['COLLECTED_VARS'], 'rb') as vars_fh, \
-         open(os.environ['FUN_LOCALS'], 'rb') as locals_fh:
+    with open(os.environ["COLLECTED_VARS"], "rb") as vars_fh, open(
+        os.environ["FUN_LOCALS"], "rb"
+    ) as locals_fh:
         varmap = pickle.load(vars_fh)
         fun_locals = pickle.load(locals_fh)
     # Collect decompilation info
@@ -154,8 +157,8 @@ def main():
 
 ida_auto.auto_wait()
 if not idaapi.init_hexrays_plugin():
-    idaapi.load_plugin('hexrays')
-    idaapi.load_plugin('hexx64')
+    idaapi.load_plugin("hexrays")
+    idaapi.load_plugin("hexx64")
     if not idaapi.init_hexrays_plugin():
         print("Unable to load Hex-rays")
     else:
