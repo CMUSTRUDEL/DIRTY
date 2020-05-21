@@ -11,8 +11,8 @@ import os
 from runner import Runner
 
 dire_dir = os.path.dirname(os.path.abspath(__file__))
-COLLECT = os.path.join(dire_dir, 'decompiler_scripts', 'collect.py')
-DUMP_TREES = os.path.join(dire_dir, 'decompiler_scripts', 'dump_trees.py')
+COLLECT = os.path.join(dire_dir, 'decompiler', 'collect.py')
+DUMP_TREES = os.path.join(dire_dir, 'decompiler', 'dump_trees.py')
 
 parser = argparse.ArgumentParser(
     description="Run the decompiler to generate a corpus.")

@@ -2,12 +2,15 @@
 
 from collections import defaultdict
 from util import UNDEF_ADDR, CFuncTree, CFuncTreeBuilder, get_expr_name
+import typeinfo
+import typing as t
 import idaapi
 from idautils import Functions
 import ida_auto
 import ida_hexrays
 import ida_kernwin
 import ida_pro
+import ida_struct
 import pickle
 import os
 import yaml
@@ -62,6 +65,8 @@ class Collector(ida_kernwin.action_handler_t):
         self.fun_locals = defaultdict(list)
         # frozenset of addrs -> varname
         self.varmap = dict()
+        # Size in bytes -> name -> Typeinfo
+        self.type_info: t.Dict[int, t.Dict[str, typeinfo.Typeinfo]] = dict()
         try:
             with open(os.environ["TYPE_DBASE"], "rb") as type_dbase:
                 self.type_dbase = pickle.load(type_dbase)
@@ -103,50 +108,31 @@ class Collector(ida_kernwin.action_handler_t):
             cfunc = None
             try:
                 cfunc = idaapi.decompile(f)
+            # Skip if decompilation failed
             except ida_hexrays.DecompilationFailure:
-                # print(f"Could not decompile at address {ea:08x}")
                 continue
             if cfunc is None:
                 continue
-            # For each variable, store its base type
-            print(cfunc)
-            print(
-                f"frame size: {f.frsize:#04x}, stackoff delta: {cfunc.get_stkoff_delta():#04x}"
-            )
-            # Collect all the locations
-            widths = dict()
+            # Collect the locations and types of the stack variables
+            var_info = set()
             for v in cfunc.get_lvars():
+                # Only compute location for stack variables
+                # The offset is from the base pointer or None if not on the stack
+                var_offset = None
                 if v.is_stk_var():
                     corrected = v.get_stkoff() - cfunc.get_stkoff_delta()
-                    bp_offset = f.frsize - corrected
-                    # Store the location and width
-                    widths[corrected] = v.width
-                    print(
-                        f"width: {v.width:#04x} offset: {v.get_stkoff():#04x} corrected: {corrected:#04x} bp_offset: {bp_offset:#04x} var: {v.type().dstr()} {v.name}"
-                    )
+                    var_offset = f.frsize - corrected
+                # variable type information
+                var_type = None
                 if v.type() and not v.type().is_funcptr():
                     cur_type = v.type().copy()
                     while cur_type.is_ptr_or_array() and not cur_type.is_pvoid():
                         cur_type.remove_ptr_or_array()
+                    # Don't care about consts
                     if cur_type.is_const():
                         cur_type.clr_const()
                     self.type_dbase[cur_type.get_size()].add(cur_type.dstr())
-            # Divide up the locations into chunks
-            locations = sorted(widths.keys())
-            chunks = dict()
-            previous_loc = None
-            for loc in locations:
-                if (
-                    previous_loc is not None
-                    and previous_loc + chunks[previous_loc] == loc
-                ):
-                    chunks[previous_loc] += widths[loc]
-                else:
-                    chunks[loc] = widths[loc]
-                    previous_loc = loc
 
-            for loc in sorted(chunks.keys()):
-                print(f"loc: {loc:#04x}, size: {chunks[loc]:#04x}")
             cur_locals = [
                 v.name for v in cfunc.get_lvars() if v.has_user_name and v.name != ""
             ]
