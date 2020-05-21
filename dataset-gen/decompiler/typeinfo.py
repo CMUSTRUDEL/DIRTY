@@ -1,3 +1,8 @@
+"""C Type Information
+
+Encodes information about C types, and provides functions to serialize types.
+"""
+from json import JSONEncoder
 import typing as t
 
 
@@ -7,6 +12,13 @@ class Typeinfo:
     def __init__(self, *, name: t.Optional[str] = None, size: int):
         self.name = name
         self.size = size
+
+    def _to_json(self):
+        return {
+            "__t": [],
+            "name": self.name,
+            "size": self.size
+        }
 
     def __eq__(self, other):
         if isinstance(other, Typeinfo):
@@ -22,9 +34,15 @@ class Pointer(Typeinfo):
 
     WIDTH = 8
 
-    def __init__(self, *, referenced_type: Typeinfo):
+    def __init__(self, referenced_type: Typeinfo):
         self.referenced_type = referenced_type
         self.size = Pointer.WIDTH
+
+    def _to_json(self):
+        return {
+            "__p": [],
+            "referenced_type": self.referenced_type._to_json()
+        }
 
     def __eq__(self, other):
         if isinstance(other, Pointer):
@@ -32,14 +50,23 @@ class Pointer(Typeinfo):
         return False
 
     def __str__(self):
-        return f"* {str(self.referenced_type)}"
+        return f"{str(self.referenced_type)} *"
 
 
 class Array(Typeinfo):
     """Stores information about an array"""
 
-    def __init__(self, *, nelements: int, base_type: Typeinfo):
-        self.size = nelements * base_type.size
+    def __init__(self, *, base_type: Typeinfo, nelements: int):
+        self.base_type = base_type
+        self.nelements = nelements
+        self.size = base_type.size * nelements
+
+    def _to_json(self):
+        return {
+            "__a": [],
+            "base_type": self.base_type._to_json(),
+            "nelements": self.nelements,
+        }
 
     def __eq__(self, other):
         if isinstance(other, Array):
@@ -66,6 +93,9 @@ class UDT(Typeinfo):
             self.typ = typ
             self.size = self.typ.size
 
+        def _to_json(self):
+            return {"__f": [], "name": self.name, "typ": self.typ._to_json()}
+
         def __str__(self):
             return f"{str(self.typ)} {self.name}"
 
@@ -74,6 +104,9 @@ class UDT(Typeinfo):
 
         def __init__(self, size: int):
             self.size = size
+
+        def _to_json(self):
+            return {"__p": [], "size": self.size}
 
         def __str__(self):
             return f"PADDING ({self.size})"
@@ -93,6 +126,13 @@ class Struct(UDT):
         self.size = 0
         for l in layout:
             self.size += l.size
+
+    def _to_json(self):
+        return {
+            "__s": [],
+            "name": self.name,
+            "layout": [l._to_json() for l in self.layout],
+        }
 
     def __str__(self):
         ret = f"struct {self.name} {{"
@@ -124,6 +164,14 @@ class Union(UDT):
         if self.padding is not None:
             self.size += self.padding.size
 
+    def _to_json(self):
+        return {
+            "__u": [],
+            "name": self.name,
+            "members": [m._to_json() for m in self.members],
+            "padding": self.padding,
+        }
+
     def __str__(self):
         ret = f"union {self.name} {{"
         for m in self.members:
@@ -141,3 +189,10 @@ class Union(UDT):
                 and self.padding == other.padding
             )
         return False
+
+
+class TypeEncoder(JSONEncoder):
+    def default(self, t):
+        if hasattr(t, "_to_json"):
+            return t._to_json()
+        return super().default(t)
