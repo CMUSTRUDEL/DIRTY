@@ -2,7 +2,7 @@
 
 Encodes information about C types, and provides functions to serialize types.
 """
-from json import JSONEncoder
+from json import JSONEncoder, loads
 import typing as t
 
 
@@ -29,30 +29,6 @@ class Typeinfo:
         return f"{self.name}"
 
 
-class Pointer(Typeinfo):
-    """Stores information about a pointer"""
-
-    WIDTH = 8
-
-    def __init__(self, referenced_type: Typeinfo):
-        self.referenced_type = referenced_type
-        self.size = Pointer.WIDTH
-
-    def _to_json(self):
-        return {
-            "__p": [],
-            "referenced_type": self.referenced_type._to_json()
-        }
-
-    def __eq__(self, other):
-        if isinstance(other, Pointer):
-            return self.referenced_type == other.referenced_type
-        return False
-
-    def __str__(self):
-        return f"{str(self.referenced_type)} *"
-
-
 class Array(Typeinfo):
     """Stores information about an array"""
 
@@ -77,6 +53,30 @@ class Array(Typeinfo):
 
     def __str__(self):
         return f"{self.base_type}[{self.nelements}]"
+
+
+class Pointer(Typeinfo):
+    """Stores information about a pointer"""
+
+    WIDTH = 8
+
+    def __init__(self, referenced_type: Typeinfo):
+        self.referenced_type = referenced_type
+        self.size = Pointer.WIDTH
+
+    def _to_json(self):
+        return {
+            "__p": [],
+            "referenced_type": self.referenced_type._to_json()
+        }
+
+    def __eq__(self, other):
+        if isinstance(other, Pointer):
+            return self.referenced_type == other.referenced_type
+        return False
+
+    def __str__(self):
+        return f"{str(self.referenced_type)} *"
 
 
 class UDT(Typeinfo):
@@ -106,7 +106,7 @@ class UDT(Typeinfo):
             self.size = size
 
         def _to_json(self):
-            return {"__p": [], "size": self.size}
+            return {"__x": [], "size": self.size}
 
         def __str__(self):
             return f"PADDING ({self.size})"
@@ -196,3 +196,33 @@ class TypeEncoder(JSONEncoder):
         if hasattr(t, "_to_json"):
             return t._to_json()
         return super().default(t)
+
+class TypeDecoder:
+    @staticmethod
+    def as_typeinfo(d):
+        if '__t' in d:
+            del d['__t']
+            return Typeinfo(**d)
+        if '__a' in d:
+            del d['__a']
+            return Array(**d)
+        if '__f' in d:
+            del d['__f']
+            return UDT.Field(**d)
+        if '__x' in d:
+            del d['__x']
+            return UDT.Padding(**d)
+        if '__s' in d:
+            del d['__s']
+            return Struct(**d)
+        if '__u' in d:
+            del d['__u']
+            return Union(**d)
+        if '__p' in d:
+            del d['__p']
+            return Pointer(**d)
+        return d
+
+    @staticmethod
+    def decode(encoded: str):
+        return loads(encoded, object_hook=TypeDecoder.as_typeinfo)
