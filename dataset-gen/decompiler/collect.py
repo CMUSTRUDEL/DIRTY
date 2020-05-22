@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from util import UNDEF_ADDR, CFuncTree, CFuncTreeBuilder, get_expr_name
-import typeinfo
+import typeinfo as ti
 import typing as t
 import idaapi
 from idautils import Functions
@@ -11,9 +11,11 @@ import ida_hexrays
 import ida_kernwin
 import ida_pro
 import ida_struct
+import ida_typeinf
 import pickle
 import os
 import yaml
+import json
 
 
 class CollectTree(CFuncTree):
@@ -66,7 +68,7 @@ class Collector(ida_kernwin.action_handler_t):
         # frozenset of addrs -> varname
         self.varmap = dict()
         # Size in bytes -> name -> Typeinfo
-        self.type_info: t.Dict[int, t.Dict[str, typeinfo.Typeinfo]] = dict()
+        self.type_info: t.Dict[int, t.Dict[str, ti.Typeinfo]] = dict()
         try:
             with open(os.environ["TYPE_DBASE"], "rb") as type_dbase:
                 self.type_dbase = pickle.load(type_dbase)
@@ -115,6 +117,7 @@ class Collector(ida_kernwin.action_handler_t):
                 continue
             # Collect the locations and types of the stack variables
             var_info = set()
+            type_info = set()
             for v in cfunc.get_lvars():
                 # Only compute location for stack variables
                 # The offset is from the base pointer or None if not on the stack
@@ -126,13 +129,92 @@ class Collector(ida_kernwin.action_handler_t):
                 var_type = None
                 if v.type() and not v.type().is_funcptr():
                     cur_type = v.type().copy()
-                    while cur_type.is_ptr_or_array() and not cur_type.is_pvoid():
-                        cur_type.remove_ptr_or_array()
                     # Don't care about consts
                     if cur_type.is_const():
                         cur_type.clr_const()
-                    self.type_dbase[cur_type.get_size()].add(cur_type.dstr())
-
+                    def serialize_type(typ):
+                        if typ.is_ptr():
+                            return ti.Pointer(typ.get_pointed_object().dstr())
+                        if typ.is_void():
+                            return ti.Void()
+                        if typ.is_array():
+                            base_type = serialize_type(typ.get_array_element())
+                            # To get array type info, first create an
+                            # array_type_data_t then call get_array_details to
+                            # populate it. Unions and structs follow a similar
+                            # pattern.
+                            array_info = ida_typeinf.array_type_data_t()
+                            typ.get_array_details(array_info)
+                            base_type = serialize_type(array_info.elem_type)
+                            return ti.Array(base_type=base_type,
+                                            nelements=array_info.nelems)
+                        if typ.is_union():
+                            union_info = ida_typeinf.udt_type_data_t()
+                            typ.get_udt_details(union_info)
+                            struct_info = ida_typeinf.udt_type_data_t()
+                            typ.get_udt_details(struct_info)
+                            size = struct_info.total_size
+                            nmembers = typ.get_udt_nmembers()
+                            members = []
+                            for n in range(nmembers):
+                                member = ida_typeinf.udt_member_t()
+                                # Yes, if we want to get the nth member we set
+                                # OFFSET to n and tell find_udt_member to search
+                                # by index.
+                                member.offset = n
+                                typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
+                                members.append(
+                                    ti.UDT.Field(
+                                        name=member.name,
+                                        typ=serialize_type(member.type)
+                                    )
+                                )
+                            name = typ.dstr()
+                            if "::" in name:
+                                name = None
+                            return ti.Union(name=name, members=members)
+                        if typ.is_struct():
+                            struct_info = ida_typeinf.udt_type_data_t()
+                            typ.get_udt_details(struct_info)
+                            size = struct_info.total_size
+                            nmembers = typ.get_udt_nmembers()
+                            layout = []
+                            next_offset = 0
+                            for n in range(nmembers):
+                                member = ida_typeinf.udt_member_t()
+                                member.offset = n
+                                typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
+                                # Check for padding. Careful, because offset and
+                                # size are in bits, not bytes.
+                                if member.offset != next_offset:
+                                    layout.append(
+                                        ti.UDT.Padding(
+                                            (member.offset - next_offset) / 8
+                                        )
+                                    )
+                                next_offset = member.offset + member.size
+                                layout.append(
+                                    ti.UDT.Field(
+                                        name=member.name,
+                                        typ=serialize_type(member.type)
+                                    )
+                                )
+                            # Check for padding one more time.
+                            # if next_offset * 8 != size:
+                            #     layout.append(
+                            #         ti.UDT.Padding(
+                            #             size - (next_offset * 8)
+                            #         )
+                            #     )
+                            name = typ.dstr()
+                            if "::" in name:
+                                name = None
+                            return ti.Struct(name=name, layout=layout)
+                        return ti.Typeinfo(name=typ.dstr(), size=typ.get_size())
+                    type_info.add(serialize_type(cur_type))
+            print(type_info)
+            print([str(t) for t in type_info])
+            print([ti.TypeinfoCodec.encode(t) for t in type_info])
             cur_locals = [
                 v.name for v in cfunc.get_lvars() if v.has_user_name and v.name != ""
             ]
