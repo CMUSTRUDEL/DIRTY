@@ -9,23 +9,57 @@ from json import JSONEncoder, dumps, loads
 import typing as t
 
 
-class Typeinfo:
+class TypeLib:
+    """A library of types.
+
+    Allows references to types by name, saving space and enabling recursive
+    structures.
+
+    The usual dictionary magic methods are implemented, allowing for
+    dictionary-like access to TypeInfo.
+    """
+
+    def __init__(self):
+        self._data: t.Dict[str, "TypeInfo"] = dict()
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
+
+    def __getitem__(self, key: str) -> "TypeInfo":
+        return self._data[key]
+
+    def __setitem__(self, key: str, item: "TypeInfo") -> None:
+        # Might want to raise a KeyError if this exists
+        if key not in self._data:
+            self._data[key] = item
+
+    def __str__(self) -> str:
+        ret = ""
+        for d in self._data:
+            ret += f"{self._data[d].size}: {d}\n"
+        return ret
+
+
+class TypeInfo:
     """Stores information about a type"""
 
-    def __init__(self, *, name: t.Optional[str] = None, size: int):
+    def __init__(self, lib: TypeLib, *, name: t.Optional[str], size: int):
         self.name = name
         self.size = size
+        self.lib = lib
+        if self.name is not None:
+            self.lib[self.name] = self
 
     @classmethod
-    def _from_json(cls, d):
+    def _from_json(cls, lib: TypeLib, d):
         """Decodes from a dictionary"""
-        return cls(name=d["n"], size=d["s"])
+        return cls(lib, name=d["n"], size=d["s"])
 
     def _to_json(self):
         """Encodes as JSON
 
-        The 'T' field encodes which Typeinfo class is represented by this JSON:
-            0: Typeinfo
+        The 'T' field encodes which TypeInfo class is represented by this JSON:
+            0: TypeInfo
             1: Array
             2: Pointer
             3: UDT.Field
@@ -37,8 +71,12 @@ class Typeinfo:
         return {"T": 0, "n": self.name, "s": self.size}
 
     def __eq__(self, other):
-        if isinstance(other, Typeinfo):
-            return self.name == other.name and self.size == other.size
+        if isinstance(other, TypeInfo):
+            return (
+                self.lib == other.lib
+                and self.name == other.name
+                and self.size == other.size
+            )
         return False
 
     def __hash__(self):
@@ -48,40 +86,45 @@ class Typeinfo:
         return f"{self.name}"
 
 
-class Array(Typeinfo):
+class Array(TypeInfo):
     """Stores information about an array"""
 
-    def __init__(self, *, base_type: Typeinfo, nelements: int):
-        self.base_type = base_type
+    def __init__(self, lib: TypeLib, *, base_type_name: str, nelements: int):
+        # TODO? Check that base type is in lib
+        self.base_type_name = base_type_name
         self.nelements = nelements
-        self.size = base_type.size * nelements
+        self.lib = lib
+        self.size = self.lib[base_type_name].size * nelements
+        self.lib[str(self)] = self
 
     @classmethod
-    def _from_json(cls, d):
-        return cls(base_type=d["b"], nelements=d["n"])
+    def _from_json(cls, lib: TypeLib, d):
+        return cls(lib, base_type_name=d["b"], nelements=d["n"])
 
     def _to_json(self):
         return {
             "T": 1,
-            "b": self.base_type._to_json(),
+            "b": self.base_type_name,
             "n": self.nelements,
         }
 
     def __eq__(self, other):
         if isinstance(other, Array):
             return (
-                self.nelements == other.nelements and self.base_type == other.base_type
+                self.lib == other.lib
+                and self.nelements == other.nelements
+                and self.base_type_name == other.base_type_name
             )
         return False
 
     def __hash__(self):
-        return hash((self.nelements, self.base_type))
+        return hash((self.nelements, self.base_type_name))
 
     def __str__(self):
-        return f"{self.base_type}[{self.nelements}]"
+        return f"{self.base_type_name}[{self.nelements}]"
 
 
-class Pointer(Typeinfo):
+class Pointer(TypeInfo):
     """Stores information about a pointer.
 
     Note that the referenced type is by name because recursive data structures
@@ -90,30 +133,36 @@ class Pointer(Typeinfo):
 
     WIDTH = 8
 
-    def __init__(self, referenced_type_name: str):
-        self.referenced_type_name = referenced_type_name
+    def __init__(self, lib: TypeLib, target_type_name: int):
+        self.target_type_name = target_type_name
+        self.name = str(self)
         self.size = Pointer.WIDTH
+        self.lib = lib
+        self.lib[self.name] = self
 
     @classmethod
-    def _from_json(cls, d):
-        return cls(referenced_type=d["t"])
+    def _from_json(cls, lib: TypeLib, d):
+        return cls(lib, d["t"])
 
     def _to_json(self):
-        return {"T": 2, "t": self.referenced_type_name}
+        return {"T": 2, "t": self.target_type_name}
 
     def __eq__(self, other):
         if isinstance(other, Pointer):
-            return self.referenced_type_name == other.referenced_type_name
+            return (
+                self.lib == other.lib
+                and self.target_type_name == other.target_type_name
+            )
         return False
 
     def __hash__(self):
-        return hash(self.referenced_type_name)
+        return hash(self.target_type_name)
 
     def __str__(self):
-        return f"{str(self.referenced_type_name)} *"
+        return f"{self.target_type_name} *"
 
 
-class UDT(Typeinfo):
+class UDT(TypeInfo):
     """An object representing struct or union types"""
 
     def __init__(self):
@@ -122,28 +171,33 @@ class UDT(Typeinfo):
     class Field:
         """Information about a field in a struct or union"""
 
-        def __init__(self, name: str, typ: Typeinfo):
+        def __init__(self, lib: TypeLib, *, name: str, type_name: str):
             self.name = name
-            self.typ = typ
-            self.size = self.typ.size
+            self.type_name = type_name
+            self.lib = lib
+            self.size = self.lib[self.type_name].size
 
         @classmethod
-        def _from_json(cls, d):
-            return cls(name=d["n"], typ=d["t"])
+        def _from_json(cls, lib: TypeLib, d):
+            return cls(lib, name=d["n"], type_name=d["t"])
 
         def _to_json(self):
-            return {"T": 3, "n": self.name, "t": self.typ._to_json()}
+            return {"T": 3, "n": self.name, "t": self.type_name}
 
         def __eq__(self, other):
             if isinstance(other, UDT.Field):
-                return self.name == other.name and self.typ == other.typ
+                return (
+                    self.lib == other.lib
+                    and self.name == other.name
+                    and self.type_name == other.type_name
+                )
             return False
 
         def __hash__(self):
-            return hash((self.name, self.typ))
+            return hash((self.name, self.type_name))
 
         def __str__(self):
-            return f"{str(self.typ)} {self.name}"
+            return f"{self.type_name} {self.name}"
 
     class Padding:
         """Padding bytes in a struct or union"""
@@ -175,6 +229,7 @@ class Struct(UDT):
 
     def __init__(
         self,
+        lib: TypeLib,
         *,
         name: t.Optional[str] = None,
         layout: t.Iterable[t.Union[UDT.Field, UDT.Padding, "Struct", "Union"]],
@@ -184,10 +239,13 @@ class Struct(UDT):
         self.size = 0
         for l in layout:
             self.size += l.size
+        self.lib = lib
+        if self.name is not None:
+            self.lib[self.name] = self
 
     @classmethod
-    def _from_json(cls, d):
-        return cls(name=d["n"], layout=d["l"])
+    def _from_json(cls, lib: TypeLib, d):
+        return cls(lib, name=d["n"], layout=d["l"])
 
     def _to_json(self):
         return {
@@ -198,7 +256,11 @@ class Struct(UDT):
 
     def __eq__(self, other):
         if isinstance(other, Struct):
-            return self.name == other.name and self.layout == other.layout
+            return (
+                self.lib == other.lib
+                and self.name == other.name
+                and self.layout == other.layout
+            )
         return False
 
     def __hash__(self):
@@ -220,6 +282,7 @@ class Union(UDT):
 
     def __init__(
         self,
+        lib: TypeLib,
         *,
         name: t.Optional[str] = None,
         members: t.Iterable[t.Union[UDT.Field, "Struct", "Union"]],
@@ -235,10 +298,13 @@ class Union(UDT):
             self.size = 0
         if self.padding is not None:
             self.size += self.padding.size
+        self.lib = lib
+        if self.name is not None:
+            self.lib[self.name] = self
 
     @classmethod
-    def _from_json(cls, d):
-        return cls(name=d["n"], members=d["m"], padding=d["p"])
+    def _from_json(cls, lib: TypeLib, d):
+        return cls(lib, name=d["n"], members=d["m"], padding=d["p"])
 
     def _to_json(self):
         return {
@@ -251,7 +317,8 @@ class Union(UDT):
     def __eq__(self, other):
         if isinstance(other, Union):
             return (
-                self.name == other.name
+                self.lib == other.lib
+                and self.name == other.name
                 and self.members == other.members
                 and self.padding == other.padding
             )
@@ -273,7 +340,7 @@ class Union(UDT):
         return ret
 
 
-class Void(Typeinfo):
+class Void(TypeInfo):
     size = 0
 
     def __init__(self):
@@ -296,8 +363,8 @@ class Void(Typeinfo):
         return "void"
 
 
-class TypeinfoCodec:
-    """Encoder/decoder functions for Typeinfo"""
+class TypeInfoCodec:
+    """Encoder/decoder functions for TypeInfo"""
 
     @staticmethod
     def decode(encoded: str):
@@ -305,7 +372,7 @@ class TypeinfoCodec:
 
         def as_typeinfo(d):
             return {
-                0: Typeinfo,
+                0: TypeInfo,
                 1: Array,
                 2: Pointer,
                 3: UDT.Field,
@@ -324,7 +391,7 @@ class TypeinfoCodec:
             return super().default(t)
 
     @staticmethod
-    def encode(typeinfo: Typeinfo):
-        """Encodes a Typeinfo as JSON"""
+    def encode(typeinfo: TypeInfo):
+        """Encodes a TypeInfo as JSON"""
         # 'separators' removes spaces after , and : for efficiency
-        return dumps(typeinfo, cls=TypeinfoCodec._TypeEncoder, separators=(",", ":"))
+        return dumps(typeinfo, cls=TypeInfoCodec._TypeEncoder, separators=(",", ":"))

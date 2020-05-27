@@ -67,8 +67,7 @@ class Collector(ida_kernwin.action_handler_t):
         self.fun_locals = defaultdict(list)
         # frozenset of addrs -> varname
         self.varmap = dict()
-        # Size in bytes -> name -> Typeinfo
-        self.type_info: t.Dict[int, t.Dict[str, ti.Typeinfo]] = dict()
+        self.type_lib = ti.TypeLib()
         try:
             with open(os.environ["TYPE_DBASE"], "rb") as type_dbase:
                 self.type_dbase = pickle.load(type_dbase)
@@ -82,7 +81,8 @@ class Collector(ida_kernwin.action_handler_t):
         specified by the environment variables `COLLECTED_VARS` and
         `FUN_LOCALS` respectively.
         """
-        print(self.fun_locals)
+        print(f"Locals: {self.fun_locals}")
+        print(f"Type Lib: {self.type_lib}")
         with open(os.environ["COLLECTED_VARS"], "wb") as vars_fh, open(
             os.environ["FUN_LOCALS"], "wb"
         ) as locals_fh, open(os.environ["TYPE_DBASE"], "wb") as type_dbase, open(
@@ -117,7 +117,7 @@ class Collector(ida_kernwin.action_handler_t):
                 continue
             # Collect the locations and types of the stack variables
             var_info = set()
-            type_info = set()
+            print("New function")
             for v in cfunc.get_lvars():
                 # Only compute location for stack variables
                 # The offset is from the base pointer or None if not on the stack
@@ -132,22 +132,37 @@ class Collector(ida_kernwin.action_handler_t):
                     # Don't care about consts
                     if cur_type.is_const():
                         cur_type.clr_const()
-                    def serialize_type(typ):
+
+                    def serialize_type(typ, working_on=None):
+                        if working_on is None:
+                            working_on = set()
+                        if typ.dstr() in working_on:
+                            return None
+                        working_on.add(typ.dstr())
                         if typ.is_ptr():
-                            return ti.Pointer(typ.get_pointed_object().dstr())
+                            ret = ti.Pointer(
+                                self.type_lib, typ.get_pointed_object().dstr()
+                            )
+                            serialize_type(typ.get_pointed_object(), working_on)
+                            return ret
                         if typ.is_void():
                             return ti.Void()
                         if typ.is_array():
-                            base_type = serialize_type(typ.get_array_element())
+                            base_type = serialize_type(
+                                typ.get_array_element(), working_on
+                            )
                             # To get array type info, first create an
                             # array_type_data_t then call get_array_details to
                             # populate it. Unions and structs follow a similar
                             # pattern.
                             array_info = ida_typeinf.array_type_data_t()
                             typ.get_array_details(array_info)
-                            base_type = serialize_type(array_info.elem_type)
-                            return ti.Array(base_type=base_type,
-                                            nelements=array_info.nelems)
+                            base_type_name = array_info.elem_type.dstr()
+                            return ti.Array(
+                                self.type_lib,
+                                base_type_name=base_type_name,
+                                nelements=array_info.nelems,
+                            )
                         if typ.is_union():
                             union_info = ida_typeinf.udt_type_data_t()
                             typ.get_udt_details(union_info)
@@ -163,17 +178,19 @@ class Collector(ida_kernwin.action_handler_t):
                                 # by index.
                                 member.offset = n
                                 typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
+                                type_name = member.type.dstr()
+                                serialize_type(member.type, working_on)
                                 members.append(
                                     ti.UDT.Field(
+                                        self.type_lib,
                                         name=member.name,
-                                        typ=serialize_type(member.type)
+                                        type_name=type_name,
                                     )
                                 )
                             name = typ.dstr()
-                            if "::" in name:
-                                name = None
-                            return ti.Union(name=name, members=members)
+                            return ti.Union(self.type_lib, name=name, members=members)
                         if typ.is_struct():
+                            print(f"Adding struct {typ.dstr()}")
                             struct_info = ida_typeinf.udt_type_data_t()
                             typ.get_udt_details(struct_info)
                             size = struct_info.total_size
@@ -189,14 +206,21 @@ class Collector(ida_kernwin.action_handler_t):
                                 if member.offset != next_offset:
                                     layout.append(
                                         ti.UDT.Padding(
-                                            (member.offset - next_offset) / 8
+                                            (member.offset - next_offset) // 8
                                         )
                                     )
                                 next_offset = member.offset + member.size
+                                type_name = member.type.dstr()
+                                print(
+                                    f"Working on field {member.name} "
+                                    f"with type {type_name}"
+                                )
+                                serialize_type(member.type, working_on)
                                 layout.append(
                                     ti.UDT.Field(
+                                        self.type_lib,
                                         name=member.name,
-                                        typ=serialize_type(member.type)
+                                        type_name=type_name,
                                     )
                                 )
                             # Check for padding one more time.
@@ -207,14 +231,13 @@ class Collector(ida_kernwin.action_handler_t):
                             #         )
                             #     )
                             name = typ.dstr()
-                            if "::" in name:
-                                name = None
-                            return ti.Struct(name=name, layout=layout)
-                        return ti.Typeinfo(name=typ.dstr(), size=typ.get_size())
-                    type_info.add(serialize_type(cur_type))
-            print(type_info)
-            print([str(t) for t in type_info])
-            print([ti.TypeinfoCodec.encode(t) for t in type_info])
+                            return ti.Struct(self.type_lib, name=name, layout=layout)
+                        print(f"Adding type {typ.dstr()}")
+                        return ti.TypeInfo(
+                            self.type_lib, name=typ.dstr(), size=typ.get_size()
+                        )
+
+                    serialize_type(cur_type)
             cur_locals = [
                 v.name for v in cfunc.get_lvars() if v.has_user_name and v.name != ""
             ]
