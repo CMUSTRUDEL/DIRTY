@@ -6,6 +6,7 @@ The JSON that is output prioritizes compactness over readability.
 Note that all sizes are in 8-bit bytes
 """
 from json import JSONEncoder, dumps, loads
+import ida_typeinf
 import typing as t
 
 
@@ -21,6 +22,70 @@ class TypeLib:
 
     def __init__(self):
         self._data: t.Dict[str, "TypeInfo"] = dict()
+
+    def add(
+        self, typ: ida_typeinf.tinfo_t, worklist: t.Optional[t.Set[str]] = None
+    ) -> None:
+        """Adds an element to the TypeLib by parsing an IDA tinfo_t object"""
+        if worklist is None:
+            worklist = set()
+        if typ.dstr() in worklist or typ.is_void():
+            return
+        worklist.add(typ.dstr())
+        if typ.is_ptr():
+            Pointer(self, typ.get_pointed_object())
+            self.add(typ.get_pointed_object(), worklist)
+        elif typ.is_array():
+            self.add(typ.get_array_element(), worklist)
+            # To get array type info, first create an
+            # array_type_data_t then call get_array_details to
+            # populate it. Unions and structs follow a similar
+            # pattern.
+            array_info = ida_typeinf.array_type_data_t()
+            typ.get_array_details(array_info)
+            base_type_name = array_info.elem_type.dstr()
+            Array(self, base_type_name=base_type_name, nelements=array_info.nelems)
+        elif typ.is_udt():
+            udt_info = ida_typeinf.udt_type_data_t()
+            typ.get_udt_details(udt_info)
+            name = typ.dstr()
+            size = udt_info.total_size
+            nmembers = typ.get_udt_nmembers()
+            if typ.is_union():
+                members = []
+                for n in range(nmembers):
+                    member = ida_typeinf.udt_member_t()
+                    # To get the nth member set OFFSET to n and tell find_udt_member
+                    # to search by index.
+                    member.offset = n
+                    typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
+                    type_name = member.type.dstr()
+                    self.add(member.type, worklist)
+                    members.append(
+                        UDT.Field(self, name=member.name, type_name=type_name)
+                    )
+                # TODO: padding
+                Union(self, name=name, members=members)
+            elif typ.is_struct():
+                layout = []
+                next_offset = 0
+                for n in range(nmembers):
+                    member = ida_typeinf.udt_member_t()
+                    member.offset = n
+                    typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
+                    # Check for padding. Careful, because offset and
+                    # size are in bits, not bytes.
+                    if member.offset != next_offset:
+                        layout.append(UDT.Padding((member.offset - next_offset) // 8))
+                    next_offset = member.offset + member.size
+                    type_name = member.type.dstr()
+                    self.add(member.type, worklist)
+                    layout.append(
+                        UDT.Field(self, name=member.name, type_name=type_name)
+                    )
+                Struct(self, name=name, layout=layout)
+        else:
+            TypeInfo(self, name=typ.dstr(), size=typ.get_size())
 
     def __contains__(self, key: str) -> bool:
         return key in self._data
