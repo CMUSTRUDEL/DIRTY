@@ -26,7 +26,7 @@ class TypeLib:
 
     def __init__(self, data: t.Optional[t.Dict[str, "TypeInfo"]] = None):
         if data is None:
-            self._data = dict()
+            self._data: t.Dict[str, "TypeInfo"] = dict()
         else:
             self._data = data
 
@@ -41,11 +41,11 @@ class TypeLib:
             return
         worklist.add(typ.dstr())
         print(f"Adding {typ.dstr()}, Worklist: {worklist}")
-        if typ.is_funcptr() or '(' in typ.dstr():
+        if typ.is_funcptr() or "(" in typ.dstr():
             FunctionPointer(self, name=self._parse_name(typ.dstr()))
         elif typ.is_decl_ptr():
             print("Ptr")
-            Pointer(self, typ.get_pointed_object())
+            Pointer(self, typ.get_pointed_object().dstr())
             self.add_ida_type(typ.get_pointed_object(), worklist)
             print(self)
         elif typ.is_array():
@@ -92,7 +92,7 @@ class TypeLib:
                 else:
                     Union(self, name=name, members=members)
             elif typ.is_struct():
-                layout = []
+                layout: t.List[t.Union[UDT.Member, "Struct", "Union"]] = []
                 next_offset = 0
                 for n in range(nmembers):
                     member = ida_typeinf.udt_member_t()
@@ -134,38 +134,36 @@ class TypeLib:
         'int [5]', 'int[ 5 ]', 'int[5 ]' -> 'int [ 5 ]'
         """
         parts = []
-        current = ''
+        current = ""
         for c in name:
-            if c == ' ':
-                if current != '':
+            if c == " ":
+                if current != "":
                     parts.append(current)
-                current = ''
-            elif c in ('*', '[', ']'):
-                if current != '':
+                current = ""
+            elif c in ("*", "[", "]"):
+                if current != "":
                     parts.append(current)
                 parts.append(c)
-                current = ''
+                current = ""
             else:
                 current += c
-        if current != '':
+        if current != "":
             parts.append(current)
 
         # Look for 0 inside array subscripts
         to_remove = []
-        for i in [i + 1 for i, x in enumerate(parts) if x == '[']:
+        for i in [i + 1 for i, x in enumerate(parts) if x == "["]:
             try:
                 if int(parts[i]) == 0:
                     to_remove.append(i)
             except ValueError:
                 pass
 
-        return ' '.join([p for i, p in enumerate(parts) if i not in to_remove])
+        return " ".join([p for i, p in enumerate(parts) if i not in to_remove])
 
     def _to_json(self):
-        print("CALLING TO DATA")
-        for (k, v) in self._data.items():
-            print(f"k: {k}")
-            print(f"v: {v}")
+        for k in self._data:
+            print(k, type(self._data[k]))
         return self._data
 
     def __contains__(self, key: str) -> bool:
@@ -284,7 +282,7 @@ class Pointer(TypeInfo):
 
     size = 8
 
-    def __init__(self, lib: TypeLib, target_type_name: int):
+    def __init__(self, lib: TypeLib, target_type_name: str):
         self.target_type_name = target_type_name
         self.name = str(self)
         self.lib = lib
@@ -312,16 +310,19 @@ class Pointer(TypeInfo):
         return f"{self.target_type_name} *"
 
 
-
-
-
 class UDT(TypeInfo):
     """An object representing struct or union types"""
 
     def __init__(self):
         raise NotImplementedError
 
-    class Field:
+    class Member:
+        """A member of a UDT. Can be a Field or Padding"""
+
+        size: int = 0
+        pass
+
+    class Field(Member):
         """Information about a field in a struct or union"""
 
         def __init__(self, lib: TypeLib, *, name: str, type_name: str):
@@ -352,7 +353,7 @@ class UDT(TypeInfo):
         def __str__(self):
             return f"{self.type_name} {self.name}"
 
-    class Padding:
+    class Padding(Member):
         """Padding bytes in a struct or union"""
 
         def __init__(self, size: int):
@@ -385,7 +386,7 @@ class Struct(UDT):
         lib: TypeLib,
         *,
         name: t.Optional[str] = None,
-        layout: t.Iterable[t.Union[UDT.Field, UDT.Padding, "Struct", "Union"]],
+        layout: t.Iterable[t.Union[UDT.Member, "Struct", "Union"]],
     ):
         self.name = name
         self.layout = tuple(layout)
@@ -538,10 +539,7 @@ class FunctionPointer(TypeInfo):
 
     def __eq__(self, other):
         if isinstance(other, FunctionPointer):
-            return (
-                self.lib == other.lib
-                and self.name == other.name
-            )
+            return self.lib == other.lib and self.name == other.name
         return False
 
     def __hash__(self):
