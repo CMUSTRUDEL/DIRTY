@@ -6,8 +6,12 @@ The JSON that is output prioritizes compactness over readability.
 Note that all sizes are in 8-bit bytes
 """
 from json import JSONEncoder, dumps, loads
-import ida_typeinf
 import typing as t
+
+try:
+    import ida_typeinf
+except ImportError:
+    print("Warning: could not import ida_typeinf. TypeLib.add() will not work")
 
 
 class TypeLib:
@@ -20,23 +24,31 @@ class TypeLib:
     dictionary-like access to TypeInfo.
     """
 
-    def __init__(self):
-        self._data: t.Dict[str, "TypeInfo"] = dict()
+    def __init__(self, data: t.Optional[t.Dict[str, "TypeInfo"]] = None):
+        if data is None:
+            self._data = dict()
+        else:
+            self._data = data
 
-    def add(
-        self, typ: ida_typeinf.tinfo_t, worklist: t.Optional[t.Set[str]] = None
+    def add_ida_type(
+        self, typ: "ida_typeinf.tinfo_t", worklist: t.Optional[t.Set[str]] = None
     ) -> None:
         """Adds an element to the TypeLib by parsing an IDA tinfo_t object"""
+
         if worklist is None:
             worklist = set()
         if typ.dstr() in worklist or typ.is_void():
             return
         worklist.add(typ.dstr())
-        if typ.is_ptr():
+        print(f"Adding {typ.dstr()}, Worklist: {worklist}")
+        if typ.is_decl_ptr():
+            print("Ptr")
             Pointer(self, typ.get_pointed_object())
-            self.add(typ.get_pointed_object(), worklist)
+            self.add_ida_type(typ.get_pointed_object(), worklist)
+            print(self)
         elif typ.is_array():
-            self.add(typ.get_array_element(), worklist)
+            print("Array")
+            self.add_ida_type(typ.get_array_element(), worklist)
             # To get array type info, first create an
             # array_type_data_t then call get_array_details to
             # populate it. Unions and structs follow a similar
@@ -46,6 +58,7 @@ class TypeLib:
             base_type_name = array_info.elem_type.dstr()
             Array(self, base_type_name=base_type_name, nelements=array_info.nelems)
         elif typ.is_udt():
+            print("UDT")
             udt_info = ida_typeinf.udt_type_data_t()
             typ.get_udt_details(udt_info)
             name = typ.dstr()
@@ -53,19 +66,29 @@ class TypeLib:
             nmembers = typ.get_udt_nmembers()
             if typ.is_union():
                 members = []
+                largest_size = 0
                 for n in range(nmembers):
                     member = ida_typeinf.udt_member_t()
                     # To get the nth member set OFFSET to n and tell find_udt_member
                     # to search by index.
                     member.offset = n
                     typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
+                    largest_size = max(largest_size, member.size)
                     type_name = member.type.dstr()
-                    self.add(member.type, worklist)
+                    self.add_ida_type(member.type, worklist)
                     members.append(
                         UDT.Field(self, name=member.name, type_name=type_name)
                     )
-                # TODO: padding
-                Union(self, name=name, members=members)
+                end_padding = size - (largest_size // 8)
+                if end_padding > 0:
+                    Union(
+                        self,
+                        name=name,
+                        members=members,
+                        padding=UDT.Padding(end_padding),
+                    )
+                else:
+                    Union(self, name=name, members=members)
             elif typ.is_struct():
                 layout = []
                 next_offset = 0
@@ -79,22 +102,85 @@ class TypeLib:
                         layout.append(UDT.Padding((member.offset - next_offset) // 8))
                     next_offset = member.offset + member.size
                     type_name = member.type.dstr()
-                    self.add(member.type, worklist)
+                    self.add_ida_type(member.type, worklist)
                     layout.append(
                         UDT.Field(self, name=member.name, type_name=type_name)
                     )
+                # Check for padding at the end
+                end_padding = size - next_offset // 8
+                if end_padding > 0:
+                    layout.append(UDT.Padding(end_padding))
                 Struct(self, name=name, layout=layout)
         else:
+            print("Regular")
+            if typ.is_decl_typedef():
+                print("Typedef")
+                print(f"Next type name {typ.get_next_type_name()}")
+                print(f"Final type name {typ.get_final_type_name()}")
             TypeInfo(self, name=typ.dstr(), size=typ.get_size())
+        print(f"Done adding {typ.dstr()}")
+
+    @classmethod
+    def _from_json(cls, d):
+        data = dict()
+        for (k, v) in d.items():
+            data[k] = TypeInfoCodec.decode(v)
+        return cls(data)
+
+    @staticmethod
+    def _parse_name(name: str) -> str:
+        """Parses a name, returning a canonical version.
+
+        Examples:
+        'char**', 'char **', 'char* *' -> 'char * *'
+        'int[0]' -> 'int [ ]'
+        'int [5]', 'int[ 5 ]', 'int[5 ]' -> 'int [ 5 ]'
+        """
+        parts = []
+        current = ''
+        for c in name:
+            if c == ' ':
+                if current != '':
+                    parts.append(current)
+                current = ''
+            elif c in ('*', '[', ']'):
+                if current != '':
+                    parts.append(current)
+                parts.append(c)
+                current = ''
+            else:
+                current += c
+        if current != '':
+            parts.append(current)
+
+        # Look for 0 inside array subscripts
+        to_remove = []
+        for i in [i + 1 for i, x in enumerate(parts) if x == '[']:
+            try:
+                if int(parts[i]) == 0:
+                    to_remove.append(i)
+            except ValueError:
+                pass
+
+        return ' '.join([p for i, p in enumerate(parts) if i not in to_remove])
+
+    def _to_json(self):
+        print("CALLING TO DATA")
+        for (k, v) in self._data.items():
+            print(f"k: {k}")
+            print(f"v: {v}")
+        return self._data
 
     def __contains__(self, key: str) -> bool:
         return key in self._data
 
     def __getitem__(self, key: str) -> "TypeInfo":
+        key = self._parse_name(key)
         return self._data[key]
 
     def __setitem__(self, key: str, item: "TypeInfo") -> None:
         # Might want to raise a KeyError if this exists
+        key = self._parse_name(key)
         if key not in self._data:
             self._data[key] = item
 
@@ -186,6 +272,8 @@ class Array(TypeInfo):
         return hash((self.nelements, self.base_type_name))
 
     def __str__(self):
+        if self.nelements == 0:
+            return f"{self.base_type_name}[]"
         return f"{self.base_type_name}[{self.nelements}]"
 
 
@@ -428,8 +516,37 @@ class Void(TypeInfo):
         return "void"
 
 
-class TypeInfoCodec:
-    """Encoder/decoder functions for TypeInfo"""
+class _Codec:
+    """Encoder/Decoder functions"""
+
+    @staticmethod
+    def decode(encoded: str):
+        raise NotImplemented
+
+    class _Encoder(JSONEncoder):
+        def default(self, t):
+            if hasattr(t, "_to_json"):
+                return t._to_json()
+            return super().default(t)
+
+    @staticmethod
+    def encode(o: t.Union[TypeLib, TypeInfo]):
+        """Encodes a TypeLib or TypeInfo as JSON"""
+        # 'separators' removes spaces after , and : for efficiency
+        return dumps(o, cls=_Codec._Encoder, separators=(",", ":"))
+
+
+class TypeLibCodec(_Codec):
+    """Encoder/decoder for TypeLib"""
+
+    @staticmethod
+    def decode(encoded: str):
+        """Decodes a JSON string"""
+        return loads(encoded, object_hook=TypeLib._from_json)
+
+
+class TypeInfoCodec(_Codec):
+    """Encoder/decoder for TypeInfo"""
 
     @staticmethod
     def decode(encoded: str):
@@ -448,15 +565,3 @@ class TypeInfoCodec:
             }[d["T"]]._from_json(d)
 
         return loads(encoded, object_hook=as_typeinfo)
-
-    class _TypeEncoder(JSONEncoder):
-        def default(self, t):
-            if hasattr(t, "_to_json"):
-                return t._to_json()
-            return super().default(t)
-
-    @staticmethod
-    def encode(typeinfo: TypeInfo):
-        """Encodes a TypeInfo as JSON"""
-        # 'separators' removes spaces after , and : for efficiency
-        return dumps(typeinfo, cls=TypeInfoCodec._TypeEncoder, separators=(",", ":"))

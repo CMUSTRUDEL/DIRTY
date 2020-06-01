@@ -82,6 +82,7 @@ class Collector(ida_kernwin.action_handler_t):
         """
         print(f"Locals: {self.fun_locals}")
         print(f"Type Lib: {self.type_lib}")
+        print(f"{ti.TypeLibCodec.encode(self.type_lib)}")
         with open(os.environ["COLLECTED_VARS"], "wb") as vars_fh, open(
             os.environ["FUN_LOCALS"], "wb"
         ) as locals_fh, open(os.environ["TYPE_DBASE"], "wb") as type_dbase, open(
@@ -128,7 +129,8 @@ class Collector(ida_kernwin.action_handler_t):
                 # Ignore function pointers
                 if v.type() and not v.type().is_funcptr():
                     cur_type = v.type().copy()
-                    self.type_lib.add(cur_type)
+                    print(cfunc)
+                    self.type_lib.add_ida_type(cur_type)
             cur_locals = [
                 v.name for v in cfunc.get_lvars() if v.has_user_name and v.name != ""
             ]
