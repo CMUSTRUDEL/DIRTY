@@ -41,7 +41,9 @@ class TypeLib:
             return
         worklist.add(typ.dstr())
         print(f"Adding {typ.dstr()}, Worklist: {worklist}")
-        if typ.is_decl_ptr():
+        if typ.is_funcptr() or '(' in typ.dstr():
+            FunctionPointer(self, name=self._parse_name(typ.dstr()))
+        elif typ.is_decl_ptr():
             print("Ptr")
             Pointer(self, typ.get_pointed_object())
             self.add_ida_type(typ.get_pointed_object(), worklist)
@@ -112,11 +114,6 @@ class TypeLib:
                     layout.append(UDT.Padding(end_padding))
                 Struct(self, name=name, layout=layout)
         else:
-            print("Regular")
-            if typ.is_decl_typedef():
-                print("Typedef")
-                print(f"Next type name {typ.get_next_type_name()}")
-                print(f"Final type name {typ.get_final_type_name()}")
             TypeInfo(self, name=typ.dstr(), size=typ.get_size())
         print(f"Done adding {typ.dstr()}")
 
@@ -218,6 +215,7 @@ class TypeInfo:
             5: Struct
             6: Union
             7: Void
+            8: Function Pointer
         """
         return {"T": 0, "n": self.name, "s": self.size}
 
@@ -284,12 +282,11 @@ class Pointer(TypeInfo):
     would recurse indefinitely.
     """
 
-    WIDTH = 8
+    size = 8
 
     def __init__(self, lib: TypeLib, target_type_name: int):
         self.target_type_name = target_type_name
         self.name = str(self)
-        self.size = Pointer.WIDTH
         self.lib = lib
         self.lib[self.name] = self
 
@@ -313,6 +310,9 @@ class Pointer(TypeInfo):
 
     def __str__(self):
         return f"{self.target_type_name} *"
+
+
+
 
 
 class UDT(TypeInfo):
@@ -516,6 +516,41 @@ class Void(TypeInfo):
         return "void"
 
 
+class FunctionPointer(TypeInfo):
+    """Stores information about a function pointer.
+
+    Currently only one function pointer is supported.
+    """
+
+    size = Pointer.size
+
+    def __init__(self, lib: TypeLib, name: str):
+        self.name = name
+        self.lib = lib
+        self.lib[self.name] = self
+
+    @classmethod
+    def _from_json(cls, lib: TypeLib, d):
+        return cls(lib, d["n"])
+
+    def _to_json(self):
+        return {"T": 8, "n": self.name}
+
+    def __eq__(self, other):
+        if isinstance(other, FunctionPointer):
+            return (
+                self.lib == other.lib
+                and self.name == other.name
+            )
+        return False
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __str__(self):
+        return f"{self.name}"
+
+
 class _Codec:
     """Encoder/Decoder functions"""
 
@@ -562,6 +597,7 @@ class TypeInfoCodec(_Codec):
                 5: Struct,
                 6: Union,
                 7: Void,
+                8: FunctionPointer,
             }[d["T"]]._from_json(d)
 
         return loads(encoded, object_hook=as_typeinfo)
