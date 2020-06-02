@@ -188,10 +188,8 @@ class TypeInfo:
         self.size = size
 
     def replacable_with(self, other: "TypeInfo") -> bool:
-        """Returns True if this type can be replaced with other"""
-        if isinstance(other, TypeInfo):
-            return self.size == other.size
-        return False
+        """Check if this type can be replaced with other"""
+        return self.size == other.size
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "TypeInfo":
@@ -222,15 +220,23 @@ class Array(TypeInfo):
         self.nelements = nelements
         self.size = element_size * nelements
 
-    def offsets(self) -> t.Iterable[int]:
-        """Returns an iterable of the accessible offsets for this array
+    def accessible_offsets(self) -> t.Iterable[int]:
+        """Offsets accessible in this Array"""
+        return range(self.size)
 
-        For example, the type int[4] has offsets [0, 4, 8, 12] (for 4-byte ints).
+    def inaccessible_offsets(self) -> t.Iterable[int]:
+        """Offsets inaccessible in this Array"""
+        return []
+
+    def start_offsets(self) -> t.Iterable[int]:
+        """Returns the start offsets elements in this array
+
+        For example, the type int[4] has start offsets [0, 4, 8, 12] (for 4-byte ints).
         """
         return range(self.size)[:: self.element_size]
 
     def replacable_with(self, other: "TypeInfo") -> bool:
-        if isinstance(other, TypeInfo) and self.size != other.size:
+        if self.size != other.size:
             return False
         if isinstance(other, Array):
             # Make sure that boundaries between elements in other are aligned
@@ -244,11 +250,12 @@ class Array(TypeInfo):
                 self.nelements <= other.nelements
                 and self.element_size % other.element_size == 0
             )
-        elif isinstance(other, Struct):
+        if isinstance(other, (Struct, Union)):
             # Check that every element is addressible via a field in the Struct
+            # or Union
             if other.has_padding():
                 return False
-            return set(self.offsets()).issubset(set(other.offsets()))
+            return set(self.start_offsets()).issubset(set(other.start_offsets()))
         return False
 
     @classmethod
@@ -400,11 +407,31 @@ class Struct(UDT):
             self.size += l.size
 
     def has_padding(self) -> bool:
-        """Returns True if this Struct has padding"""
+        """True if the Struct has padding"""
         return any((isinstance(m, UDT.Padding) for m in self.layout))
 
-    def offsets(self) -> t.Generator[int, None, None]:
-        """Returns the accessible offsets in this struct
+    def accessible_offsets(self) -> t.Generator[int, None, None]:
+        """Offsets accessible in this struct"""
+        current_offset = 0
+        for m in self.layout:
+            next_offset = current_offset + m.size
+            if isinstance(m, UDT.Field):
+                for offset in range(current_offset, next_offset):
+                    yield offset
+            current_offset = next_offset
+
+    def inaccessible_offsets(self) -> t.Generator[int, None, None]:
+        """Offsets inaccessible in this struct"""
+        current_offset = 0
+        for m in self.layout:
+            next_offset = current_offset + m.size
+            if isinstance(m, UDT.Padding):
+                for offset in range(current_offset, next_offset):
+                    yield offset
+            current_offset = next_offset
+
+    def start_offsets(self) -> t.Generator[int, None, None]:
+        """Returns the start offsets of fields in this struct
 
         For example, if int is 4-bytes, char is 1-byte, and long is 8-bytes,
         a struct with the layout:
@@ -416,6 +443,17 @@ class Struct(UDT):
             if isinstance(m, UDT.Field):
                 yield current_offset
             current_offset += m.size
+
+    def replacable_with(self, other: "TypeInfo") -> bool:
+        if self.size != other.size:
+            return False
+        if isinstance(other, (Array, Struct, Union)):
+            return set(self.start_offsets()).issubset(
+                set(other.start_offsets())
+            ) and set(self.accessible_offsets()).issubset(
+                set(other.accessible_offsets())
+            )
+        return list(self.start_offsets()) == [0]
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "Struct":
@@ -471,6 +509,29 @@ class Union(UDT):
     def has_padding(self) -> bool:
         """Returns True if this Union has padding"""
         return self.padding is not None
+
+    def accessible_offsets(self) -> t.Iterable[int]:
+        """Offsets accessible in this Union"""
+        return range(max(m.size for m in self.members))
+
+    def inaccessible_offsets(self) -> t.Iterable[int]:
+        """Offsets inaccessible in this Union"""
+        if not self.has_padding():
+            return []
+        return range(max(m.size for m in self.members), self.size)
+
+    def start_offsets(self) -> t.Iterable[int]:
+        """Returns the start offsets elements in this Union"""
+        return [0]
+
+    def replacable_with(self, other: "TypeInfo") -> bool:
+        if self.size != other.size:
+            return False
+        if isinstance(other, (Struct, Union)):
+            return set(self.accessible_offsets()).issubset(
+                set(other.accessible_offsets())
+            )
+        return True
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "Union":
