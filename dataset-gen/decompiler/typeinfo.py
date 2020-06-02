@@ -40,6 +40,8 @@ class TypeLib:
         if typ.dstr() in worklist or typ.is_void():
             return
         worklist.add(typ.dstr())
+
+        new_type: TypeInfo
         if typ.is_funcptr() or "(" in typ.dstr():
             new_type = FunctionPointer(name=typ.dstr())
         elif typ.is_decl_ptr():
@@ -120,15 +122,15 @@ class TypeLib:
         self._data[new_type.size].add(new_type)
 
     @classmethod
-    def _from_json(cls, d):
-        data = defaultdict(set)
+    def _from_json(cls, d: t.Dict[str, t.List["TypeInfo"]]) -> "TypeLib":
+        data: t.DefaultDict[int, t.Set["TypeInfo"]] = defaultdict(set)
         # Convert lists of types into sets
         for key, types in d.items():
             if key != "T":
                 data[int(key)] = set(types)
         return cls(data)
 
-    def _to_json(self):
+    def _to_json(self) -> t.Dict[str, t.Union[int, t.Set["TypeInfo"]]]:
         """Encodes as JSON
 
         The 'T' field encodes which TypeInfo class is represented by this JSON:
@@ -153,7 +155,9 @@ class TypeLib:
             7: Void
             8: Function Pointer
         """
-        data = dict(self._data)
+        data: t.Dict[str, t.Union[int, t.Set["TypeInfo"]]] = {
+            str(key): value for key, value in self._data.items()
+        }
         data["T"] = 0
         return data
 
@@ -183,23 +187,29 @@ class TypeInfo:
         self.name = name
         self.size = size
 
+    def replacable_with(self, other: "TypeInfo") -> bool:
+        """Returns True if this type can be replaced with other"""
+        if isinstance(other, TypeInfo):
+            return self.size == other.size
+        return False
+
     @classmethod
-    def _from_json(cls, d):
+    def _from_json(cls, d: t.Dict[str, t.Any]) -> "TypeInfo":
         """Decodes from a dictionary"""
         return cls(name=d["n"], size=d["s"])
 
-    def _to_json(self):
+    def _to_json(self) -> t.Dict[str, t.Any]:
         return {"T": 1, "n": self.name, "s": self.size}
 
-    def __eq__(self, other):
+    def __eq__(self, other: t.Any) -> bool:
         if isinstance(other, TypeInfo):
             return self.name == other.name and self.size == other.size
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.name, self.size))
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name}"
 
 
@@ -212,11 +222,40 @@ class Array(TypeInfo):
         self.nelements = nelements
         self.size = element_size * nelements
 
+    def offsets(self) -> t.Iterable[int]:
+        """Returns an iterable of the accessible offsets for this array
+
+        For example, the type int[4] has offsets [0, 4, 8, 12] (for 4-byte ints).
+        """
+        return range(self.size)[:: self.element_size]
+
+    def replacable_with(self, other: "TypeInfo") -> bool:
+        if isinstance(other, TypeInfo) and self.size != other.size:
+            return False
+        if isinstance(other, Array):
+            # Make sure that boundaries between elements in other are aligned
+            # with this array.
+            # For example, if A has 4-byte elements and B has 2-byte elements
+            # A.replacable_with(B) is True, but B.replacable_with(A) is False
+            #
+            # A: [   4   |   4   ]
+            # B: [ 2 | 2 | 2 | 2 ]
+            return (
+                self.nelements <= other.nelements
+                and self.element_size % other.element_size == 0
+            )
+        elif isinstance(other, Struct):
+            # Check that every element is addressible via a field in the Struct
+            if other.has_padding():
+                return False
+            return set(self.offsets()).issubset(set(other.offsets()))
+        return False
+
     @classmethod
-    def _from_json(cls, d):
+    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Array":
         return cls(nelements=d["n"], element_size=d["s"], element_type=d["t"])
 
-    def _to_json(self):
+    def _to_json(self) -> t.Dict[str, t.Any]:
         return {
             "T": 2,
             "n": self.nelements,
@@ -224,7 +263,7 @@ class Array(TypeInfo):
             "t": self.element_type,
         }
 
-    def __eq__(self, other):
+    def __eq__(self, other: t.Any) -> bool:
         if isinstance(other, Array):
             return (
                 self.nelements == other.nelements
@@ -233,10 +272,10 @@ class Array(TypeInfo):
             )
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.nelements, self.element_size, self.element_type))
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.nelements == 0:
             return f"{self.element_type}[]"
         return f"{self.element_type}[{self.nelements}]"
@@ -255,34 +294,44 @@ class Pointer(TypeInfo):
         self.target_type_name = target_type_name
 
     @classmethod
-    def _from_json(cls, d):
+    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Pointer":
         return cls(d["t"])
 
-    def _to_json(self):
+    def _to_json(self) -> t.Dict[str, t.Any]:
         return {"T": 3, "t": self.target_type_name}
 
-    def __eq__(self, other):
+    def __eq__(self, other: t.Any) -> bool:
         if isinstance(other, Pointer):
             return self.target_type_name == other.target_type_name
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.target_type_name)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.target_type_name} *"
 
 
 class UDT(TypeInfo):
     """An object representing struct or union types"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         raise NotImplementedError
 
     class Member:
         """A member of a UDT. Can be a Field or Padding"""
 
         size: int = 0
+
+        def __init__(self) -> None:
+            raise NotImplementedError
+
+        @classmethod
+        def _from_json(cls, d: t.Dict[str, t.Any]) -> "UDT.Member":
+            raise NotImplementedError
+
+        def _to_json(self) -> t.Dict[str, t.Any]:
+            raise NotImplementedError
 
     class Field(Member):
         """Information about a field in a struct or union"""
@@ -293,21 +342,21 @@ class UDT(TypeInfo):
             self.size = size
 
         @classmethod
-        def _from_json(cls, d):
+        def _from_json(cls, d: t.Dict[str, t.Any]) -> "UDT.Field":
             return cls(name=d["n"], type_name=d["t"], size=d["s"])
 
-        def _to_json(self):
+        def _to_json(self) -> t.Dict[str, t.Any]:
             return {"T": 4, "n": self.name, "t": self.type_name, "s": self.size}
 
-        def __eq__(self, other):
+        def __eq__(self, other: t.Any) -> bool:
             if isinstance(other, UDT.Field):
                 return self.name == other.name and self.type_name == other.type_name
             return False
 
-        def __hash__(self):
+        def __hash__(self) -> int:
             return hash((self.name, self.type_name))
 
-        def __str__(self):
+        def __str__(self) -> str:
             return f"{self.type_name} {self.name}"
 
     class Padding(Member):
@@ -317,21 +366,21 @@ class UDT(TypeInfo):
             self.size = size
 
         @classmethod
-        def _from_json(cls, d):
+        def _from_json(cls, d: t.Dict[str, int]) -> "UDT.Padding":
             return cls(size=d["s"])
 
-        def _to_json(self):
+        def _to_json(self) -> t.Dict[str, int]:
             return {"T": 5, "s": self.size}
 
-        def __eq__(self, other):
+        def __eq__(self, other: t.Any) -> bool:
             if isinstance(other, UDT.Padding):
                 return self.size == other.size
             return False
 
-        def __hash__(self):
+        def __hash__(self) -> int:
             return self.size
 
-        def __str__(self):
+        def __str__(self) -> str:
             return f"PADDING ({self.size})"
 
 
@@ -350,26 +399,44 @@ class Struct(UDT):
         for l in layout:
             self.size += l.size
 
+    def has_padding(self) -> bool:
+        """Returns True if this Struct has padding"""
+        return any((isinstance(m, UDT.Padding) for m in self.layout))
+
+    def offsets(self) -> t.Generator[int, None, None]:
+        """Returns the accessible offsets in this struct
+
+        For example, if int is 4-bytes, char is 1-byte, and long is 8-bytes,
+        a struct with the layout:
+        [int, char, padding(3), long, long]
+        has offsets [0, 4, 8, 16].
+        """
+        current_offset = 0
+        for m in self.layout:
+            if isinstance(m, UDT.Field):
+                yield current_offset
+            current_offset += m.size
+
     @classmethod
-    def _from_json(cls, d):
+    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Struct":
         return cls(name=d["n"], layout=d["l"])
 
-    def _to_json(self):
+    def _to_json(self) -> t.Dict[str, t.Any]:
         return {
             "T": 6,
             "n": self.name,
             "l": [l._to_json() for l in self.layout],
         }
 
-    def __eq__(self, other):
+    def __eq__(self, other: t.Any) -> bool:
         if isinstance(other, Struct):
             return self.name == other.name and self.layout == other.layout
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.name, self.layout))
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.name is None:
             ret = f"struct {{ "
         else:
@@ -401,11 +468,15 @@ class Union(UDT):
         if self.padding is not None:
             self.size += self.padding.size
 
+    def has_padding(self) -> bool:
+        """Returns True if this Union has padding"""
+        return self.padding is not None
+
     @classmethod
-    def _from_json(cls, d):
+    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Union":
         return cls(name=d["n"], members=d["m"], padding=d["p"])
 
-    def _to_json(self):
+    def _to_json(self) -> t.Dict[str, t.Any]:
         return {
             "T": 8,
             "n": self.name,
@@ -413,7 +484,7 @@ class Union(UDT):
             "p": self.padding,
         }
 
-    def __eq__(self, other):
+    def __eq__(self, other: t.Any) -> bool:
         if isinstance(other, Union):
             return (
                 self.name == other.name
@@ -422,10 +493,10 @@ class Union(UDT):
             )
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.name, self.members, self.padding))
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.name is None:
             ret = f"union {{ "
         else:
@@ -441,31 +512,28 @@ class Union(UDT):
 class Void(TypeInfo):
     size = 0
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     @classmethod
-    def _from_json(cls, d):
+    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Void":
         return cls()
 
-    def _to_json(self):
+    def _to_json(self) -> t.Dict[str, int]:
         return {"T": 8}
 
-    def __eq__(self, other):
+    def __eq__(self, other: t.Any) -> bool:
         return isinstance(other, Void)
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return 0
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "void"
 
 
 class FunctionPointer(TypeInfo):
-    """Stores information about a function pointer.
-
-    Currently only one function pointer is supported.
-    """
+    """Stores information about a function pointer."""
 
     size = Pointer.size
 
@@ -473,32 +541,38 @@ class FunctionPointer(TypeInfo):
         self.name = name
 
     @classmethod
-    def _from_json(cls, d):
+    def _from_json(cls, d: t.Dict[str, str]) -> "FunctionPointer":
         return cls(d["n"])
 
-    def _to_json(self):
+    def _to_json(self) -> t.Dict[str, t.Union[t.Optional[str], int]]:
         return {"T": 9, "n": self.name}
 
-    def __eq__(self, other):
+    def __eq__(self, other: t.Any) -> bool:
         if isinstance(other, FunctionPointer):
             return self.name == other.name
         return False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.name)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name}"
 
 
 class TypeLibCodec:
     """Encoder/Decoder functions"""
 
+    CodecTypes = t.Union["TypeLib", "TypeInfo", "UDT.Member"]
+
     @staticmethod
-    def decode(encoded: str):
+    def decode(encoded: str) -> CodecTypes:
         """Decodes a JSON string"""
-        def read_metadata(d):
-            return {
+
+        def read_metadata(d: t.Dict[str, t.Any]) -> TypeLibCodec.CodecTypes:
+            classes: t.Dict[
+                int,
+                t.Union[t.Type["TypeLib"], t.Type["TypeInfo"], t.Type["UDT.Member"]],
+            ] = {
                 0: TypeLib,
                 1: TypeInfo,
                 2: Array,
@@ -509,12 +583,13 @@ class TypeLibCodec:
                 7: Union,
                 8: Void,
                 9: FunctionPointer,
-            }[d["T"]]._from_json(d)
+            }
+            return classes[d["T"]]._from_json(d)
 
         return loads(encoded, object_hook=read_metadata)
 
     class _Encoder(JSONEncoder):
-        def default(self, obj):
+        def default(self, obj: t.Any) -> t.Any:
             if hasattr(obj, "_to_json"):
                 return obj._to_json()
             if isinstance(obj, set):
@@ -522,7 +597,7 @@ class TypeLibCodec:
             return super().default(obj)
 
     @staticmethod
-    def encode(o: t.Union[TypeLib, TypeInfo]):
+    def encode(o: CodecTypes) -> str:
         """Encodes a TypeLib or TypeInfo as JSON"""
         # 'separators' removes spaces after , and : for efficiency
         return dumps(o, cls=TypeLibCodec._Encoder, separators=(",", ":"))
