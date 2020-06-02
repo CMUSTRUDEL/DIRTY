@@ -81,6 +81,7 @@ class Collector(ida_kernwin.action_handler_t):
         `FUN_LOCALS` respectively.
         """
         print(f"{ti.TypeLibCodec.encode(self.type_lib)}")
+        print(f"{self.type_lib}")
         with open(os.environ["COLLECTED_VARS"], "wb") as vars_fh, open(
             os.environ["FUN_LOCALS"], "wb"
         ) as locals_fh, open(os.environ["TYPE_DBASE"], "wb") as type_dbase, open(
