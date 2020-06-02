@@ -117,9 +117,9 @@ class TimedRun:
 
 
 class Runner:
-    def __init__(self, ida, type_dbase, binaries_dir, output_dir, verbose, COLLECT, DUMP_TREES):
+    def __init__(self, ida, type_lib, binaries_dir, output_dir, verbose, COLLECT, DUMP_TREES):
         self.ida = ida
-        self.type_dbase = type_dbase
+        self.type_lib = type_lib
         self.binaries_dir = binaries_dir
         self.output_dir = output_dir
         self.verbose = verbose
@@ -129,7 +129,7 @@ class Runner:
         self.env = os.environ.copy()
         self.env['IDALOG'] = '/dev/stdout'
         self.env['OUTPUT_DIR'] = self.output_dir
-        self.env['TYPE_DBASE'] = self.type_dbase
+        self.env['TYPE_LIB'] = self.type_lib
 
         self.binaries = os.listdir(binaries_dir)
 

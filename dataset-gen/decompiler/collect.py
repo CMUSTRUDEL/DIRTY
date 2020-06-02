@@ -66,13 +66,12 @@ class Collector(ida_kernwin.action_handler_t):
         self.fun_locals = defaultdict(list)
         # frozenset of addrs -> varname
         self.varmap = dict()
-        self.type_lib = ti.TypeLib()
         try:
-            with open(os.environ["TYPE_DBASE"], "rb") as type_dbase:
-                self.type_dbase = pickle.load(type_dbase)
+            with open(os.environ["TYPE_LIB"], "rb") as type_lib_file:
+                self.type_lib = ti.TypeLibCodec.decode(type_lib_file.read())
         except Exception as e:
             print(e)
-            self.type_dbase = defaultdict(set)
+            self.type_lib = ti.TypeLib()
         ida_kernwin.action_handler_t.__init__(self)
 
     def dump_info(self):
@@ -80,25 +79,16 @@ class Collector(ida_kernwin.action_handler_t):
         specified by the environment variables `COLLECTED_VARS` and
         `FUN_LOCALS` respectively.
         """
-        print(f"{ti.TypeLibCodec.encode(self.type_lib)}")
         print(f"{self.type_lib}")
         with open(os.environ["COLLECTED_VARS"], "wb") as vars_fh, open(
             os.environ["FUN_LOCALS"], "wb"
-        ) as locals_fh, open(os.environ["TYPE_DBASE"], "wb") as type_dbase, open(
-            "types.yaml", "w"
-        ) as type_yaml:
+        ) as locals_fh, open(os.environ["TYPE_LIB"], "w") as type_lib_fh:
             pickle.dump(self.varmap, vars_fh)
             pickle.dump(self.fun_locals, locals_fh)
-            pickle.dump(self.type_dbase, type_dbase)
-            yaml.dump(
-                self.type_dbase, type_yaml, default_flow_style=False, allow_unicode=True
-            )
+            type_lib_fh.write(ti.TypeLibCodec.encode(self.type_lib))
             vars_fh.flush()
             locals_fh.flush()
-            type_dbase.flush()
-            type_yaml.flush()
-            for size in sorted([s for s in self.type_dbase]):
-                print(f"{size}: {self.type_dbase[size]}")
+            type_lib_fh.flush()
 
     def activate(self, ctx):
         """Runs the collector"""

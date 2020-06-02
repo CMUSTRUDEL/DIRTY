@@ -24,9 +24,9 @@ class TypeLib:
     dictionary-like access to TypeInfo.
     """
 
-    def __init__(self, data: t.Optional[t.DefaultDict[str, t.Set["TypeInfo"]]] = None):
+    def __init__(self, data: t.Optional[t.DefaultDict[int, t.Set["TypeInfo"]]] = None):
         if data is None:
-            self._data: t.DefaultDict[str, t.Set["TypeInfo"]] = defaultdict(set)
+            self._data: t.DefaultDict[int, t.Set["TypeInfo"]] = defaultdict(set)
         else:
             self._data = data
 
@@ -122,15 +122,40 @@ class TypeLib:
     @classmethod
     def _from_json(cls, d):
         data = defaultdict(set)
-        for (size, types) in d.items():
-            decoded_types = set()
-            for t in types:
-                decoded_types.add(TypeInfoCodec.decode(v))
-            data[k] = decoded_types
+        # Convert lists of types into sets
+        for key, types in d.items():
+            if key != "T":
+                data[int(key)] = set(types)
         return cls(data)
 
     def _to_json(self):
-        return dict(self._data)
+        """Encodes as JSON
+
+        The 'T' field encodes which TypeInfo class is represented by this JSON:
+            0: TypeLib
+            1: TypeInfo
+            2: Array
+            3: Pointer
+            4: UDT.Field
+            5: UDT.Padding
+            6: Struct
+            7: Union
+            8: Void
+            9: FunctionPointer
+
+            0: TypeInfo
+            1: Array
+            2: Pointer
+            3: UDT.Field
+            4: UDT.Padding
+            5: Struct
+            6: Union
+            7: Void
+            8: Function Pointer
+        """
+        data = dict(self._data)
+        data["T"] = 0
+        return data
 
     def __contains__(self, key: int) -> bool:
         return key in self._data
@@ -164,20 +189,7 @@ class TypeInfo:
         return cls(name=d["n"], size=d["s"])
 
     def _to_json(self):
-        """Encodes as JSON
-
-        The 'T' field encodes which TypeInfo class is represented by this JSON:
-            0: TypeInfo
-            1: Array
-            2: Pointer
-            3: UDT.Field
-            4: UDT.Padding
-            5: Struct
-            6: Union
-            7: Void
-            8: Function Pointer
-        """
-        return {"T": 0, "n": self.name, "s": self.size}
+        return {"T": 1, "n": self.name, "s": self.size}
 
     def __eq__(self, other):
         if isinstance(other, TypeInfo):
@@ -206,7 +218,7 @@ class Array(TypeInfo):
 
     def _to_json(self):
         return {
-            "T": 1,
+            "T": 2,
             "n": self.nelements,
             "s": self.element_size,
             "t": self.element_type,
@@ -247,7 +259,7 @@ class Pointer(TypeInfo):
         return cls(d["t"])
 
     def _to_json(self):
-        return {"T": 2, "t": self.target_type_name}
+        return {"T": 3, "t": self.target_type_name}
 
     def __eq__(self, other):
         if isinstance(other, Pointer):
@@ -285,7 +297,7 @@ class UDT(TypeInfo):
             return cls(name=d["n"], type_name=d["t"], size=d["s"])
 
         def _to_json(self):
-            return {"T": 3, "n": self.name, "t": self.type_name, "s": self.size}
+            return {"T": 4, "n": self.name, "t": self.type_name, "s": self.size}
 
         def __eq__(self, other):
             if isinstance(other, UDT.Field):
@@ -309,7 +321,7 @@ class UDT(TypeInfo):
             return cls(size=d["s"])
 
         def _to_json(self):
-            return {"T": 4, "s": self.size}
+            return {"T": 5, "s": self.size}
 
         def __eq__(self, other):
             if isinstance(other, UDT.Padding):
@@ -344,7 +356,7 @@ class Struct(UDT):
 
     def _to_json(self):
         return {
-            "T": 5,
+            "T": 6,
             "n": self.name,
             "l": [l._to_json() for l in self.layout],
         }
@@ -395,7 +407,7 @@ class Union(UDT):
 
     def _to_json(self):
         return {
-            "T": 6,
+            "T": 8,
             "n": self.name,
             "m": [m._to_json() for m in self.members],
             "p": self.padding,
@@ -437,7 +449,7 @@ class Void(TypeInfo):
         return cls()
 
     def _to_json(self):
-        return {"T": 7}
+        return {"T": 8}
 
     def __eq__(self, other):
         return isinstance(other, Void)
@@ -465,7 +477,7 @@ class FunctionPointer(TypeInfo):
         return cls(d["n"])
 
     def _to_json(self):
-        return {"T": 8, "n": self.name}
+        return {"T": 9, "n": self.name}
 
     def __eq__(self, other):
         if isinstance(other, FunctionPointer):
@@ -479,12 +491,27 @@ class FunctionPointer(TypeInfo):
         return f"{self.name}"
 
 
-class _Codec:
+class TypeLibCodec:
     """Encoder/Decoder functions"""
 
     @staticmethod
     def decode(encoded: str):
-        raise NotImplemented
+        """Decodes a JSON string"""
+        def read_metadata(d):
+            return {
+                0: TypeLib,
+                1: TypeInfo,
+                2: Array,
+                3: Pointer,
+                4: UDT.Field,
+                5: UDT.Padding,
+                6: Struct,
+                7: Union,
+                8: Void,
+                9: FunctionPointer,
+            }[d["T"]]._from_json(d)
+
+        return loads(encoded, object_hook=read_metadata)
 
     class _Encoder(JSONEncoder):
         def default(self, obj):
@@ -498,36 +525,4 @@ class _Codec:
     def encode(o: t.Union[TypeLib, TypeInfo]):
         """Encodes a TypeLib or TypeInfo as JSON"""
         # 'separators' removes spaces after , and : for efficiency
-        return dumps(o, cls=_Codec._Encoder, separators=(",", ":"))
-
-
-class TypeLibCodec(_Codec):
-    """Encoder/decoder for TypeLib"""
-
-    @staticmethod
-    def decode(encoded: str):
-        """Decodes a JSON string"""
-        return loads(encoded, object_hook=TypeLib._from_json)
-
-
-class TypeInfoCodec(_Codec):
-    """Encoder/decoder for TypeInfo"""
-
-    @staticmethod
-    def decode(encoded: str):
-        """Decodes a JSON string"""
-
-        def as_typeinfo(d):
-            return {
-                0: TypeInfo,
-                1: Array,
-                2: Pointer,
-                3: UDT.Field,
-                4: UDT.Padding,
-                5: Struct,
-                6: Union,
-                7: Void,
-                8: FunctionPointer,
-            }[d["T"]]._from_json(d)
-
-        return loads(encoded, object_hook=as_typeinfo)
+        return dumps(o, cls=TypeLibCodec._Encoder, separators=(",", ":"))
