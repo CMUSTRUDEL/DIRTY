@@ -121,6 +121,12 @@ class TypeLib:
             new_type = TypeInfo(name=typ.dstr(), size=typ.get_size())
         self._data[new_type.size].add(new_type)
 
+    def get_replacements(
+        self, types: t.Tuple["TypeInfo", ...]
+    ) -> t.Iterable[t.Tuple["TypeInfo", ...]]:
+        """Given a list of types, get all possible lists of replacements"""
+        raise NotImplementedError
+
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.List["TypeInfo"]]) -> "TypeLib":
         data: t.DefaultDict[int, t.Set["TypeInfo"]] = defaultdict(set)
@@ -187,9 +193,39 @@ class TypeInfo:
         self.name = name
         self.size = size
 
-    def replacable_with(self, other: "TypeInfo") -> bool:
-        """Check if this type can be replaced with other"""
-        return self.size == other.size
+    def accessible_offsets(self) -> t.Tuple[int, ...]:
+        """Offsets accessible in this type"""
+        return tuple(range(self.size))
+
+    def inaccessible_offsets(self) -> t.Tuple[int, ...]:
+        """Inaccessible offsets in this type (e.g., padding in a Struct)"""
+        return tuple()
+
+    def start_offsets(self) -> t.Tuple[int, ...]:
+        """Start offsets of elements in this type"""
+        return (0,)
+
+    def replacable_with(self, others: t.Tuple["TypeInfo", ...]) -> bool:
+        """Check if this type can be replaced with others"""
+        if self.size != sum(other.size for other in others):
+            return False
+        cur_offset = 0
+        other_start: t.Tuple[int, ...] = tuple()
+        other_accessible: t.Tuple[int, ...] = tuple()
+        other_inaccessible: t.Tuple[int, ...] = tuple()
+        for other in others:
+
+            def displace(offsets):
+                return [off + cur_offset for off in offsets]
+
+            other_start += displace(other.start_offsets())
+            other_accessible += displace(other.accessible_offsets())
+            other_inaccessible += displace(other.inaccessible_offsets())
+        return (
+            set(self.start_offsets()).issubset(other_start)
+            and self.accessible_offsets() == other_accessible
+            and self.inaccessible_offsets() == other_inaccessible
+        )
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "TypeInfo":
@@ -220,43 +256,12 @@ class Array(TypeInfo):
         self.nelements = nelements
         self.size = element_size * nelements
 
-    def accessible_offsets(self) -> t.Iterable[int]:
-        """Offsets accessible in this Array"""
-        return range(self.size)
-
-    def inaccessible_offsets(self) -> t.Iterable[int]:
-        """Offsets inaccessible in this Array"""
-        return []
-
-    def start_offsets(self) -> t.Iterable[int]:
+    def start_offsets(self) -> t.Tuple[int, ...]:
         """Returns the start offsets elements in this array
 
         For example, the type int[4] has start offsets [0, 4, 8, 12] (for 4-byte ints).
         """
-        return range(self.size)[:: self.element_size]
-
-    def replacable_with(self, other: "TypeInfo") -> bool:
-        if self.size != other.size:
-            return False
-        if isinstance(other, Array):
-            # Make sure that boundaries between elements in other are aligned
-            # with this array.
-            # For example, if A has 4-byte elements and B has 2-byte elements
-            # A.replacable_with(B) is True, but B.replacable_with(A) is False
-            #
-            # A: [   4   |   4   ]
-            # B: [ 2 | 2 | 2 | 2 ]
-            return (
-                self.nelements <= other.nelements
-                and self.element_size % other.element_size == 0
-            )
-        if isinstance(other, (Struct, Union)):
-            # Check that every element is addressible via a field in the Struct
-            # or Union
-            if other.has_padding():
-                return False
-            return set(self.start_offsets()).issubset(set(other.start_offsets()))
-        return False
+        return tuple(range(self.size)[:: self.element_size])
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "Array":
@@ -410,27 +415,33 @@ class Struct(UDT):
         """True if the Struct has padding"""
         return any((isinstance(m, UDT.Padding) for m in self.layout))
 
-    def accessible_offsets(self) -> t.Generator[int, None, None]:
+    def accessible_offsets(self) -> t.Tuple[int, ...]:
         """Offsets accessible in this struct"""
+        accessible: t.Tuple[int, ...] = tuple()
         current_offset = 0
         for m in self.layout:
             next_offset = current_offset + m.size
             if isinstance(m, UDT.Field):
                 for offset in range(current_offset, next_offset):
-                    yield offset
+                    accessible += (offset,)
             current_offset = next_offset
+        return accessible
 
-    def inaccessible_offsets(self) -> t.Generator[int, None, None]:
+    def inaccessible_offsets(self) -> t.Tuple[int, ...]:
         """Offsets inaccessible in this struct"""
+        if not self.has_padding():
+            return tuple()
+        inaccessible: t.Tuple[int, ...] = tuple()
         current_offset = 0
         for m in self.layout:
             next_offset = current_offset + m.size
             if isinstance(m, UDT.Padding):
                 for offset in range(current_offset, next_offset):
-                    yield offset
+                    inaccessible += (offset,)
             current_offset = next_offset
+        return inaccessible
 
-    def start_offsets(self) -> t.Generator[int, None, None]:
+    def start_offsets(self) -> t.Tuple[int, ...]:
         """Returns the start offsets of fields in this struct
 
         For example, if int is 4-bytes, char is 1-byte, and long is 8-bytes,
@@ -438,22 +449,13 @@ class Struct(UDT):
         [int, char, padding(3), long, long]
         has offsets [0, 4, 8, 16].
         """
+        starts: t.Tuple[int, ...] = tuple()
         current_offset = 0
         for m in self.layout:
             if isinstance(m, UDT.Field):
-                yield current_offset
+                starts += (current_offset,)
             current_offset += m.size
-
-    def replacable_with(self, other: "TypeInfo") -> bool:
-        if self.size != other.size:
-            return False
-        if isinstance(other, (Array, Struct, Union)):
-            return set(self.start_offsets()).issubset(
-                set(other.start_offsets())
-            ) and set(self.accessible_offsets()).issubset(
-                set(other.accessible_offsets())
-            )
-        return list(self.start_offsets()) == [0]
+        return starts
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "Struct":
@@ -510,28 +512,19 @@ class Union(UDT):
         """Returns True if this Union has padding"""
         return self.padding is not None
 
-    def accessible_offsets(self) -> t.Iterable[int]:
+    def accessible_offsets(self) -> t.Tuple[int, ...]:
         """Offsets accessible in this Union"""
-        return range(max(m.size for m in self.members))
+        return tuple(range(max(m.size for m in self.members)))
 
-    def inaccessible_offsets(self) -> t.Iterable[int]:
+    def inaccessible_offsets(self) -> t.Tuple[int, ...]:
         """Offsets inaccessible in this Union"""
         if not self.has_padding():
-            return []
-        return range(max(m.size for m in self.members), self.size)
+            return tuple()
+        return tuple(range(max(m.size for m in self.members), self.size))
 
-    def start_offsets(self) -> t.Iterable[int]:
+    def start_offsets(self) -> t.Tuple[int, ...]:
         """Returns the start offsets elements in this Union"""
-        return [0]
-
-    def replacable_with(self, other: "TypeInfo") -> bool:
-        if self.size != other.size:
-            return False
-        if isinstance(other, (Struct, Union)):
-            return set(self.accessible_offsets()).issubset(
-                set(other.accessible_offsets())
-            )
-        return True
+        return (0,)
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "Union":
@@ -600,6 +593,10 @@ class FunctionPointer(TypeInfo):
 
     def __init__(self, name: str):
         self.name = name
+
+    def replacable_with(self, other: t.Tuple["TypeInfo", ...]) -> bool:
+        # No function pointers are replacable for now
+        return False
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, str]) -> "FunctionPointer":
