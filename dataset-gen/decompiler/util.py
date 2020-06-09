@@ -14,6 +14,30 @@ def get_expr_name(expr):
     return name
 
 
+def get_var_id(varname: str) -> str:
+    try:
+        _, var_id, _, _ = varname.split("@@")
+    except ValueError:
+        raise ValueError(f"malformed name {varname}")
+    return var_id
+
+
+def get_old_name(varname: str) -> str:
+    try:
+        _, _, old, _ = varname.split("@@")
+    except ValueError:
+        raise ValueError(f"malformed name {varname}")
+    return old
+
+
+def get_new_name(varname: str) -> str:
+    try:
+        _, _, _, new = varname.split("@@")
+    except ValueError:
+        raise ValueError(f"malformed name {varname}")
+    return new
+
+
 class CFuncTree:
     def __init__(self):
         self.next_node_num = 0
@@ -81,20 +105,6 @@ class CFuncTree:
             parts.append(tstr if tstr else "?")
         return "".join(parts)
 
-    # Takes a cexpr.type and returns info about it
-    def serialize_type(self, t):
-        info = {
-            "name": t._print(),
-            "score": t.calc_score(),
-        }
-        if not t.is_decl_void():
-            info["size"] = t.get_size()
-            if t.get_size() != t.get_unpadded_size():
-                info["unpadded_size"] = t.get_unpadded_size()
-        if t.get_udt_nmembers() >= 0:
-            info["udt_nmembers"] = t.get_udt_nmembers()
-        return info
-
     def json_tree(self, n):
         """Puts the tree in a format suitable for JSON"""
         # Each node has a unique ID
@@ -102,9 +112,6 @@ class CFuncTree:
         item = self.items[n]
         # This is the type of ctree node
         node_info["node_type"] = ida_hexrays.get_ctype_name(item.op)
-        # This is the type of the data (in C-land)
-        if item.is_expr() and not item.cexpr.type.empty():
-            node_info["type"] = self.serialize_type(item.cexpr.type)
         node_info["address"] = f"{item.ea:08x}"
         if item.ea == UNDEF_ADDR:
             node_info["parent_address"] = f"{self.get_pred_ea(n):08x}"
@@ -120,12 +127,9 @@ class CFuncTree:
                 {"name": get_expr_name(item.cexpr), "ref_width": item.cexpr.refwidth}
             )
         elif item.op == ida_hexrays.cot_var:
-            _, var_id, old_name, new_name = get_expr_name(item.cexpr).split("@@")
             node_info.update(
                 {
-                    "var_id": var_id,
-                    "old_name": old_name,
-                    "new_name": new_name,
+                    "var_id": get_var_id(get_expr_name(item.cexpr)),
                     "ref_width": item.cexpr.refwidth,
                 }
             )

@@ -24,31 +24,119 @@ class TypeLib:
     dictionary-like access to TypeInfo.
     """
 
-    def __init__(self, data: t.Optional[t.DefaultDict[int, t.Set["TypeInfo"]]] = None):
+    class _Entry:
+        """Entry in the TypeLib. Each entry is a sorted list of TypeInfo
+        together with its frequency of appearance.
+        """
+
+        # Named tuple?
+
+        def __init__(
+            self, contents: t.Optional[t.List[t.Tuple[int, "TypeInfo"]]] = None
+        ) -> None:
+            self._contents: t.List[t.Tuple[int, "TypeInfo"]]
+            if contents is not None:
+                self._contents = contents
+            else:
+                self._contents = list()
+
+        @property
+        def frequency(self) -> int:
+            """The total frequency for this entry"""
+            return sum(c for c, _ in self._contents)
+
+        def add(self, item: "TypeInfo") -> bool:
+            """Add an item, increasing frequency if it already exists.
+            Returns True if the item already existed.
+            """
+            update_idx: t.Optional[int] = None
+            freq: int
+            type_info: "TypeInfo"
+            print(self._contents)
+            print(type(self._contents))
+            print(list(enumerate(self._contents)))
+            for idx, (_, type_info) in enumerate(self._contents):
+                if type_info == item:
+                    update_idx = idx
+                    break
+            if update_idx is not None:
+                print(self._contents)
+                print(self._contents[update_idx])
+                freq, _ = self._contents[update_idx]
+                self._contents[update_idx] = (freq + 1, item)
+                self._sort()
+                return True
+            else:
+                # Don't need to sort if we're just appending with freq 1
+                self._contents.append((1, item))
+                return False
+
+        def get_freq(self, item: "TypeInfo") -> t.Optional[int]:
+            """Get the frequency of an item, None if it does not exist"""
+            for freq, type_info in self._contents:
+                if type_info == item:
+                    return freq
+            return None
+
+        def _sort(self) -> None:
+            """Sorts the internal list by frequency"""
+            self._contents.sort(reverse=True, key=lambda i: i[0])
+
+        @classmethod
+        def _from_json(
+            cls, d: t.Dict[str, t.Union[str, t.List[t.List[int, "TypeInfo"]]]]
+        ) -> "TypeLib._Entry":
+            print(f"HEY HERE's THE DICT: {d}")
+            c = d["c"]
+            # Check the type (mostly for mypy)
+            if isinstance(c, str):
+                raise ValueError
+            contents: t.Union[str, t.List[t.Tuple[int, "TypeInfo"]]] = c
+            return cls(contents)
+
+        def _to_json(
+            self,
+        ) -> t.Dict[str, t.Union[str, t.List[t.Tuple[int, "TypeInfo"]]]]:
+            return {
+                "c": self._contents,
+                "T": "E",
+            }
+
+        # def __contains__(self, item: "TypeInfo") -> bool:
+        #     for type_info in self:
+        #         if type_info == item:
+        #             return True
+        #     return False
+
+        # def __iter__(self) -> t.Iterator["TypeInfo"]:
+        #     for _, type_info in self._contents:
+        #         yield type_info
+
+        # def __reversed__(self) -> t.Iterator["TypeInfo"]:
+        #     for _, type_info in reversed(self._contents):
+        #         yield type_info
+
+        def __str__(self) -> str:
+            return f"{[(freq, str(info)) for freq, info in self._contents]}"
+
+    def __init__(self, data: t.Optional[t.DefaultDict[int, "TypeLib._Entry"]] = None):
         if data is None:
-            self._data: t.DefaultDict[int, t.Set["TypeInfo"]] = defaultdict(set)
+            self._data: t.DefaultDict[int, "TypeLib._Entry"] = defaultdict(
+                TypeLib._Entry
+            )
         else:
             self._data = data
 
-    def add_ida_type(
-        self, typ: "ida_typeinf.tinfo_t", worklist: t.Optional[t.Set[str]] = None
-    ) -> None:
-        """Adds an element to the TypeLib by parsing an IDA tinfo_t object"""
-
-        if worklist is None:
-            worklist = set()
-        if typ.dstr() in worklist or typ.is_void():
-            return
-        worklist.add(typ.dstr())
-
-        new_type: TypeInfo
+    @staticmethod
+    def parse_ida_type(typ: "ida_typeinf.tinfo_t") -> "TypeInfo":
+        """Parses an IDA tinfo_t object"""
+        if typ.is_void():
+            return Void()
         if typ.is_funcptr() or "(" in typ.dstr():
-            new_type = FunctionPointer(name=typ.dstr())
-        elif typ.is_decl_ptr():
-            new_type = Pointer(typ.get_pointed_object().dstr())
-            self.add_ida_type(typ.get_pointed_object(), worklist)
-        elif typ.is_array():
-            self.add_ida_type(typ.get_array_element(), worklist)
+            return FunctionPointer(name=typ.dstr())
+        if typ.is_decl_ptr():
+            return Pointer(typ.get_pointed_object().dstr())
+        if typ.is_array():
             # To get array type info, first create an
             # array_type_data_t then call get_array_details to
             # populate it. Unions and structs follow a similar
@@ -58,12 +146,12 @@ class TypeLib:
             nelements = array_info.nelems
             element_size = array_info.elem_type.get_size()
             element_type = array_info.elem_type.dstr()
-            new_type = Array(
+            return Array(
                 nelements=nelements,
                 element_size=element_size,
                 element_type=element_type,
             )
-        elif typ.is_udt():
+        if typ.is_udt():
             udt_info = ida_typeinf.udt_type_data_t()
             typ.get_udt_details(udt_info)
             name = typ.dstr()
@@ -80,20 +168,19 @@ class TypeLib:
                     typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
                     largest_size = max(largest_size, member.size)
                     type_name = member.type.dstr()
-                    self.add_ida_type(member.type, worklist)
                     members.append(
                         UDT.Field(
                             name=member.name, size=member.size, type_name=type_name
                         )
                     )
                 end_padding = size - (largest_size // 8)
-                if end_padding > 0:
-                    new_type = Union(
-                        name=name, members=members, padding=UDT.Padding(end_padding),
-                    )
-                else:
-                    new_type = Union(name=name, members=members)
-            elif typ.is_struct():
+                if end_padding == 0:
+                    return Union(name=name, members=members)
+                return Union(
+                    name=name, members=members, padding=UDT.Padding(end_padding),
+                )
+            else:
+                # UDT is a struct
                 layout: t.List[t.Union[UDT.Member, "Struct", "Union"]] = []
                 next_offset = 0
                 for n in range(nmembers):
@@ -106,7 +193,6 @@ class TypeLib:
                         layout.append(UDT.Padding((member.offset - next_offset) // 8))
                     next_offset = member.offset + member.size
                     type_name = member.type.dstr()
-                    self.add_ida_type(member.type, worklist)
                     layout.append(
                         UDT.Field(
                             name=member.name, size=member.size, type_name=type_name
@@ -116,10 +202,39 @@ class TypeLib:
                 end_padding = size - next_offset // 8
                 if end_padding > 0:
                     layout.append(UDT.Padding(end_padding))
-                new_type = Struct(name=name, layout=layout)
-        else:
-            new_type = TypeInfo(name=typ.dstr(), size=typ.get_size())
-        self._data[new_type.size].add(new_type)
+                return Struct(name=name, layout=layout)
+        return TypeInfo(name=typ.dstr(), size=typ.get_size())
+
+    def add_ida_type(
+        self, typ: "ida_typeinf.tinfo_t", worklist: t.Optional[t.Set[str]] = None
+    ) -> None:
+        """Adds an element to the TypeLib by parsing an IDA tinfo_t object"""
+
+        if worklist is None:
+            worklist = set()
+        if typ.dstr() in worklist or typ.is_void():
+            return
+        worklist.add(typ.dstr())
+        new_type: TypeInfo = self.parse_ida_type(typ)
+        # If this type isn't a duplicate, break down the subtypes
+        if not self._data[new_type.size].add(new_type):
+            if typ.is_decl_ptr() and not (typ.is_funcptr() or "(" in typ.dstr()):
+                self.add_ida_type(typ.get_pointed_object(), worklist)
+            elif typ.is_array():
+                self.add_ida_type(typ.get_array_element(), worklist)
+            elif typ.is_udt():
+                udt_info = ida_typeinf.udt_type_data_t()
+                typ.get_udt_details(udt_info)
+                name = typ.dstr()
+                size = udt_info.total_size
+                nmembers = typ.get_udt_nmembers()
+                for n in range(nmembers):
+                    member = ida_typeinf.udt_member_t()
+                    # To get the nth member set OFFSET to n and tell find_udt_member
+                    # to search by index.
+                    member.offset = n
+                    typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
+                    self.add_ida_type(member.type, worklist)
 
     def get_replacements(
         self, types: t.Tuple["TypeInfo", ...]
@@ -128,18 +243,19 @@ class TypeLib:
         raise NotImplementedError
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.List["TypeInfo"]]) -> "TypeLib":
-        data: t.DefaultDict[int, t.Set["TypeInfo"]] = defaultdict(set)
+    def _from_json(cls, d: t.Dict[str, t.List[t.Tuple[int, "TypeInfo"]]]) -> "TypeLib":
+        data: t.DefaultDict[int, "TypeLib._Entry"] = defaultdict(TypeLib._Entry)
         # Convert lists of types into sets
-        for key, types in d.items():
+        for key, lib_entry in d.items():
             if key != "T":
-                data[int(key)] = set(types)
+                data[int(key)] = TypeLib._Entry(lib_entry)
         return cls(data)
 
-    def _to_json(self) -> t.Dict[str, t.Union[int, t.Set["TypeInfo"]]]:
+    def _to_json(self) -> t.Dict[str, t.Union[int, "TypeLib._Entry"]]:
         """Encodes as JSON
 
         The 'T' field encodes which TypeInfo class is represented by this JSON:
+            E: TypeLib._Entry
             0: TypeLib
             1: TypeInfo
             2: Array
@@ -161,7 +277,7 @@ class TypeLib:
             7: Void
             8: Function Pointer
         """
-        data: t.Dict[str, t.Union[int, t.Set["TypeInfo"]]] = {
+        data: t.Dict[str, t.Union[int, "TypeLib._Entry"]] = {
             str(key): value for key, value in self._data.items()
         }
         data["T"] = 0
@@ -170,19 +286,16 @@ class TypeLib:
     def __contains__(self, key: int) -> bool:
         return key in self._data
 
-    def __getitem__(self, key: int) -> t.Set["TypeInfo"]:
+    def __getitem__(self, key: int) -> "TypeLib._Entry":
         return self._data[key]
 
-    def __setitem__(self, key: int, item: t.Set["TypeInfo"]) -> None:
+    def __setitem__(self, key: int, item: "TypeLib._Entry") -> None:
         self._data[key] = item
 
     def __str__(self) -> str:
         ret = ""
         for n in sorted(self._data.keys()):
-            ret += f"{n}: ["
-            for t in self._data[n]:
-                ret += f"{t}, "
-            ret += f"]\n"
+            ret += f"{n}: {self._data[n]}\n"
         return ret
 
 
@@ -215,8 +328,8 @@ class TypeInfo:
         other_inaccessible: t.Tuple[int, ...] = tuple()
         for other in others:
 
-            def displace(offsets):
-                return [off + cur_offset for off in offsets]
+            def displace(offsets: t.Tuple[int, ...]) -> t.Tuple[int, ...]:
+                return tuple(off + cur_offset for off in offsets)
 
             other_start += displace(other.start_offsets())
             other_accessible += displace(other.accessible_offsets())
@@ -620,7 +733,7 @@ class FunctionPointer(TypeInfo):
 class TypeLibCodec:
     """Encoder/Decoder functions"""
 
-    CodecTypes = t.Union["TypeLib", "TypeInfo", "UDT.Member"]
+    CodecTypes = t.Union["TypeLib", "TypeLib._Entry", "TypeInfo", "UDT.Member"]
 
     @staticmethod
     def decode(encoded: str) -> CodecTypes:
@@ -628,9 +741,15 @@ class TypeLibCodec:
 
         def read_metadata(d: t.Dict[str, t.Any]) -> TypeLibCodec.CodecTypes:
             classes: t.Dict[
-                int,
-                t.Union[t.Type["TypeLib"], t.Type["TypeInfo"], t.Type["UDT.Member"]],
+                t.Union[int, str],
+                t.Union[
+                    t.Type["TypeLib"],
+                    t.Type["TypeLib._Entry"],
+                    t.Type["TypeInfo"],
+                    t.Type["UDT.Member"],
+                ],
             ] = {
+                "E": TypeLib._Entry,
                 0: TypeLib,
                 1: TypeInfo,
                 2: Array,

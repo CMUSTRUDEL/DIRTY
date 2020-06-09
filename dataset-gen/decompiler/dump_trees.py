@@ -1,5 +1,6 @@
 from collections import defaultdict
-from util import UNDEF_ADDR, CFuncTree, CFuncTreeBuilder, get_expr_name
+from util import UNDEF_ADDR, CFuncTree, CFuncTreeBuilder, get_expr_name, get_var_id, get_old_name, get_new_name
+from typeinfo import TypeLib, TypeLibCodec
 import idaapi
 import idautils
 import ida_auto
@@ -98,7 +99,14 @@ def func(ea):
     # print([(v.name, v.is_stk_var(), v.get_stkoff(), v.has_user_name, v.is_noptr_var) for v in cfunc.get_lvars()])
     cfunc.build_c_tree()
     function_info["user_vars"] = fun_locals[ea]
-    function_info["lvars"] = [v.name for v in cfunc.get_lvars() if v.name != ""]
+    function_info["lvars"] = {
+        get_var_id(v.name): {
+            "old": get_old_name(v.name),
+            "new": get_new_name(v.name),
+            "type": TypeLib.parse_ida_type(v.type()),
+        }
+        for v in cfunc.get_lvars() if v.name != ""
+    }
     new_tree = CFuncTree()
     new_builder = CFuncTreeBuilder(new_tree)
     new_builder.apply_to(cfunc.body, None)
@@ -122,7 +130,7 @@ class collect_vars(custom_action_handler):
         file_name = os.path.join(os.environ["OUTPUT_DIR"], os.environ["PREFIX"])
         jsonl_file_name = f"{file_name}.jsonl"
         with open(jsonl_file_name, "w+") as jsonl_file:
-            with jsonlines.Writer(jsonl_file) as writer:
+            with jsonlines.Writer(jsonl_file, dumps=TypeLibCodec.encode) as writer:
                 for ea in fun_locals:
                     try:
                         writer.write(func(ea))
@@ -130,6 +138,7 @@ class collect_vars(custom_action_handler):
                         print("Decompilation failure")
                         continue
                     except ValueError as e:
+                        print(func(ea))
                         print(e)
                         continue
         print("Vars collected.")
