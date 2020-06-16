@@ -1,5 +1,13 @@
 from collections import defaultdict
-from util import UNDEF_ADDR, CFuncTree, CFuncTreeBuilder, get_expr_name, get_var_id, get_old_name, get_new_name
+from util import (
+    UNDEF_ADDR,
+    CFuncTree,
+    CFuncTreeBuilder,
+    get_expr_name,
+    get_var_id,
+    get_old_name,
+    get_new_name,
+)
 from typeinfo import TypeLib, TypeLibCodec
 import idaapi
 import idautils
@@ -105,7 +113,8 @@ def func(ea):
             "new": get_new_name(v.name),
             "type": TypeLib.parse_ida_type(v.type()),
         }
-        for v in cfunc.get_lvars() if v.name != ""
+        for v in cfunc.get_lvars()
+        if v.name != ""
     }
     new_tree = CFuncTree()
     new_builder = CFuncTreeBuilder(new_tree)

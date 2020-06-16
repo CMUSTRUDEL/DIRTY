@@ -24,105 +24,110 @@ class TypeLib:
     dictionary-like access to TypeInfo.
     """
 
-    class _Entry:
-        """Entry in the TypeLib. Each entry is a sorted list of TypeInfo
-        together with its frequency of appearance.
+    class Entry(t.NamedTuple):
+        """A single entry in the TypeLib"""
+
+        frequency: int
+        typeinfo: "TypeInfo"
+
+        def __eq__(self, other: t.Any) -> bool:
+            if isinstance(other, TypeLib.Entry):
+                return other.typeinfo == self.typeinfo
+            return False
+
+        def __repr__(self) -> str:
+            return f"({self.frequency}, {str(self.typeinfo)})"
+
+    class EntryList(list):
+        """A list of entries in the TypeLib. Each is list of Entries sorted by
+        frequency.
         """
 
-        # Named tuple?
-
         def __init__(
-            self, contents: t.Optional[t.List[t.Tuple[int, "TypeInfo"]]] = None
+            self, data: t.Optional[t.List["TypeLib.Entry"]] = None
         ) -> None:
-            self._contents: t.List[t.Tuple[int, "TypeInfo"]]
-            if contents is not None:
-                self._contents = contents
+            self._data: t.List["TypeLib.Entry"]
+            if data is not None:
+                self._data = data
             else:
-                self._contents = list()
+                self._data = list()
 
         @property
         def frequency(self) -> int:
-            """The total frequency for this entry"""
-            return sum(c for c, _ in self._contents)
+            """The total frequency for this entry list"""
+            return sum(c.frequency for c in self._data)
 
         def add(self, item: "TypeInfo") -> bool:
             """Add an item, increasing frequency if it already exists.
             Returns True if the item already existed.
             """
             update_idx: t.Optional[int] = None
-            freq: int
-            type_info: "TypeInfo"
-            print(self._contents)
-            print(type(self._contents))
-            print(list(enumerate(self._contents)))
-            for idx, (_, type_info) in enumerate(self._contents):
-                if type_info == item:
+            frequency: int
+            typeinfo: "TypeInfo"
+            for idx, entry in enumerate(self._data):
+                if entry.typeinfo == item:
                     update_idx = idx
                     break
             if update_idx is not None:
-                print(self._contents)
-                print(self._contents[update_idx])
-                freq, _ = self._contents[update_idx]
-                self._contents[update_idx] = (freq + 1, item)
+                old_entry = self._data[update_idx]
+                self._data[update_idx] = TypeLib.Entry(
+                    frequency=old_entry.frequency + 1, typeinfo=old_entry.typeinfo
+                )
                 self._sort()
                 return True
             else:
                 # Don't need to sort if we're just appending with freq 1
-                self._contents.append((1, item))
+                self._data.append(TypeLib.Entry(frequency=1, typeinfo=item))
                 return False
 
         def get_freq(self, item: "TypeInfo") -> t.Optional[int]:
             """Get the frequency of an item, None if it does not exist"""
-            for freq, type_info in self._contents:
-                if type_info == item:
-                    return freq
+            for entry in self:
+                if entry.typeinfo == item:
+                    return entry.frequency
             return None
 
         def _sort(self) -> None:
             """Sorts the internal list by frequency"""
-            self._contents.sort(reverse=True, key=lambda i: i[0])
+            self._data.sort(reverse=True, key=lambda entry: entry.frequency)
 
         @classmethod
         def _from_json(
-            cls, d: t.Dict[str, t.Union[str, t.List[t.List[int, "TypeInfo"]]]]
-        ) -> "TypeLib._Entry":
-            print(f"HEY HERE's THE DICT: {d}")
-            c = d["c"]
-            # Check the type (mostly for mypy)
-            if isinstance(c, str):
-                raise ValueError
-            contents: t.Union[str, t.List[t.Tuple[int, "TypeInfo"]]] = c
-            return cls(contents)
+            cls, l: t.List[t.List[t.Any]]
+        ) -> "TypeLib.EntryList":
+            data: t.List["TypeLib.Entry"] = list()
+            for (frequency, typeinfo) in l:
+                data.append(TypeLib.Entry(frequency, typeinfo))
+            return cls(data)
 
-        def _to_json(
-            self,
-        ) -> t.Dict[str, t.Union[str, t.List[t.Tuple[int, "TypeInfo"]]]]:
+        def _to_json(self,) -> t.Dict[str, t.Union[str, t.List["TypeLib.Entry"]]]:
             return {
-                "c": self._contents,
+                "d": self._data,
                 "T": "E",
             }
 
-        # def __contains__(self, item: "TypeInfo") -> bool:
-        #     for type_info in self:
-        #         if type_info == item:
-        #             return True
-        #     return False
+        def __iter__(self) -> t.Iterable["TypeLib.Entry"]:
+            for entry in self._data:
+                yield entry
 
-        # def __iter__(self) -> t.Iterator["TypeInfo"]:
-        #     for _, type_info in self._contents:
-        #         yield type_info
+        def __len__(self) -> int:
+            return len(self._data)
 
-        # def __reversed__(self) -> t.Iterator["TypeInfo"]:
-        #     for _, type_info in reversed(self._contents):
-        #         yield type_info
+        def __getitem__(self, i: int) -> "TypeLib.Entry":
+            return self._data[i]
 
-        def __str__(self) -> str:
-            return f"{[(freq, str(info)) for freq, info in self._contents]}"
+        def __setitem__(self, i: int, v: "TypeLib.Entry") -> None:
+            self._data[i] = v
 
-    def __init__(self, data: t.Optional[t.DefaultDict[int, "TypeLib._Entry"]] = None):
+        def __repr__(self) -> str:
+            return f"{[(entry) for entry in self._data]}"
+
+    def __init__(
+        self, data: t.Optional[t.DefaultDict[int, "TypeLib.EntryList"]] = None
+    ):
         if data is None:
-            self._data: t.DefaultDict[int, "TypeLib._Entry"] = defaultdict(
-                TypeLib._Entry
+            self._data: t.DefaultDict[int, "TypeLib.EntryList"] = defaultdict(
+                TypeLib.EntryList
             )
         else:
             self._data = data
@@ -243,19 +248,20 @@ class TypeLib:
         raise NotImplementedError
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.List[t.Tuple[int, "TypeInfo"]]]) -> "TypeLib":
-        data: t.DefaultDict[int, "TypeLib._Entry"] = defaultdict(TypeLib._Entry)
+    def _from_json(cls, d: t.Dict[str, t.Union[int, t.Dict[str, "TypeLib.EntryList"]]]) -> "TypeLib":
+        data: t.DefaultDict[int, "TypeLib.EntryList"] = defaultdict(TypeLib.EntryList)
         # Convert lists of types into sets
         for key, lib_entry in d.items():
-            if key != "T":
-                data[int(key)] = TypeLib._Entry(lib_entry)
+            if key == "T":
+                continue
+            data[int(key)] = TypeLib.EntryList._from_json(lib_entry)
         return cls(data)
 
-    def _to_json(self) -> t.Dict[str, t.Union[int, "TypeLib._Entry"]]:
+    def _to_json(self) -> t.Dict[str, t.Union[int, t.Dict[int, "TypeLib.EntryList"]]]:
         """Encodes as JSON
 
         The 'T' field encodes which TypeInfo class is represented by this JSON:
-            E: TypeLib._Entry
+            E: TypeLib.EntryList
             0: TypeLib
             1: TypeInfo
             2: Array
@@ -277,19 +283,17 @@ class TypeLib:
             7: Void
             8: Function Pointer
         """
-        data: t.Dict[str, t.Union[int, "TypeLib._Entry"]] = {
-            str(key): value for key, value in self._data.items()
-        }
-        data["T"] = 0
-        return data
+        encoded = {str(key): val for key, val in self._data.items()}
+        encoded["T"] = 0
+        return encoded
 
     def __contains__(self, key: int) -> bool:
         return key in self._data
 
-    def __getitem__(self, key: int) -> "TypeLib._Entry":
+    def __getitem__(self, key: int) -> "TypeLib.EntryList":
         return self._data[key]
 
-    def __setitem__(self, key: int, item: "TypeLib._Entry") -> None:
+    def __setitem__(self, key: int, item: "TypeLib.EntryList") -> None:
         self._data[key] = item
 
     def __str__(self) -> str:
@@ -733,7 +737,7 @@ class FunctionPointer(TypeInfo):
 class TypeLibCodec:
     """Encoder/Decoder functions"""
 
-    CodecTypes = t.Union["TypeLib", "TypeLib._Entry", "TypeInfo", "UDT.Member"]
+    CodecTypes = t.Union["TypeLib", "TypeLib.EntryList", "TypeInfo", "UDT.Member"]
 
     @staticmethod
     def decode(encoded: str) -> CodecTypes:
@@ -744,12 +748,12 @@ class TypeLibCodec:
                 t.Union[int, str],
                 t.Union[
                     t.Type["TypeLib"],
-                    t.Type["TypeLib._Entry"],
+                    t.Type["TypeLib.EntryList"],
                     t.Type["TypeInfo"],
                     t.Type["UDT.Member"],
                 ],
             ] = {
-                "E": TypeLib._Entry,
+                "E": TypeLib.EntryList,
                 0: TypeLib,
                 1: TypeInfo,
                 2: Array,
