@@ -52,7 +52,7 @@ class Collector(ida_kernwin.action_handler_t):
             # - Argument or Local (A or L)
             # - Location
             # - Old name
-            new_names: Dict[int, str]
+            new_names: Dict[int, str] = dict()
             for idx, v in enumerate(cfunc.get_lvars()):
                 tag = "A" if v.is_arg_var else "L"
                 location: str
@@ -63,7 +63,7 @@ class Collector(ida_kernwin.action_handler_t):
                 if v.is_reg_var():
                     location = f"R{v.get_reg1()}"
                 new_names[idx] = f"@@{tag}@@{location}@@{v.name}"
-            for idx in to_rename.keys():
+            for idx in new_names.keys():
                 cfunc.get_lvars()[idx].name = new_names[idx]
 
 

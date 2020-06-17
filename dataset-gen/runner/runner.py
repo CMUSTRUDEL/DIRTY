@@ -7,11 +7,6 @@ import tempfile
 from tqdm import tqdm
 
 
-class NoVarsError(Exception):
-    """Exception raised when no variables are defined"""
-    pass
-
-
 class Timer:
     def __init__(self, num_files):
         self._binary = ''
@@ -79,25 +74,19 @@ class TimedRun:
         self.timer = timer
         timer.binary = binary
         self.env = env
-        self.collected_vars = None
         self.functions = None
         self.orig = None
         self.stripped = None
 
     def __enter__(self):
         self.start_time = datetime.datetime.now()
-        self.collected_vars = tempfile.NamedTemporaryFile()
         self.functions = tempfile.NamedTemporaryFile()
         self.orig = tempfile.NamedTemporaryFile()
         self.stripped = tempfile.NamedTemporaryFile()
-        self.env['COLLECTED_VARS'] = self.collected_vars.name
         self.env['FUNCTIONS'] = self.functions.name
-        # print(f"File {self.timer.runs + 1} of {self.timer.num_files}")
-        # print(f"Started at {self.start_time}")
         return self
 
     def __exit__(self, type, value, traceback):
-        self.collected_vars.close()
         self.functions.close()
         self.orig.close()
         self.stripped.close()
@@ -107,8 +96,6 @@ class TimedRun:
             self.timer.message("Timed out")
         elif type is pickle.UnpicklingError:
             self.timer.message("Unpickling error")
-        elif type is NoVarsError:
-            self.timer.message("No vars collected")
         elif type is not None:
             self.timer.message(f"{Type}: value")
             return False
@@ -191,11 +178,6 @@ class Runner:
                     subprocess.check_output(['cp', file_path, r.orig.name])
                     # Timeout after 30s for the collect run
                     self.run_decompiler(r.orig.name, self.COLLECT, timeout=30)
-                    try:
-                        if not pickle.load(r.collected_vars):
-                            raise NoVarsError
-                    except EOFError:
-                        raise NoVarsError
                     # Dump trees
                     subprocess.call(['cp', file_path, r.stripped.name])
                     subprocess.call(['strip', '--strip-debug', r.stripped.name])
