@@ -7,7 +7,7 @@ import json
 UNDEF_ADDR = 0xFFFFFFFFFFFFFFFF
 
 
-def get_expr_name(expr):
+def get_expr_name(expr) -> str:
     name = expr.print1(None)
     name = ida_lines.tag_remove(name)
     name = ida_pro.str2user(name)

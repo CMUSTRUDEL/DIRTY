@@ -1,4 +1,6 @@
 from collections import defaultdict
+from typing import Dict, List
+
 import idaapi
 import idautils
 import ida_auto
@@ -11,6 +13,7 @@ import pickle
 import os
 import re
 
+from functioninfo import FunctionInfo
 from typeinfo import TypeLib, TypeLibCodec
 from util import (
     UNDEF_ADDR,
@@ -22,61 +25,46 @@ from util import (
     get_new_name,
 )
 
-fun_locals = dict()
-varmap = dict()
-# Dictionary mapping variable ids to (orig, renamed) pairs
-varnames = dict()
-var_id = 0
-sentinel_vars = re.compile("@@VAR_[0-9]+")
+class Collector(ida_kernwin.action_handler_t):
+    def __init__(self):
+        # Load function info
+        with open(os.environ["FUNCTIONS"], "rb") as function_fh:
+            self.functions: Dict[int, FunctionInfo] = pickle.load(function_fh)
+        ida_kernwin.action_handler_t.__init__(self)
 
+    def activate(self, ctx) -> int:
+        """Renames variables"""
+        print("Renaming variables.")
 
-class RenamedTreeBuilder(CFuncTreeBuilder):
-    def __init__(self, tree, func, addresses):
-        self.func = func
-        self.addresses = addresses
-        super(RenamedTreeBuilder, self).__init__(tree)
+        # Decompile
+        for ea, func_info in self.functions.items():
+            # Decompile
+            f = idaapi.get_func(ea)
+            cfunc = None
+            try:
+                cfunc = idaapi.decompile(f)
+            except ida_hexrays.DecompilationFailure:
+                continue
+            if cfunc is None:
+                continue
 
-    def visit_expr(self, e):
-        global var_id
-        if e.op is ida_hexrays.cot_var:
-            # Save original name of variable
-            original_name = get_expr_name(e)
-            if not sentinel_vars.match(original_name):
-                # Get new name of variable
-                addresses = frozenset(self.addresses[original_name])
-                if addresses in varmap and varmap[addresses] != "::NONE::":
-                    new_name = varmap[addresses]
-                else:
-                    new_name = original_name
-                # Save names
-                varnames[var_id] = (original_name, new_name)
-                # Rename variables to @@VAR_[id]@@[orig name]@@[new name]
-                self.func.get_lvars()[
-                    e.v.idx
-                ].name = f"@@VAR_{var_id}@@{original_name}@@{new_name}"
-                var_id += 1
-        return self.process(e)
-
-
-class AddressCollector:
-    def __init__(self, ct):
-        self.ct = ct
-        self.addresses = defaultdict(set)
-
-    def collect(self):
-        for item in self.ct.items:
-            if item.op is ida_hexrays.cot_var:
-                name = get_expr_name(item)
-                if item.ea != UNDEF_ADDR:
-                    self.addresses[name].add(item.ea)
-                else:
-                    item_id = [
-                        item_id for (i, item_id) in self.ct.reverse if i == item
-                    ][0]
-                    # item_id = self.ct.reverse[item]
-                    ea = self.ct.get_pred_ea(item_id)
-                    if ea != UNDEF_ADDR:
-                        self.addresses[name].add(ea)
+            # Rename variables to keep track of:
+            # - Argument or Local (A or L)
+            # - Location
+            # - Old name
+            new_names: Dict[int, str]
+            for idx, v in enumerate(cfunc.get_lvars()):
+                tag = "A" if v.is_arg_var else "L"
+                location: str
+                if v.is_stk_var():
+                    corrected = v.get_stkoff() - cfunc.get_stkoff_delta()
+                    offset = f.frsize - corrected
+                    location = f"S{offset}"
+                if v.is_reg_var():
+                    location = f"R{v.get_reg1()}"
+                new_names[idx] = f"@@{tag}@@{location}@@{v.name}"
+            for idx in to_rename.keys():
+                cfunc.get_lvars()[idx].name = new_names[idx]
 
 
 def func(ea):
@@ -97,9 +85,7 @@ def func(ea):
     ct = CFuncTree()
     tb = CFuncTreeBuilder(ct)
     tb.apply_to(cfunc.body, None)
-    ac = AddressCollector(ct)
-    ac.collect()
-    rt = RenamedTreeBuilder(ct, cfunc, ac.addresses)
+    rt = RenamedTreeBuilder(ct, cfunc)
     rt.apply_to(cfunc.body, None)
 
     # Create tree from collected names
@@ -129,51 +115,6 @@ def func(ea):
     return function_info
 
 
-class custom_action_handler(ida_kernwin.action_handler_t):
-    def __init__(self):
-        ida_kernwin.action_handler_t.__init__(self)
-
-
-class collect_vars(custom_action_handler):
-    def activate(self, ctx):
-        print("Collecting vars.")
-        file_name = os.path.join(os.environ["OUTPUT_DIR"], os.environ["PREFIX"])
-        jsonl_file_name = f"{file_name}.jsonl"
-        with open(jsonl_file_name, "w+") as jsonl_file:
-            with jsonlines.Writer(jsonl_file, dumps=TypeLibCodec.encode) as writer:
-                for ea in fun_locals:
-                    try:
-                        writer.write(func(ea))
-                    except ida_hexrays.DecompilationFailure:
-                        print("Decompilation failure")
-                        continue
-                    except ValueError as e:
-                        print(func(ea))
-                        print(e)
-                        continue
-        print("Vars collected.")
-        return 1
-
-
-def main():
-    global renamed_prefix
-    global varmap
-    global fun_locals
-    global varnames
-    renamed_prefix = os.path.join(
-        os.environ["OUTPUT_DIR"], "functions", os.environ["PREFIX"]
-    )
-    # Load collected variables and function locals
-    with open(os.environ["COLLECTED_VARS"], "rb") as vars_fh, open(
-        os.environ["FUN_LOCALS"], "rb"
-    ) as locals_fh:
-        varmap = pickle.load(vars_fh)
-        fun_locals = pickle.load(locals_fh)
-    # Collect decompilation info
-    cv = collect_vars()
-    cv.activate(None)
-
-
 ida_auto.auto_wait()
 if not idaapi.init_hexrays_plugin():
     idaapi.load_plugin("hexrays")
@@ -182,5 +123,6 @@ if not idaapi.init_hexrays_plugin():
         print("Unable to load Hex-rays")
     else:
         print(f"Hex-rays version {idaapi.get_hexrays_version()} detected")
-main()
+cv = Collector()
+cv.activate(None)
 ida_pro.qexit(0)
