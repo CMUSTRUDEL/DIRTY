@@ -1,14 +1,4 @@
 from collections import defaultdict
-from util import (
-    UNDEF_ADDR,
-    CFuncTree,
-    CFuncTreeBuilder,
-    get_expr_name,
-    get_var_id,
-    get_old_name,
-    get_new_name,
-)
-from typeinfo import TypeLib, TypeLibCodec
 import idaapi
 import idautils
 import ida_auto
@@ -20,6 +10,17 @@ import jsonlines
 import pickle
 import os
 import re
+
+from typeinfo import TypeLib, TypeLibCodec
+from util import (
+    UNDEF_ADDR,
+    CFuncTree,
+    CFuncTreeBuilder,
+    get_expr_name,
+    get_var_id,
+    get_old_name,
+    get_new_name,
+)
 
 fun_locals = dict()
 varmap = dict()

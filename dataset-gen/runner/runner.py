@@ -80,25 +80,25 @@ class TimedRun:
         timer.binary = binary
         self.env = env
         self.collected_vars = None
-        self.fun_locals = None
+        self.functions = None
         self.orig = None
         self.stripped = None
 
     def __enter__(self):
         self.start_time = datetime.datetime.now()
         self.collected_vars = tempfile.NamedTemporaryFile()
-        self.fun_locals = tempfile.NamedTemporaryFile()
+        self.functions = tempfile.NamedTemporaryFile()
         self.orig = tempfile.NamedTemporaryFile()
         self.stripped = tempfile.NamedTemporaryFile()
         self.env['COLLECTED_VARS'] = self.collected_vars.name
-        self.env['FUN_LOCALS'] = self.fun_locals.name
+        self.env['FUNCTIONS'] = self.functions.name
         # print(f"File {self.timer.runs + 1} of {self.timer.num_files}")
         # print(f"Started at {self.start_time}")
         return self
 
     def __exit__(self, type, value, traceback):
         self.collected_vars.close()
-        self.fun_locals.close()
+        self.functions.close()
         self.orig.close()
         self.stripped.close()
         if type is KeyboardInterrupt:
