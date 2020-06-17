@@ -43,9 +43,7 @@ class TypeLib:
         frequency.
         """
 
-        def __init__(
-            self, data: t.Optional[t.List["TypeLib.Entry"]] = None
-        ) -> None:
+        def __init__(self, data: t.Optional[t.List["TypeLib.Entry"]] = None) -> None:
             self._data: t.List["TypeLib.Entry"]
             if data is not None:
                 self._data = data
@@ -92,9 +90,7 @@ class TypeLib:
             self._data.sort(reverse=True, key=lambda entry: entry.frequency)
 
         @classmethod
-        def _from_json(
-            cls, l: t.List[t.List[t.Any]]
-        ) -> "TypeLib.EntryList":
+        def _from_json(cls, l: t.List[t.List[t.Any]]) -> "TypeLib.EntryList":
             data: t.List["TypeLib.Entry"] = list()
             for (frequency, typeinfo) in l:
                 data.append(TypeLib.Entry(frequency, typeinfo))
@@ -248,7 +244,9 @@ class TypeLib:
         raise NotImplementedError
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.Union[int, t.Dict[str, "TypeLib.EntryList"]]]) -> "TypeLib":
+    def _from_json(
+        cls, d: t.Dict[str, t.Union[int, t.Dict[str, "TypeLib.EntryList"]]]
+    ) -> "TypeLib":
         data: t.DefaultDict[int, "TypeLib.EntryList"] = defaultdict(TypeLib.EntryList)
         # Convert lists of types into sets
         for key, lib_entry in d.items():
