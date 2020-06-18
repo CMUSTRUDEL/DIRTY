@@ -3,10 +3,10 @@ from collections import defaultdict
 from typing import DefaultDict, Mapping, Optional, Set
 
 from typeinfo import TypeInfo
-from varinfo import Location, Variable
+from variable import Location, Variable
 
 
-class FunctionInfo:
+class Function:
     """Holds information about a C function
 
     name: name of the function
@@ -22,6 +22,7 @@ class FunctionInfo:
         return_type: TypeInfo,
         arguments: Mapping[Location, Set[Variable]],
         local_vars: Mapping[Location, Set[Variable]],
+        raw_code: Optional[str] = None,
     ):
         self._name = name
         self._return_type = return_type
@@ -60,3 +61,15 @@ class FunctionInfo:
             f"    Arguments:  {dict(self.arguments)}\n"
             f"    Local vars: {dict(self.local_vars)}"
         )
+
+
+def CollectedFunction:
+    """Collected information about a single function. Has both debug and
+    decompiler-generated data.
+    """
+
+    def __init__(self, debug: Function, decompiler: Function, raw_code: str):
+        self.name: str = debug.name
+        self.debug = debug
+        self.decompiler = decompiler
+        self.raw_code = raw_code
