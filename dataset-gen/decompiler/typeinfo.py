@@ -243,6 +243,16 @@ class TypeLib:
         """Given a list of types, get all possible lists of replacements"""
         raise NotImplementedError
 
+
+    def items(self) -> t.ItemsView[int, "TypeLib.EntryList"]:
+        return self._data.items()
+
+    def keys(self) -> t.KeysView[int]:
+        return self._data.keys()
+
+    def values(self) -> t.ValuesView["TypeLib.EntryList"]:
+        return self._data.values()
+
     @classmethod
     def _from_json(
         cls, d: t.Dict[str, t.Union[int, t.Dict[str, "TypeLib.EntryList"]]]
@@ -287,6 +297,10 @@ class TypeLib:
 
     def __contains__(self, key: int) -> bool:
         return key in self._data
+
+    def __iter__(self) -> t.Iterable[int]:
+        for k in self._data.keys():
+            yield k
 
     def __getitem__(self, key: int) -> "TypeLib.EntryList":
         return self._data[key]
