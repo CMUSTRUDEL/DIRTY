@@ -13,7 +13,7 @@ import pickle
 import os
 import re
 
-from functioninfo import FunctionInfo
+from function import Function, CollectedFunction
 from typeinfo import TypeLib, TypeLibCodec
 from util import (
     UNDEF_ADDR,
@@ -29,7 +29,8 @@ class Collector(ida_kernwin.action_handler_t):
     def __init__(self):
         # Load function info
         with open(os.environ["FUNCTIONS"], "rb") as function_fh:
-            self.functions: Dict[int, FunctionInfo] = pickle.load(function_fh)
+            self.debug_functions: Dict[int, Function] = pickle.load(function_fh)
+        self.functions: Dict[int, CollectedFunction]
         ida_kernwin.action_handler_t.__init__(self)
 
     def activate(self, ctx) -> int:
@@ -37,7 +38,7 @@ class Collector(ida_kernwin.action_handler_t):
         print("Renaming variables.")
 
         # Decompile
-        for ea, func_info in self.functions.items():
+        for ea, func_info in self.debug_functions.items():
             # Decompile
             f = idaapi.get_func(ea)
             cfunc = None
@@ -47,6 +48,8 @@ class Collector(ida_kernwin.action_handler_t):
                 continue
             if cfunc is None:
                 continue
+
+
 
             # Rename variables to keep track of:
             # - Argument or Local (A or L)

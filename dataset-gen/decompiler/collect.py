@@ -18,13 +18,13 @@ import yaml
 
 import typeinfo as ti
 
-from functioninfo import FunctionInfo
-from varinfo import Location, Stack, Register, Variable
+from function import Function
+from variable import Location, Stack, Register, Variable
 
 
 class Collector(ida_kernwin.action_handler_t):
     def __init__(self):
-        self.functions: Dict[int, FunctionInfo] = dict()
+        self.functions: Dict[int, Function] = dict()
 
         # Load the type library
         try:
@@ -99,7 +99,7 @@ class Collector(ida_kernwin.action_handler_t):
             local_vars = collect_variables(
                 [v for v in cfunc.get_lvars() if not v.is_arg_var]
             )
-            self.functions[ea] =  FunctionInfo(
+            self.functions[ea] =  Function(
                 name=name,
                 return_type=return_type,
                 arguments=arguments,
