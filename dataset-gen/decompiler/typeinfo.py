@@ -243,7 +243,6 @@ class TypeLib:
         """Given a list of types, get all possible lists of replacements"""
         raise NotImplementedError
 
-
     def items(self) -> t.ItemsView[int, "TypeLib.EntryList"]:
         return self._data.items()
 

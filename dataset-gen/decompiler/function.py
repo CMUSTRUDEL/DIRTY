@@ -2,6 +2,7 @@ from collections import defaultdict
 
 from typing import DefaultDict, Mapping, Optional, Set
 
+from ast import AST
 from typeinfo import TypeInfo
 from variable import Location, Variable
 
@@ -37,7 +38,9 @@ class Function:
     def has_user_names(self) -> bool:
         arg_vars = (v for vs in self.arguments.values() for v in vs)
         local_vars = (v for vs in self.local_vars.values() for v in vs)
-        return any(v.user_name for v in arg_vars) or any(v.user_name for v in local_vars)
+        return any(v.user_name for v in arg_vars) or any(
+            v.user_name for v in local_vars
+        )
 
     @property
     def local_vars(self) -> DefaultDict[Location, Set[Variable]]:
@@ -63,13 +66,16 @@ class Function:
         )
 
 
-def CollectedFunction:
+class CollectedFunction:
     """Collected information about a single function. Has both debug and
     decompiler-generated data.
     """
 
-    def __init__(self, debug: Function, decompiler: Function, raw_code: str):
+    def __init__(
+        self, *, ast: AST, debug: Function, decompiler: Function, raw_code: str,
+    ):
         self.name: str = debug.name
+        self.ast = ast
         self.debug = debug
         self.decompiler = decompiler
         self.raw_code = raw_code

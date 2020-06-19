@@ -48,6 +48,7 @@ class Stack(Location):
     def __repr__(self) -> str:
         return f"Stk 0x{self.offset:x}"
 
+
 class Variable:
     """A variable
 

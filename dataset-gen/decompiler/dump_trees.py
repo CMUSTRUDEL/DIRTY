@@ -25,6 +25,7 @@ from util import (
     get_new_name,
 )
 
+
 class Collector(ida_kernwin.action_handler_t):
     def __init__(self):
         # Load function info
@@ -48,8 +49,6 @@ class Collector(ida_kernwin.action_handler_t):
                 continue
             if cfunc is None:
                 continue
-
-
 
             # Rename variables to keep track of:
             # - Argument or Local (A or L)
