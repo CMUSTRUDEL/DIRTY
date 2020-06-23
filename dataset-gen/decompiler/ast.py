@@ -1,5 +1,7 @@
 import typing as t
 
+from collections import defaultdict
+
 import ida_hexrays as hr
 
 from typeinfo import TypeLib, TypeInfo
@@ -13,15 +15,17 @@ class Statement:
         self.node_id = node_id
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Statement":
-        return cls(node_id=node_id)
+    def from_item(cls, item: hr.citem_t) -> "Statement":
+        return cls(node_id=item.obj_id)
 
 
 class Expression(Statement):
     """An expression, considered a special case of a statement. Corresponds to the
     Hex-Rays cot_ types"""
 
-    pass
+    @classmethod
+    def from_item(cls, item: hr.cexpr_t) -> "Expression":
+        return cls(node_id=item.obj_id)
 
 
 class UnaryExpression(Expression):
@@ -32,8 +36,10 @@ class UnaryExpression(Expression):
         self.x = x
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "UnaryExpression":
-        return cls(node_id=node_id, x=item.x)
+    def from_item(cls, item: hr.citem_t) -> "UnaryExpression":
+        node_id = item.obj_id
+        x = parse_hexrays_expression(item.x)
+        return cls(node_id=node_id, x=x)
 
 
 class BinaryExpression(Expression):
@@ -45,8 +51,11 @@ class BinaryExpression(Expression):
         self.y = y
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "UnaryExpression":
-        return cls(node_id=node_id, x=item.x, y=item.y)
+    def from_item(cls, item: hr.citem_t) -> "BinaryExpression":
+        node_id = item.obj_id
+        x = parse_hexrays_expression(item.x)
+        y = parse_hexrays_expression(item.y)
+        return cls(node_id=node_id, x=x, y=y)
 
 
 class Comma(BinaryExpression):
@@ -149,8 +158,12 @@ class Tern(Expression):
         self.z = z
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Tern":
-        return cls(node_id=node_id, x=item.x, y=item.y, z=item.z)
+    def from_item(cls, item: hr.citem_t) -> "Tern":
+        node_id = item.obj_id
+        x = parse_hexrays_expression(item.x)
+        y = parse_hexrays_expression(item.y)
+        z = parse_hexrays_expression(item.z)
+        return cls(node_id=node_id, x=x, y=y, z=z)
 
 
 class Lor(BinaryExpression):
@@ -366,8 +379,10 @@ class Ptr(Expression):
         self.ptrsize = ptrsize
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Ptr":
-        return cls(node_id=node_id, x=item.x, ptrsize=item.ptrsize)
+    def from_item(cls, item: hr.citem_t) -> "Ptr":
+        node_id = item.obj_id
+        x = parse_hexrays_expression(item.x)
+        return cls(node_id=node_id, x=x, ptrsize=item.ptrsize)
 
 
 class Ref(UnaryExpression):
@@ -406,11 +421,12 @@ class Call(Expression):
     class Arg(Expression):
         """An argument"""
 
-        def __init__(self, node_id: node_id, is_vararg: bool, formal_type: TypeInfo):
-            self.node_id = node_id
-            self.is_vararg = is_vararg
-            self.formal_type: formal_type
-            super().__init__()
+        def __init__(self, item: hr.carg_t):
+            # FIXME: This is technically an expression,
+            # so I think there should be more parsering
+            self.node_id = item.obj_id
+            self.is_vararg = item.is_vararg
+            self.formal_type: TypeInfo = TypeLib.parse_ida_type(item.formal_type)
 
     def __init__(self, node_id: int, x: Expression, a: t.List[Call.Arg]):
         self.node_id = node_id
@@ -418,9 +434,11 @@ class Call(Expression):
         self.a = a
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Call":
-        # FIXME: a needs to be initialized, I think
-        return cls(node_id=node_id, x=item.x, a=list())
+    def from_item(cls, item: hr.citem_t) -> "Call":
+        node_id = item.obj_id
+        x = parse_hexrays_item(item.x)
+        a = [Call.Arg(i) for i in item.a]
+        return cls(node_id=node_id, x=item.x, a=a)
 
 
 class Idx(BinaryExpression):
@@ -438,8 +456,10 @@ class Memref(Expression):
         self.m = m
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Memref":
-        return cls(node_id=node_id, x=item.x, m=item.m)
+    def from_item(cls, item: hr.citem_t) -> "Memref":
+        node_id = item.obj_id
+        x = parse_hexrays_expression(item.x)
+        return cls(node_id=node_id, x=x, m=item.m)
 
 
 class Memptr(Expression):
@@ -452,8 +472,10 @@ class Memptr(Expression):
         self.ptrsize = ptrsize
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Memptr":
-        return cls(node_id=node_id, x=item.x, m=item.m, ptrsize=item.ptrsize)
+    def from_item(cls, item: hr.citem_t) -> "Memptr":
+        node_id = item.obj_id
+        x = parse_hexrays_expression(item.x)
+        return cls(node_id=node_id, x=x, m=item.m, ptrsize=item.ptrsize)
 
 
 class Num(Expression):
@@ -464,7 +486,8 @@ class Num(Expression):
         self.n = n
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Num":
+    def from_item(cls, item: hr.citem_t) -> "Num":
+        node_id = item.obj_id
         return cls(node_id=node_id, n=item.n)
 
 
@@ -476,7 +499,8 @@ class Fnum(Expression):
         self.fpc = fpc
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Fnum":
+    def from_item(cls, item: hr.citem_t) -> "Fnum":
+        node_id = item.obj_id
         return cls(node_id=node_id, fpc=item.fpc)
 
 
@@ -488,7 +512,8 @@ class Str(Expression):
         self.string = string
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Str":
+    def from_item(cls, item: hr.citem_t) -> "Str":
+        node_id = item.obj_id
         return cls(node_id=node_id, string=item.string)
 
 
@@ -500,20 +525,26 @@ class Obj(Expression):
         self.obj_ea = obj_ea
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Obj":
+    def from_item(cls, item: hr.citem_t) -> "Obj":
+        node_id = item.obj_id
         return cls(node_id=node_id, obj_ea=item.obj_ea)
 
 
 class Var(Expression):
-    """cot_var (v)"""
+    """cot_var (v)
 
-    def __init__(self, node_id: int, v: Variable):
+    idx is an offset into lvars_t, used by the AST to generate a Variable object.
+    """
+
+    def __init__(self, node_id: int, idx: int):
         self.node_id = node_id
-        self.v = v
+        self.idx = idx
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Var":
-        return cls(node_id=node_id, v=item.v)
+    def from_item(cls, item: hr.citem_t) -> "Var":
+        node_id = item.obj_id
+        idx = item.v.idx
+        return cls(node_id=node_id, idx=idx)
 
 
 class Insn(Expression):
@@ -542,7 +573,8 @@ class Type(Expression):
         self.typ = typ
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Type":
+    def from_item(cls, item: hr.citem_t) -> "Type":
+        node_id = item.obj_id
         return cls(node_id=node_id, typ=TypeLib.parse_ida_type(item.type))
 
 
@@ -557,9 +589,10 @@ class Block(Statement):
         self.statements = statements
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Block":
-        # FIXME: statements should be initialized
-        return cls(node_id=node_id, statements=list())
+    def from_item(cls, item: hr.citem_t) -> "Block":
+        node_id = item.obj_id
+        statements = [parse_hexrays_item(i) for i in item]
+        return cls(node_id=node_id, statements=statements)
 
 
 class ExprStatement(Statement):
@@ -570,9 +603,10 @@ class ExprStatement(Statement):
         self.expr = expr
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "ExprStatement":
-        # FIXME: expr is wrong here
-        return cls(node_id=node_id, expr=item.expr)
+    def from_item(cls, item: hr.citem_t) -> "ExprStatement":
+        node_id = item.obj_id
+        expr = parse_hexrays_expression(item.expr)
+        return cls(node_id=node_id, expr=expr)
 
 
 class If(ExprStatement):
@@ -587,9 +621,12 @@ class If(ExprStatement):
         self.expr = expr
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "If":
-        # FIXME: ithen, etc are wrong
-        return cls(node_id=node_id, ithen=item.ithen, ielse=item.ielse, expr=item.expr)
+    def from_item(cls, item: hr.citem_t) -> "If":
+        node_id = item.obj_id
+        ithen = parse_hexrays_statement(item.ithen)
+        ielse = parse_hexrays_statement(item.ielse)
+        expr = parse_hexrays_expression(item.expr)
+        return cls(node_id=node_id, ithen=ithen, ielse=ielse, expr=expr)
 
 
 class Loop(ExprStatement):
@@ -601,9 +638,11 @@ class Loop(ExprStatement):
         self.expr = expr
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Loop":
-        # FIXME: body and expr are wrong
-        return cls(node_id=node_id, body=item.body, expr=item.expr)
+    def from_item(cls, item: hr.citem_t) -> "Loop":
+        node_id = item.obj_id
+        body = parse_hexrays_statement(item.body)
+        expr = parse_hexrays_expression(item.expr)
+        return cls(node_id=node_id, body=body, expr=expr)
 
 
 class Do(Loop):
@@ -629,29 +668,33 @@ class For(Loop):
         init: Expression,
         step: Expression,
     ):
+        super().__init__(node_id, body, expr)
         self.init = init
         self.step = step
-        super().__init__(self, node_id, body, expr)
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "For":
-        # FIXME: body and expr and others are wrong
+    def from_item(cls, item: hr.citem_t) -> "For":
+        node_id = item.obj_id
+        body = parse_hexrays_statement(item.body)
+        expr = parse_hexrays_expression(item.expr)
+        init = parse_hexrays_expression(item.init)
+        step = parse_hexrays_expression(item.step)
         return cls(
             node_id=node_id,
-            body=item.body,
-            expr=item.expr,
-            init=item.init,
-            step=item.step,
+            body=body,
+            expr=expr,
+            init=init,
+            step=step,
         )
 
 
 class Switch(ExprStatement):
     """cit_switch"""
 
-    def Case(Statement):
-        def __init__(self, node_id: int, values: t.List[int]):
-            self.values = values
-            super().__init__(node_id)
+    class Case(Statement):
+        def __init__(self, item: hr.ccase_t):
+            self.node_id = item.obj_id
+            self.values = item.values
 
     def __init__(
         self,
@@ -659,21 +702,25 @@ class Switch(ExprStatement):
         body: Statement,
         expr: Expression,
         mvnf: int,
-        cases: t.List["Switch.Case"],
+        cases: t.List["Case"],
     ):
+        super().__init__(node_id, expr)
+        self.body = parse_hexrays_statement(body)
         self.mvnf = mvnf
         self.cases = cases
-        super().__init__(self, node_id, body, expr)
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Switch":
-        # FIXME: body and expr and cases are wrong
+    def from_item(cls, item: hr.citem_t) -> "Switch":
+        node_id = item.obj_id
+        body = parse_hexrays_statement(item.body)
+        expr = parse_hexrays_expression(item.expr)
+        cases = [Switch.Case(c) for c in item.cases]
         return cls(
             node_id=node_id,
-            body=item.body,
-            expr=item.expr,
+            body=body,
+            expr=expr,
             mvnf=item.mvnf,
-            cases=list(),
+            cases=cases,
         )
 
 
@@ -691,7 +738,8 @@ class Goto(Statement):
         self.label_num = label_num
 
     @classmethod
-    def from_item(cls, node_id: int, item: hr.citem_t) -> "Goto":
+    def from_item(cls, item: hr.citem_t) -> "Goto":
+        node_id = item.obj_id
         return cls(node_id=node_id, label_num=item.label_num)
 
 
@@ -712,112 +760,110 @@ class Continue(Statement):
 
     pass
 
+def parse_hexrays_expression(expr: hr.cexpr_t) -> Expression:
+    """Parses a HexRays expression and returns an Expression object"""
+    classes: t.Dict[hr.cexpr_t, t.Type["Expression"]] = {
+        hr.cot_comma: Comma,
+        hr.cot_asg: Asg,
+        hr.cot_asgbor: Asgbor,
+        hr.cot_asgxor: Asgxor,
+        hr.cot_asgband: Asgband,
+        hr.cot_asgadd: Asgadd,
+        hr.cot_asgsub: Asgsub,
+        hr.cot_asgmul: Asgmul,
+        hr.cot_asgsshr: Asgsshr,
+        hr.cot_asgushr: Asgushr,
+        hr.cot_asgshl: Asgshl,
+        hr.cot_asgsdiv: Asgsdiv,
+        hr.cot_asgudiv: Asgudiv,
+        hr.cot_asgsmod: Asgsmod,
+        hr.cot_asgumod: Asgumod,
+        hr.cot_tern: Tern,
+        hr.cot_lor: Lor,
+        hr.cot_land: Land,
+        hr.cot_bor: Bor,
+        hr.cot_xor: Xor,
+        hr.cot_band: Band,
+        hr.cot_eq: Eq,
+        hr.cot_ne: Ne,
+        hr.cot_sge: Sge,
+        hr.cot_uge: Uge,
+        hr.cot_sle: Sle,
+        hr.cot_ule: Ule,
+        hr.cot_sgt: Sgt,
+        hr.cot_ugt: Ugt,
+        hr.cot_slt: Slt,
+        hr.cot_ult: Ult,
+        hr.cot_sshr: Sshr,
+        hr.cot_ushr: Ushr,
+        hr.cot_shl: Shl,
+        hr.cot_add: Add,
+        hr.cot_sub: Sub,
+        hr.cot_mul: Mul,
+        hr.cot_sdiv: Sdiv,
+        hr.cot_udiv: Udiv,
+        hr.cot_smod: Smod,
+        hr.cot_umod: Umod,
+        hr.cot_fadd: Fadd,
+        hr.cot_fsub: Fsub,
+        hr.cot_fmul: Fmul,
+        hr.cot_fdiv: Fdiv,
+        hr.cot_fneg: Fneg,
+        hr.cot_neg: Neg,
+        hr.cot_cast: Cast,
+        hr.cot_lnot: Lnot,
+        hr.cot_bnot: Bnot,
+        hr.cot_ptr: Ptr,
+        hr.cot_ref: Ref,
+        hr.cot_postinc: Postinc,
+        hr.cot_postdec: Postdec,
+        hr.cot_preinc: Preinc,
+        hr.cot_predec: Predec,
+        hr.cot_call: Call,
+        hr.cot_idx: Idx,
+        hr.cot_memref: Memref,
+        hr.cot_memptr: Memptr,
+        hr.cot_num: Num,
+        hr.cot_fnum: Fnum,
+        hr.cot_fnum: Str,
+        hr.cot_obj: Obj,
+        hr.cot_var: Var,
+        hr.cot_insn: Insn,
+        hr.cot_sizeof: Sizeof,
+        hr.cot_helper: Helper,
+        hr.cot_type: Type,
+    }
+    return classes[expr.op].from_item(expr)
+
+
+def parse_hexrays_statement(stmt: hr.cinsn_t) -> Statement:
+    """Parses a HexRays statement and returns a Statement object"""
+    classes: t.Dict[hr.cinsn_t, t.Type[Statement]] = {
+        hr.cit_block: Block,
+        hr.cit_if: If,
+        hr.cit_do: Do,
+        hr.cit_while: While,
+        hr.cit_for: For,
+        hr.cit_switch: Switch,
+        hr.cit_return: Return,
+        hr.cit_goto: Goto,
+        hr.cit_asm: Asm,
+        hr.cit_break: Break,
+        hr.cit_continue: Continue,
+    }
+    return classes[stmt.op].from_item(stmt)
+
+
+def parse_hexrays_item(item: hr.citem_t) -> Statement:
+    """Parses any HexRays item and returns a Statement object"""
+    try:
+        return parse_hexrays_statement(item)
+    except KeyError:
+        return parse_hexrays_expression(item)
+
 
 class AST:
-    def __init__(self):
-        self.next_node_number = 0
-        self.root: Node = list()
-
-    def add_node(self, item: ida_hexrays.citem_t) -> None:
-        constructor = {
-            hr.cot_comma: Comma,
-            hr.cot_asg: Asg,
-            hr.cot_asgbor: Asgbor,
-            hr.cot_asgxor: Asgxor,
-            hr.cot_asgband: Asgband,
-            hr.cot_asgadd: Asgadd,
-            hr.cot_asgsub: Asgsub,
-            hr.cot_asgmul: Asgmul,
-            hr.cot_asgsshr: Asgsshr,
-            hr.cot_asgushr: Asgushr,
-            hr.cot_asgshl: Asgshl,
-            hr.cot_asgsdiv: Asgsdiv,
-            hr.cot_asgudiv: Asgudiv,
-            hr.cot_asgsmod: Asgsmod,
-            hr.cot_asgumod: Asgumod,
-            hr.cot_tern: Tern,
-            hr.cot_lor: Lor,
-            hr.cot_land: Land,
-            hr.cot_bor: Bor,
-            hr.cot_xor: Xor,
-            hr.cot_band: Band,
-            hr.cot_eq: Eq,
-            hr.cot_ne: Ne,
-            hr.cot_sge: Sge,
-            hr.cot_uge: Uge,
-            hr.cot_sle: Sle,
-            hr.cot_ule: Ule,
-            hr.cot_sgt: Sgt,
-            hr.cot_ugt: Ugt,
-            hr.cot_slt: Slt,
-            hr.cot_ult: Ult,
-            hr.cot_sshr: Sshr,
-            hr.cot_ushr: Ushr,
-            hr.cot_shl: Shl,
-            hr.cot_add: Add,
-            hr.cot_sub: Sub,
-            hr.cot_mul: Mul,
-            hr.cot_sdiv: Sdiv,
-            hr.cot_udiv: Udiv,
-            hr.cot_smod: Smod,
-            hr.cot_umod: Umod,
-            hr.cot_fadd: Fadd,
-            hr.cot_fsub: Fsub,
-            hr.cot_fmul: Fmul,
-            hr.cot_fdiv: Fdiv,
-            hr.cot_fneg: Fneg,
-            hr.cot_neg: Neg,
-            hr.cot_cast: Cast,
-            hr.cot_lnot: Lnot,
-            hr.cot_bnot: Bnot,
-            hr.cot_ptr: Ptr,
-            hr.cot_ref: Ref,
-            hr.cot_postinc: Postinc,
-            hr.cot_postdec: Postdec,
-            hr.cot_preinc: Preinc,
-            hr.cot_predec: Predec,
-            hr.cot_call: Call,
-            hr.cot_idx: Idx,
-            hr.cot_memref: Memref,
-            hr.cot_memptr: Memptr,
-            hr.cot_num: Num,
-            hr.cot_fnum: Fnum,
-            hr.cot_fnum: Str,
-            hr.cot_obj: Obj,
-            hr.cot_var: Var,
-            hr.cot_insn: Insn,
-            hr.cot_sizeof: Sizeof,
-            hr.cot_helper: Helper,
-            hr.cot_type: Type,
-            hr.cit_block: Block,
-            hr.cit_if: If,
-            hr.cit_do: Do,
-            hr.cit_while: While,
-            hr.cit_for: For,
-            hr.cit_switch: Switch,
-            hr.cit_return: Return,
-            hr.cit_goto: Goto,
-            hr.cit_asm: Asm,
-            hr.cit_break: Break,
-            hr.cit_continue: Continue,
-        }[item.op]
-        new_node = constructor.from_item(self._new_node_id(), item)
-
-    def _new_node_id(self) -> int:
-        node_id = self.next_node_id
-        self.next_node_id += 1
-        return node_id
-
-
-class TreeBuilder(ida_hexrays.ctree_parentee_t):
-    """Builds an AST"""
-
-    def __init__(self, ast: AST):
-        self.ast = ast
-        super().__init__(self)
-
-    def visit_insn(self, insn: ida_hexrays.cinsn_t) -> None:
-        self.ast.add_node(insn)
-
-    def visit_expr(self, expr: ida_hexrays.cexpr_t) -> None:
-        self.ast.add_node(expr)
+    def __init__(self, function: hr.cfunc_t):
+        self.function = function
+        # Statement should be a block
+        self.root = parse_hexrays_statement(function.body)
