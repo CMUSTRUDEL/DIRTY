@@ -13,9 +13,9 @@ import pickle
 import os
 import re
 
-from function import Function, CollectedFunction
-from typeinfo import TypeLib, TypeLibCodec
-from util import (
+from .function import Function, CollectedFunction
+from .typeinfo import TypeLib, TypeLibCodec
+from .util import (
     UNDEF_ADDR,
     CFuncTree,
     CFuncTreeBuilder,
@@ -67,6 +67,7 @@ class Collector(ida_kernwin.action_handler_t):
                 new_names[idx] = f"@@{tag}@@{location}@@{v.name}"
             for idx in new_names.keys():
                 cfunc.get_lvars()[idx].name = new_names[idx]
+        return 0
 
 
 def func(ea):

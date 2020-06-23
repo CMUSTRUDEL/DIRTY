@@ -4,8 +4,8 @@ from collections import defaultdict
 
 import ida_hexrays as hr
 
-from typeinfo import TypeLib, TypeInfo
-from variable import Variable
+from .typeinfo import TypeLib, TypeInfo
+from .variable import Variable
 
 
 class Statement:

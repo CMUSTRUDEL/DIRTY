@@ -1,6 +1,11 @@
 # Usage: IDALOG=/dev/stdout ./idat64 -B -S/path/to/collect.py /path/to/binary
 
-from collect import CollectDebug
+import ida_auto
+import ida_pro
+import idaapi
+
+
+from .collect import CollectDebug
 
 ida_auto.auto_wait()
 if not idaapi.init_hexrays_plugin():

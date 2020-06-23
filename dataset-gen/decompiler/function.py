@@ -2,9 +2,9 @@ from collections import defaultdict
 
 from typing import DefaultDict, Mapping, Optional, Set
 
-from ast import AST
-from typeinfo import TypeInfo
-from variable import Location, Variable
+from .ast import AST
+from .typeinfo import TypeInfo
+from .variable import Location, Variable
 
 
 class Function:
@@ -38,8 +38,8 @@ class Function:
     def has_user_names(self) -> bool:
         arg_vars = (v for vs in self.arguments.values() for v in vs)
         local_vars = (v for vs in self.local_vars.values() for v in vs)
-        return any(v.user_name for v in arg_vars) or any(
-            v.user_name for v in local_vars
+        return any(v.user for v in arg_vars) or any(
+            v.user for v in local_vars
         )
 
     @property
@@ -48,7 +48,7 @@ class Function:
 
     @property
     def locations(self) -> Set[Location]:
-        return set(self.arguments.keys()) + set(self.local_vars.keys())
+        return set(self.arguments.keys()).union(set(self.local_vars.keys()))
 
     @property
     def name(self) -> str:

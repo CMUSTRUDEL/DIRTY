@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from typeinfo import TypeInfo
+from .typeinfo import TypeInfo
 
 
 class Location:
@@ -53,49 +53,15 @@ class Variable:
     """A variable
 
     typ: the type of the variable
-    user_name: an optional user-defined name for the variable
+    name: an optional user-defined name for the variable
+    user: true if the name is user-defined
     """
 
-    class Name:
-        """A name of a varaible."""
-
-        def __init__(self, name):
-            self._name = name
-
-        @property
-        def name(self) -> str:
-            return self._name
-
-    class Auto(Name):
-        """An auto-generated name."""
-
-        def __eq__(self, other: Any) -> bool:
-            return isinstance(other, Variable.Auto) and self.name == other.name
-
-        def __hash__(self) -> int:
-            return hash(self.name)
-
-        def __repr__(self):
-            return f"{self.name} (A)"
-
-    class User(Name):
-        """A user-generated name."""
-
-        def __eq__(self, other: Any) -> bool:
-            return isinstance(other, Variable.User) and self.name == other.name
-
-        def __hash__(self) -> int:
-            return hash(self.name)
-
-        def __repr__(self):
-            return f"{self.name} (U)"
 
     def __init__(self, typ: TypeInfo, name: str, user: bool):
         self.typ = typ
-        if user:
-            self.name = Variable.User(name)
-        else:
-            self.name = Variable.Auto(name)
+        self.name = name
+        self.user = user
 
     def __eq__(self, other: Any) -> bool:
         return (
@@ -108,4 +74,5 @@ class Variable:
         return hash((self.name, self.typ))
 
     def __repr__(self) -> str:
-        return f"{str(self.typ)} {self.name}"
+        name_source = "U" if self.user else "A"
+        return f"{str(self.typ)} {self.name} ({name_source})"

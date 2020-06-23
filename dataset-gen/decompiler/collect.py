@@ -11,10 +11,10 @@ import ida_kernwin
 import pickle
 import os
 
-import typeinfo as ti
+import decompiler.typeinfo as ti
 
-from function import Function
-from variable import Location, Stack, Register, Variable
+from .function import Function
+from .variable import Location, Stack, Register, Variable
 
 
 class Collector(ida_kernwin.action_handler_t):
