@@ -17,7 +17,7 @@ class Register(Location):
     name: the name of the register
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: int):
         self.name = name
 
     def __eq__(self, other: Any) -> bool:

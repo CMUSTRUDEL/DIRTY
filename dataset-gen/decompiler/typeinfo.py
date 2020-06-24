@@ -9,6 +9,11 @@ from collections import defaultdict
 from json import JSONEncoder, dumps, loads
 import typing as t
 
+try:
+    import ida_typeinf
+except ImportError:
+    print("Could not import ida_typeinf. Cannot parse IDA types.")
+
 
 class TypeLib:
     """A library of types.
@@ -126,10 +131,6 @@ class TypeLib:
     @staticmethod
     def parse_ida_type(typ: "ida_typeinf.tinfo_t") -> "TypeInfo":
         """Parses an IDA tinfo_t object"""
-        try:
-            import ida_typeinf
-        except ImportError:
-            raise ImportError("Could not import ida_typeinf. Cannot parse IDA type.")
         if typ.is_void():
             return Void()
         if typ.is_funcptr() or "(" in typ.dstr():

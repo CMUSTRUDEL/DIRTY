@@ -1,7 +1,5 @@
 from collections import defaultdict
-import ida_hexrays
-import ida_lines
-import ida_pro
+import idaapi as ida
 import json
 
 UNDEF_ADDR = 0xFFFFFFFFFFFFFFFF
@@ -9,8 +7,8 @@ UNDEF_ADDR = 0xFFFFFFFFFFFFFFFF
 
 def get_expr_name(expr) -> str:
     name = expr.print1(None)
-    name = ida_lines.tag_remove(name)
-    name = ida_pro.str2user(name)
+    name = ida.tag_remove(name)
+    name = ida.str2user(name)
     return name
 
 
@@ -83,20 +81,20 @@ class CFuncTree:
         op = item.op
         insn = item.cinsn
         expr = item.cexpr
-        parts = [ida_hexrays.get_ctype_name(op)]
-        if op == ida_hexrays.cot_ptr:
+        parts = [ida.get_ctype_name(op)]
+        if op == ida.cot_ptr:
             parts.append(f".{expr.ptrsize}")
-        elif op == ida_hexrays.cot_memptr:
+        elif op == ida.cot_memptr:
             parts.append(f".{expr.ptrsize} (m={expr.m})")
-        elif op == ida_hexrays.cot_memref:
+        elif op == ida.cot_memref:
             parts.append(f" (m={expr.m})")
-        elif op in [ida_hexrays.cot_obj, ida_hexrays.cot_var]:
+        elif op in [ida.cot_obj, ida.cot_var]:
             parts.append(f".{expr.refwidth} {get_expr_name(expr)}")
-        elif op in [ida_hexrays.cot_num, ida_hexrays.cot_helper, ida_hexrays.cot_str]:
+        elif op in [ida.cot_num, ida.cot_helper, ida.cot_str]:
             parts.append(f" {get_expr_name(expr)}")
-        elif op == ida_hexrays.cit_goto:
+        elif op == ida.cit_goto:
             parts.append(f" LABEL_{insn.cgoto.label_num}")
-        elif op == ida_hexrays.cit_asm:
+        elif op == ida.cit_asm:
             parts.append("<asm statements; unsupported>")
         parts.append(f", ea: {item.ea:08x}")
         if item.is_expr() and expr is not None and not expr.type.empty():
@@ -111,22 +109,22 @@ class CFuncTree:
         node_info = {"node_id": n}
         item = self.items[n]
         # This is the type of ctree node
-        node_info["node_type"] = ida_hexrays.get_ctype_name(item.op)
+        node_info["node_type"] = ida.get_ctype_name(item.op)
         node_info["address"] = f"{item.ea:08x}"
         if item.ea == UNDEF_ADDR:
             node_info["parent_address"] = f"{self.get_pred_ea(n):08x}"
         # Specific info for different node types
-        if item.op == ida_hexrays.cot_ptr:
+        if item.op == ida.cot_ptr:
             node_info["pointer_size"] = item.cexpr.ptrsize
-        elif item.op == ida_hexrays.cot_memptr:
+        elif item.op == ida.cot_memptr:
             node_info.update({"pointer_size": item.cexpr.ptrsize, "m": item.cexpr.m})
-        elif item.op == ida_hexrays.cot_memref:
+        elif item.op == ida.cot_memref:
             node_info["m"] = item.cexpr.m
-        elif item.op == ida_hexrays.cot_obj:
+        elif item.op == ida.cot_obj:
             node_info.update(
                 {"name": get_expr_name(item.cexpr), "ref_width": item.cexpr.refwidth}
             )
-        elif item.op == ida_hexrays.cot_var:
+        elif item.op == ida.cot_var:
             node_info.update(
                 {
                     "var_id": get_var_id(get_expr_name(item.cexpr)),
@@ -134,9 +132,9 @@ class CFuncTree:
                 }
             )
         elif item.op in [
-            ida_hexrays.cot_num,
-            ida_hexrays.cot_str,
-            ida_hexrays.cot_helper,
+            ida.cot_num,
+            ida.cot_str,
+            ida.cot_helper,
         ]:
             node_info["name"] = get_expr_name(item.cexpr)
         # Get info for children of this node
@@ -169,7 +167,7 @@ class CFuncTree:
     def dump(self):
         print(f"{self.size()} items:")
         for n in range(self.size()):
-            print(f"\t{n}: {ida_hexrays.get_ctype_name(self.items[n].op)}")
+            print(f"\t{n}: {ida.get_ctype_name(self.items[n].op)}")
 
         print("pred:")
         for child in range(self.size()):
@@ -180,9 +178,9 @@ class CFuncTree:
             print(f"\t{parent}: {self.succs[parent]}")
 
 
-class CFuncTreeBuilder(ida_hexrays.ctree_parentee_t):
+class CFuncTreeBuilder(ida.ctree_parentee_t):
     def __init__(self, tree):
-        ida_hexrays.ctree_parentee_t.__init__(self)
+        ida.ctree_parentee_t.__init__(self)
         self.tree = tree
 
     def process(self, item):

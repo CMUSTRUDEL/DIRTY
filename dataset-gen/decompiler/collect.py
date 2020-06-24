@@ -3,11 +3,9 @@
 from collections import defaultdict
 from typing import DefaultDict, Dict, Iterable, Optional, Set
 
-import idaapi
+
+import idaapi as ida
 from idautils import Functions
-import ida_funcs
-import ida_hexrays
-import ida_kernwin
 import pickle
 import os
 
@@ -17,7 +15,7 @@ from .function import Function
 from .variable import Location, Stack, Register, Variable
 
 
-class Collector(ida_kernwin.action_handler_t):
+class Collector(ida.action_handler_t):
     """Generic class to collect information from a binary"""
 
     def __init__(self):
@@ -39,7 +37,7 @@ class Collector(ida_kernwin.action_handler_t):
             type_lib_fh.flush()
 
     def collect_variables(
-        self, variables: Iterable[ida_typeinf.tinfo_t],
+            self, frsize: int, stkoff_delta: int, variables: Iterable[ida.lvar_t],
     ) -> DefaultDict[Location, Set[Variable]]:
         """Collects Variables from a list of tinfo_ts and adds their types to the type
         library."""
@@ -53,8 +51,8 @@ class Collector(ida_kernwin.action_handler_t):
 
             loc: Location
             if v.is_stk_var():
-                corrected = v.get_stkoff() - cfunc.get_stkoff_delta()
-                offset = f.frsize - corrected
+                corrected = v.get_stkoff() - stkoff_delta
+                offset = frsize - corrected
                 loc = Stack(offset)
             if v.is_reg_var():
                 loc = Register(v.get_reg1())
@@ -89,23 +87,23 @@ class CollectDebug(Collector):
         # `ea` is the start address of a single function
         for ea in Functions():
             # Decompile
-            f = idaapi.get_func(ea)
+            f = ida.get_func(ea)
             cfunc = None
             try:
-                cfunc = idaapi.decompile(f)
-            except ida_hexrays.DecompilationFailure:
+                cfunc = ida.decompile(f)
+            except ida.DecompilationFailure:
                 continue
             if cfunc is None:
                 continue
 
             # Function info
-            name: str = ida_funcs.get_func_name(ea)
+            name: str = ida.get_func_name(ea)
 
             self.type_lib.add_ida_type(cfunc.type.get_rettype())
             return_type = ti.TypeLib.parse_ida_type(cfunc.type.get_rettype())
 
-            arguments = self.collect_variables(cfunc.arguments)
-            local_vars = self.collect_variables(
+            arguments = self.collect_variables(f.frsize, f.get_stkoff_delta(), cfunc.arguments)
+            local_vars = self.collect_variables(f.frsize, f.get_stkoff_delta(),
                 [v for v in cfunc.get_lvars() if not v.is_arg_var]
             )
             self.functions[ea] = Function(
@@ -129,6 +127,10 @@ class CollectDecompiler(Collector):
         self.decompiler_functions: Dict[int, Function] = dict()
         super().__init__(self)
 
+    # FIXME
+    def write_info(self) -> None:
+        pass
+
     def activate(self, ctx) -> int:
         """Collects types, user-defined variables, their locations in addition to the
         AST and raw code.
@@ -137,30 +139,30 @@ class CollectDecompiler(Collector):
         # `ea` is the start address of a single function
         for ea in Functions():
             # Decompile
-            f = idaapi.get_func(ea)
+            f = ida.get_func(ea)
             cfunc = None
             try:
-                cfunc = idaapi.decompile(f)
-            except ida_hexrays.DecompilationFailure:
+                cfunc = ida.decompile(f)
+            except ida.DecompilationFailure:
                 continue
             if cfunc is None:
                 continue
 
             # Function info
-            name: str = ida_funcs.get_func_name(ea)
+            name: str = ida.get_func_name(ea)
 
             self.type_lib.add_ida_type(cfunc.type.get_rettype())
             return_type = ti.TypeLib.parse_ida_type(cfunc.type.get_rettype())
 
-            arguments = self.collect_variables(cfunc.arguments)
-            local_vars = self.collect_variables(
+            arguments = self.collect_variables(f.frsize, f.get_stkoff_delta(), cfunc.arguments)
+            local_vars = self.collect_variables(f.frsize, f.get_stkoff_delta(),
                 [v for v in cfunc.get_lvars() if not v.is_arg_var]
             )
-            self.functions[ea] = Function(
+            self.decompiler_functions[ea] = Function(
                 name=name,
                 return_type=return_type,
                 arguments=arguments,
                 local_vars=local_vars,
             )
-        self.dump_info()
+        self.write_info()
         return 1
