@@ -38,9 +38,7 @@ class Function:
     def has_user_names(self) -> bool:
         arg_vars = (v for vs in self.arguments.values() for v in vs)
         local_vars = (v for vs in self.local_vars.values() for v in vs)
-        return any(v.user for v in arg_vars) or any(
-            v.user for v in local_vars
-        )
+        return any(v.user for v in arg_vars) or any(v.user for v in local_vars)
 
     @property
     def local_vars(self) -> DefaultDict[Location, Set[Variable]]:

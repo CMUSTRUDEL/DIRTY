@@ -37,7 +37,7 @@ class Collector(ida.action_handler_t):
             type_lib_fh.flush()
 
     def collect_variables(
-            self, frsize: int, stkoff_delta: int, variables: Iterable[ida.lvar_t],
+        self, frsize: int, stkoff_delta: int, variables: Iterable[ida.lvar_t],
     ) -> DefaultDict[Location, Set[Variable]]:
         """Collects Variables from a list of tinfo_ts and adds their types to the type
         library."""
@@ -102,9 +102,13 @@ class CollectDebug(Collector):
             self.type_lib.add_ida_type(cfunc.type.get_rettype())
             return_type = ti.TypeLib.parse_ida_type(cfunc.type.get_rettype())
 
-            arguments = self.collect_variables(f.frsize, f.get_stkoff_delta(), cfunc.arguments)
-            local_vars = self.collect_variables(f.frsize, f.get_stkoff_delta(),
-                [v for v in cfunc.get_lvars() if not v.is_arg_var]
+            arguments = self.collect_variables(
+                f.frsize, f.get_stkoff_delta(), cfunc.arguments
+            )
+            local_vars = self.collect_variables(
+                f.frsize,
+                f.get_stkoff_delta(),
+                [v for v in cfunc.get_lvars() if not v.is_arg_var],
             )
             self.functions[ea] = Function(
                 name=name,
@@ -154,9 +158,13 @@ class CollectDecompiler(Collector):
             self.type_lib.add_ida_type(cfunc.type.get_rettype())
             return_type = ti.TypeLib.parse_ida_type(cfunc.type.get_rettype())
 
-            arguments = self.collect_variables(f.frsize, f.get_stkoff_delta(), cfunc.arguments)
-            local_vars = self.collect_variables(f.frsize, f.get_stkoff_delta(),
-                [v for v in cfunc.get_lvars() if not v.is_arg_var]
+            arguments = self.collect_variables(
+                f.frsize, f.get_stkoff_delta(), cfunc.arguments
+            )
+            local_vars = self.collect_variables(
+                f.frsize,
+                f.get_stkoff_delta(),
+                [v for v in cfunc.get_lvars() if not v.is_arg_var],
             )
             self.decompiler_functions[ea] = Function(
                 name=name,

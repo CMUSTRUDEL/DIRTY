@@ -57,7 +57,6 @@ class Variable:
     user: true if the name is user-defined
     """
 
-
     def __init__(self, typ: TypeInfo, name: str, user: bool):
         self.typ = typ
         self.name = name

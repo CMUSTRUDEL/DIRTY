@@ -90,9 +90,10 @@ class TypeLib:
             self._data.sort(reverse=True, key=lambda entry: entry.frequency)
 
         @classmethod
-        def _from_json(cls, l: t.List[t.List[t.Any]]) -> "TypeLib.EntryList":
+        def _from_json(cls, d: t.Dict[str, t.Any]) -> "TypeLib.EntryList":
+            encoded_data = d["d"]
             data: t.List["TypeLib.Entry"] = list()
-            for (frequency, typeinfo) in l:
+            for (frequency, typeinfo) in encoded_data:
                 data.append(TypeLib.Entry(frequency, typeinfo))
             return cls(data)
 
@@ -102,17 +103,20 @@ class TypeLib:
                 "T": "E",
             }
 
-        def __iter__(self) -> t.Iterable["TypeLib.Entry"]:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
             for entry in self._data:
                 yield entry
 
         def __len__(self) -> int:
             return len(self._data)
 
-        def __getitem__(self, i: int) -> "TypeLib.Entry":
+        def __getitem__(self, i: t.Any) -> t.Any:
             return self._data[i]
 
-        def __setitem__(self, i: int, v: "TypeLib.Entry") -> None:
+        def __setitem__(self, i: t.Any, v: t.Any) -> None:
             self._data[i] = v
 
         def __repr__(self) -> str:
@@ -267,7 +271,7 @@ class TypeLib:
             data[int(key)] = TypeLib.EntryList._from_json(lib_entry)
         return cls(data)
 
-    def _to_json(self) -> t.Dict[str, t.Union[int, t.Dict[int, "TypeLib.EntryList"]]]:
+    def _to_json(self) -> t.Dict[t.Any, t.Any]:
         """Encodes as JSON
 
         The 'T' field encodes which TypeInfo class is represented by this JSON:
@@ -293,7 +297,9 @@ class TypeLib:
             7: Void
             8: Function Pointer
         """
-        encoded = {str(key): val for key, val in self._data.items()}
+        encoded: t.Dict[t.Any, t.Any] = {
+            str(key): val for key, val in self._data.items()
+        }
         encoded["T"] = 0
         return encoded
 
