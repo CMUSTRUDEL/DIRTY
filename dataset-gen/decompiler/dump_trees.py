@@ -1,3 +1,5 @@
+import idaapi as ida
+
 import os
 import pickle
 
@@ -8,23 +10,25 @@ from decompiler.collect import Collector
 from decompiler.function import Function
 from decompiler.typeinfo import TypeLib
 
-class CollectDebug(Collector):
-    """Class for collecting debug information"""
+
+class CollectDecompiler(Collector):
+    """Class for collecting decompiler-specific information"""
 
     def __init__(self):
-        self.functions: Dict[int, Function] = dict()
+        # Load the functions collected by CollectDebug
+        with open(os.environ["FUNCTIONS"], "rb") as functions_fh:
+            self.debug_functions: Dict[int, Function] = pickle.load(functions_fh)
+        self.decompiler_functions: Dict[int, Function] = dict()
         super().__init__(self)
 
-    def write_functions(self) -> None:
-        """Dumps the collected functions to the file specified by the environment
-        variable `FUNCTIONS`.
-        """
-        with open(os.environ["FUNCTIONS"], "wb") as functions_fh:
-            pickle.dump(self.functions, functions_fh)
-            functions_fh.flush()
+    # FIXME
+    def write_info(self) -> None:
+        pass
 
     def activate(self, ctx) -> int:
-        """Collects types, user-defined variables, and their locations"""
+        """Collects types, user-defined variables, their locations in addition to the
+        AST and raw code.
+        """
         print("Collecting vars and types.")
         # `ea` is the start address of a single function
         for ea in Functions():
@@ -52,14 +56,13 @@ class CollectDebug(Collector):
                 f.get_stkoff_delta(),
                 [v for v in cfunc.get_lvars() if not v.is_arg_var],
             )
-            self.functions[ea] = Function(
+            self.decompiler_functions[ea] = Function(
                 name=name,
                 return_type=return_type,
                 arguments=arguments,
                 local_vars=local_vars,
             )
-        self.write_type_lib()
-        self.write_functions()
+        self.write_info()
         return 1
 
 
@@ -73,6 +76,6 @@ if not ida.init_hexrays_plugin():
     else:
         print(f"Hex-rays version {ida.get_hexrays_version()}")
 
-debug = CollectDebug()
-debug.activate(None)
+decompiler = CollectDecompiler()
+decompiler.activate(None)
 ida.qexit(0)

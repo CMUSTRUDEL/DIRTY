@@ -261,7 +261,7 @@ class TypeLib:
 
     @classmethod
     def _from_json(
-        cls, d: t.Dict[str, t.Union[int, t.Dict[str, "TypeLib.EntryList"]]]
+        cls, d: t.Dict[str, t.Any]
     ) -> "TypeLib":
         data: t.DefaultDict[int, "TypeLib.EntryList"] = defaultdict(TypeLib.EntryList)
         # Convert lists of types into sets

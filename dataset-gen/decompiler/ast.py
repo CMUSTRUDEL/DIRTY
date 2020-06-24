@@ -4,8 +4,8 @@ from collections import defaultdict
 
 import idaapi as ida
 
-from .typeinfo import TypeLib, TypeInfo
-from .variable import Variable
+from decompiler.typeinfo import TypeLib, TypeInfo
+from decompiler.variable import Variable
 
 
 class Statement:
@@ -818,7 +818,7 @@ def parse_hexrays_expression(expr: ida.cexpr_t) -> Expression:
         ida.cot_helper: Helper,
         ida.cot_type: Type,
     }
-    return classes[expr.op].from_item(expr)
+    return classes[expr.op].from_item(expr) # type: ignore
 
 
 def parse_hexrays_statement(stmt: ida.cinsn_t) -> Statement:
@@ -836,7 +836,7 @@ def parse_hexrays_statement(stmt: ida.cinsn_t) -> Statement:
         ida.cit_break: Break,
         ida.cit_continue: Continue,
     }
-    return classes[stmt.op].from_item(stmt)
+    return classes[stmt.op].from_item(stmt) # type: ignore
 
 
 class AST:

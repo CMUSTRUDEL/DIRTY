@@ -2,9 +2,9 @@ from collections import defaultdict
 
 from typing import DefaultDict, Mapping, Optional, Set
 
-from .ast import AST
-from .typeinfo import TypeInfo
-from .variable import Location, Variable
+from decompiler.ast import AST
+from decompiler.typeinfo import TypeInfo
+from decompiler.variable import Location, Variable
 
 
 class Function:
