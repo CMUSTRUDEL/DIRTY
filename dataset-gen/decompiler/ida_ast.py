@@ -1,3 +1,10 @@
+"""HexRays AST
+
+For the purposes of serialization, each node type corresponds to a HexRays
+ctype_t, which is just an integer. This is stored in "meta"
+"""
+
+
 import typing as t
 
 from collections import defaultdict
@@ -69,95 +76,98 @@ class BinaryExpression(Expression):
 class Comma(BinaryExpression):
     """cot_comma (x, y)"""
 
-    meta = "c"
+    meta = ida.cot_comma
 
 
 class Asg(BinaryExpression):
     """cot_asg (x = y)"""
 
-    pass
+    meta = ida.cot_comma
+
 
 
 class Asgbor(BinaryExpression):
     """cot_asgbor (x |= y)"""
 
-    pass
+    meta = ida.cot_asgbor
 
 
 class Asgxor(BinaryExpression):
     """cot_asgxor (x ^= y)"""
 
-    pass
+    meta = ida.cot_asgxor
 
 
 class Asgband(BinaryExpression):
     """cot_asgband (x &= y)"""
 
-    pass
+    meta = ida.cot_asgband
 
 
 class Asgadd(BinaryExpression):
     """cot_asgadd (x += y)"""
 
-    pass
+    meta = ida.cot_asgadd
 
 
 class Asgsub(BinaryExpression):
     """cot_asgsub (x -= y)"""
 
-    pass
+    meta = ida.cot_asgsub
 
 
 class Asgmul(BinaryExpression):
     """cot_asgmul (x *= y)"""
 
-    pass
+    meta = ida.cot_asgmul
 
 
 class Asgsshr(BinaryExpression):
     """cot_asgsshr (x >>= y signed)"""
 
-    pass
+    meta = ida.cot_asgsshr
 
 
 class Asgushr(BinaryExpression):
     """cot_asgushr (x >>= y unsigned)"""
 
-    pass
+    meta = ida.cot_asgushr
 
 
 class Asgshl(BinaryExpression):
     """cot_asgshl (x <<= y)"""
 
-    pass
+    meta = ida.cot_asgshl
 
 
 class Asgsdiv(BinaryExpression):
     """cot_asgsdiv (x /= y signed)"""
 
-    pass
+    meta = ida.cot_asgsdiv
 
 
 class Asgudiv(BinaryExpression):
     """cot_asgudiv (x /= y unsigned)"""
 
-    pass
+    meta = ida.cot_asgudiv
 
 
 class Asgsmod(BinaryExpression):
     """cot_asgsmod (x %= y signed)"""
 
-    pass
+    meta = ida.cot_asgsmod
 
 
 class Asgumod(BinaryExpression):
     """cot_asgumod (x %= y unsigned)"""
 
-    pass
+    meta = ida.cot_asgumod
 
 
 class Tern(Expression):
-    """cot_tern (x ? y : z)"""
+    """cot_tern (x ? y : meta = ida.z)"""
+
+    meta = ida.cot_tern
 
     def __init__(self, node_id: int, x: Expression, y: Expression, z: Expression):
         self.node_id = node_id
@@ -179,209 +189,211 @@ class Tern(Expression):
 class Lor(BinaryExpression):
     """cot_lor (x || y)"""
 
-    pass
+    meta = ida.cot_lor
 
 
 class Land(BinaryExpression):
     """cot_land (x && y)"""
 
-    pass
+    meta = ida.cot_land
 
 
 class Bor(BinaryExpression):
     """cot_bor (x | y)"""
 
-    pass
+    meta = ida.cot_bor
 
 
 class Xor(BinaryExpression):
     """cot_xor (x ^ y)"""
 
-    pass
+    meta = ida.cot_xor
 
 
 class Band(BinaryExpression):
     """cot_band (x & y)"""
 
-    pass
+    meta = ida.cot_band
 
 
 class Eq(BinaryExpression):
     """cot_eq (x == y int or fpu)"""
 
-    pass
+    meta = ida.cot_eq
 
 
 class Ne(BinaryExpression):
     """cot_ne (x != y int or fpu)"""
 
-    pass
+    meta = ida.cot_ne
 
 
 class Sge(BinaryExpression):
     """cot_sge (x >= y signed or fpu)"""
 
-    pass
+    meta = ida.cot_sge
 
 
 class Uge(BinaryExpression):
     """cot_uge (x >= y unsigned)"""
 
-    pass
+    meta = ida.cot_uge
 
 
 class Sle(BinaryExpression):
     """cot_sle (x <= y signed or fpu)"""
 
-    pass
+    meta = ida.cot_sle
 
 
 class Ule(BinaryExpression):
     """cot_ule (x <= y unsigned)"""
 
-    pass
+    meta = ida.cot_ule
 
 
 class Sgt(BinaryExpression):
     """cot_sgt (x > y signed or fpu)"""
 
-    pass
+    meta = ida.cot_sgt
 
 
 class Ugt(BinaryExpression):
     """cot_ugt (x > y unsigned)"""
 
-    pass
+    meta = ida.cot_ugt
 
 
 class Slt(BinaryExpression):
     """cot_slt (x < y signed or fpu)"""
 
-    pass
+    meta = ida.cot_slt
 
 
 class Ult(BinaryExpression):
     """cot_ult (x < y unsigned)"""
 
-    pass
+    meta = ida.cot_ult
 
 
 class Sshr(BinaryExpression):
     """cot_sshr (x >> y signed)"""
 
-    pass
+    meta = ida.cot_sshr
 
 
 class Ushr(BinaryExpression):
     """cot_ushr (x >> y unsigned)"""
 
-    pass
+    meta = ida.cot_ushr
 
 
 class Shl(BinaryExpression):
     """cot_shl (x << y)"""
 
-    pass
+    meta = ida.cot_shl
 
 
 class Add(BinaryExpression):
     """cot_add (x + y)"""
 
-    pass
+    meta = ida.cot_add
 
 
 class Sub(BinaryExpression):
     """cot_sub (x - y)"""
 
-    pass
+    meta = ida.cot_sub
 
 
 class Mul(BinaryExpression):
     """cot_mul (x * y)"""
 
-    pass
+    meta = ida.cot_mul
 
 
 class Sdiv(BinaryExpression):
     """cot_sdiv (x / y signed)"""
 
-    pass
+    meta = ida.cot_sdiv
 
 
 class Udiv(BinaryExpression):
     """cot_udiv (x / y unsigned)"""
 
-    pass
+    meta = ida.cot_udiv
 
 
 class Smod(BinaryExpression):
     """cot_smod (x % y signed)"""
 
-    pass
+    meta = ida.cot_smod
 
 
 class Umod(BinaryExpression):
     """cot_umod (x % y unsigned)"""
 
-    pass
+    meta = ida.cot_umod
 
 
 class Fadd(BinaryExpression):
     """cot_fadd (x + y fp)"""
 
-    pass
+    meta = ida.cot_fadd
 
 
 class Fsub(BinaryExpression):
     """cot_fsub (x - y fp)"""
 
-    pass
+    meta = ida.cot_fsub
 
 
 class Fmul(BinaryExpression):
     """cot_fmul (x * y fp)"""
 
-    pass
+    meta = ida.cot_fmul
 
 
 class Fdiv(BinaryExpression):
     """cot_fdiv (x / y fp)"""
 
-    pass
+    meta = ida.cot_fdiv
 
 
 class Fneg(UnaryExpression):
     """cot_fneg (-x fp)"""
 
-    pass
+    meta = ida.cot_fneg
 
 
 class Neg(UnaryExpression):
     """cot_neg (-x)"""
 
-    pass
+    meta = ida.cot_neg
 
 
 class Cast(UnaryExpression):
     """cot_cast ((type)x)"""
 
-    pass
+    meta = ida.cot_cast
 
 
 class Lnot(UnaryExpression):
     """cot_lnot (!x)"""
 
-    pass
+    meta = ida.cot_lnot
 
 
 class Bnot(UnaryExpression):
     """cot_bnot (~x)"""
 
-    pass
+    meta = ida.cot_bnot
 
 
 class Ptr(Expression):
     """cot_ptr (*x, access size in 'ptrsize')"""
+
+    meta = ida.cot_ptr
 
     def __init__(self, node_id: int, x: Expression, ptrsize: int):
         self.node_id = node_id
@@ -401,35 +413,37 @@ class Ptr(Expression):
 class Ref(UnaryExpression):
     """cot_ref (&x)"""
 
-    pass
+    meta = ida.cot_ref
 
 
 class Postinc(UnaryExpression):
     """cot_postinc (x++)"""
 
-    pass
+    meta = ida.cot_postinc
 
 
 class Postdec(UnaryExpression):
     """cot_postdec (x--)"""
 
-    pass
+    meta = ida.cot_postdec
 
 
 class Preinc(UnaryExpression):
     """cot_preinc (++x)"""
 
-    pass
+    meta = ida.cot_preinc
 
 
 class Predec(UnaryExpression):
     """cot_predec (--x)"""
 
-    pass
+    meta = ida.cot_predec
 
 
 class Call(Expression):
     """cot_call (x(...))"""
+
+    meta = ida.cot_call
 
     class Arg(Expression):
         """An argument"""
@@ -470,11 +484,13 @@ class Call(Expression):
 class Idx(BinaryExpression):
     """cot_idx (x[y])"""
 
-    pass
+    meta = ida.cot_idx
 
 
 class Memref(Expression):
     """cot_memref (x.m)"""
+
+    meta = ida.cot_memref
 
     def __init__(self, node_id: int, x: Expression, m: int):
         self.node_id = node_id
@@ -493,6 +509,8 @@ class Memref(Expression):
 
 class Memptr(Expression):
     """cot_memptr (x->m, access size in 'ptrsize')"""
+
+    meta = ida.cot_memptr
 
     def __init__(self, node_id: int, x: Expression, m: int, ptrsize: int):
         self.node_id = node_id
@@ -513,6 +531,8 @@ class Memptr(Expression):
 class Num(Expression):
     """cot_num (n: numeric constant)"""
 
+    meta = ida.cot_num
+
     def __init__(self, node_id: int, n: int):
         self.node_id = node_id
         self.n = n
@@ -528,6 +548,8 @@ class Num(Expression):
 class Fnum(Expression):
     """cot_fnum (fpc: floating point constant)"""
 
+    meta = ida.cot_fnum
+
     def __init__(self, node_id: int, fpc: int):
         self.node_id = node_id
         self.fpc = fpc
@@ -541,7 +563,9 @@ class Fnum(Expression):
         return f"Fnum ({self.fpc})"
 
 class Str(Expression):
-    """cot_fnum (string constant)"""
+    """cot_str (string constant)"""
+
+    meta = ida.cot_str
 
     def __init__(self, node_id: int, string: str):
         self.node_id = node_id
@@ -557,6 +581,8 @@ class Str(Expression):
 
 class Obj(Expression):
     """cot_obj (obj_ea)"""
+
+    meta = ida.cot_obj
 
     def __init__(self, node_id: int, obj_ea: int):
         self.node_id = node_id
@@ -579,6 +605,8 @@ class Var(Expression):
     idx is an offset into lvars_t, used by the AST to generate a Variable object.
     """
 
+    meta = ida.cot_var
+
     def __init__(self, node_id: int, idx: int, lvars: ida.lvars_t):
         self.node_id = node_id
         self.idx = idx
@@ -597,23 +625,25 @@ class Var(Expression):
 class Insn(Expression):
     """cot_insn (instruction in expression, internal representation only)"""
 
-    pass
+    meta = ida.cot_insn
 
 
 class Sizeof(UnaryExpression):
     """cot_sizeof (sizeof(x))"""
 
-    pass
+    meta = ida.cot_sizeof
 
 
 class Helper(Expression):
     """cot_helper (arbitrary name)"""
 
-    pass
+    meta = ida.cot_helper
 
 
 class Type(Expression):
-    """cot_helper (arbitrary type)"""
+    """cot_type (arbitrary type)"""
+
+    meta = ida.cot_type
 
     def __init__(self, node_id: int, typ: TypeInfo):
         self.node_id = node_id
@@ -633,6 +663,8 @@ class Type(Expression):
 
 class Block(Statement):
     """cit_block"""
+
+    meta = ida.cit_block
 
     def __init__(self, node_id: int, statements: t.List[Statement]):
         self.node_id = node_id
@@ -660,6 +692,8 @@ class ExprStatement(Statement):
 
 class If(ExprStatement):
     """cit_if"""
+
+    meta = ida.cit_if
 
     def __init__(
         self,
@@ -697,6 +731,8 @@ class Loop(ExprStatement):
 class Do(Loop):
     """cit_do"""
 
+    meta = ida.cit_do
+
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Loop":
         node_id = item.obj_id
@@ -710,6 +746,8 @@ class Do(Loop):
 
 class While(Loop):
     """cit_while"""
+
+    meta = ida.cit_while
 
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Loop":
@@ -725,6 +763,8 @@ class While(Loop):
 
 class For(Loop):
     """cit_for"""
+
+    meta = ida.cit_for
 
     def __init__(
         self,
@@ -753,6 +793,8 @@ class For(Loop):
 
 class Switch(ExprStatement):
     """cit_switch"""
+
+    meta = ida.cit_switch
 
     class Case(Statement):
         def __init__(self, item: ida.ccase_t, lvars: ida.lvars_t):
@@ -796,6 +838,8 @@ class Switch(ExprStatement):
 class Return(ExprStatement):
     """cit_return"""
 
+    meta = ida.cit_return
+
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Return":
         node_id = item.obj_id
@@ -808,6 +852,8 @@ class Return(ExprStatement):
 
 class Goto(Statement):
     """cit_goto"""
+
+    meta = ida.cit_goto
 
     def __init__(self, node_id: int, label_num: int):
         self.node_id = node_id
@@ -825,19 +871,19 @@ class Goto(Statement):
 class Asm(Statement):
     """cit_asm, not supported"""
 
-    pass
+    meta = ida.cit_asm
 
 
 class Break(Statement):
     """cit_break"""
 
-    pass
+    meta = ida.cit_break
 
 
 class Continue(Statement):
     """cit_continue"""
 
-    pass
+    meta = ida.cit_continue
 
 
 def parse_hexrays_expression(expr: ida.cexpr_t, lvars: ida.lvars_t) -> Expression:
