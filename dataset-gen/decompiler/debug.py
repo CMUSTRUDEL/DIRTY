@@ -59,8 +59,7 @@ class CollectDebug(Collector):
             )
 
         self.write_type_lib()
-        # FIXME
-        # self.write_functions()
+        self.write_functions()
         return 1
 
 

@@ -14,13 +14,20 @@ class Statement:
     def __init__(self, node_id: int):
         self.node_id = node_id
 
+    @classmethod
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Statement":
+        node_id = item.obj_id
+        return cls(node_id=node_id)
+
+    def __repr__(self):
+        return type(self).__name__
 
 class Expression(Statement):
     """An expression, considered a special case of a statement. Corresponds to the
     Hex-Rays cot_ types"""
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Expression":
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Expression":
         return cls(node_id=item.obj_id)
 
 
@@ -32,11 +39,13 @@ class UnaryExpression(Expression):
         self.x = x
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "UnaryExpression":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "UnaryExpression":
         node_id = item.obj_id
-        x = parse_hexrays_expression(item.x)
+        x = parse_hexrays_expression(item.x, lvars)
         return cls(node_id=node_id, x=x)
 
+    def __repr__(self):
+        return f"{type(self).__name__} (x: {self.x})"
 
 class BinaryExpression(Expression):
     """A binary expression. Has two operands stored in x and y"""
@@ -47,11 +56,14 @@ class BinaryExpression(Expression):
         self.y = y
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "BinaryExpression":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "BinaryExpression":
         node_id = item.obj_id
-        x = parse_hexrays_expression(item.x)
-        y = parse_hexrays_expression(item.y)
+        x = parse_hexrays_expression(item.x, lvars)
+        y = parse_hexrays_expression(item.y, lvars)
         return cls(node_id=node_id, x=x, y=y)
+
+    def __repr__(self):
+        return f"{type(self).__name__} (x: {self.x}, y: {self.y})"
 
 
 class Comma(BinaryExpression):
@@ -154,13 +166,15 @@ class Tern(Expression):
         self.z = z
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Tern":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Tern":
         node_id = item.obj_id
-        x = parse_hexrays_expression(item.x)
-        y = parse_hexrays_expression(item.y)
-        z = parse_hexrays_expression(item.z)
+        x = parse_hexrays_expression(item.x, lvars)
+        y = parse_hexrays_expression(item.y, lvars)
+        z = parse_hexrays_expression(item.z, lvars)
         return cls(node_id=node_id, x=x, y=y, z=z)
 
+    def __repr__(self):
+        return f"{type(self).__name__} (x: {self.x}, y: {self.y}, z: {self.z})"
 
 class Lor(BinaryExpression):
     """cot_lor (x || y)"""
@@ -375,10 +389,13 @@ class Ptr(Expression):
         self.ptrsize = ptrsize
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Ptr":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Ptr":
         node_id = item.obj_id
-        x = parse_hexrays_expression(item.x)
+        x = parse_hexrays_expression(item.x, lvars)
         return cls(node_id=node_id, x=x, ptrsize=item.ptrsize)
+
+    def __repr__(self):
+        return f"{type(self).__name__} (size: {self.ptrsize}, x: {self.x})"
 
 
 class Ref(UnaryExpression):
@@ -417,24 +434,37 @@ class Call(Expression):
     class Arg(Expression):
         """An argument"""
 
-        def __init__(self, item: ida.carg_t):
+        def __init__(self, item: ida.carg_t, lvars: ida.lvars_t):
             # FIXME: This is technically an expression,
             # so I think there should be more parsering
             self.node_id = item.obj_id
             self.is_vararg = item.is_vararg
+            self.idx = None
+            self.name = None
+            if item.v:
+                self.idx = item.v.idx
+                self.name = lvars[self.idx].name
             self.formal_type: TypeInfo = TypeLib.parse_ida_type(item.formal_type)
 
-    def __init__(self, node_id: int, x: Expression, a: t.List[Call.Arg]):
+        def __repr__(self):
+            if self.is_vararg:
+                return "Vararg"
+            return f"{self.formal_type} {self.name}"
+
+    def __init__(self, node_id: int, x: Expression, a: t.List["Call.Arg"]):
         self.node_id = node_id
         self.x = x
         self.a = a
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Call":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Call":
         node_id = item.obj_id
-        x = parse_hexrays_expression(item.x)
-        a = [Call.Arg(i) for i in item.a]
+        x = parse_hexrays_expression(item.x, lvars)
+        a = [Call.Arg(i, lvars) for i in item.a]
         return cls(node_id=node_id, x=x, a=a)
+
+    def __repr__(self):
+        return f"{type(self).__name__} (x: {self.x}, args: {self.a})"
 
 
 class Idx(BinaryExpression):
@@ -452,10 +482,13 @@ class Memref(Expression):
         self.m = m
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Memref":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Memref":
         node_id = item.obj_id
-        x = parse_hexrays_expression(item.x)
+        x = parse_hexrays_expression(item.x, lvars)
         return cls(node_id=node_id, x=x, m=item.m)
+
+    def __repr__(self):
+        return f"Memref (x: {self.x}, m: {self.m})"
 
 
 class Memptr(Expression):
@@ -468,10 +501,13 @@ class Memptr(Expression):
         self.ptrsize = ptrsize
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Memptr":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Memptr":
         node_id = item.obj_id
-        x = parse_hexrays_expression(item.x)
+        x = parse_hexrays_expression(item.x, lvars)
         return cls(node_id=node_id, x=x, m=item.m, ptrsize=item.ptrsize)
+
+    def __repr__(self):
+        return f"Memptr (x: {self.x}, m: {self.m} size: {self.ptrsize})"
 
 
 class Num(Expression):
@@ -482,10 +518,12 @@ class Num(Expression):
         self.n = n
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Num":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Num":
         node_id = item.obj_id
-        return cls(node_id=node_id, n=item.n)
+        return cls(node_id=node_id, n=item.n._value)
 
+    def __repr__(self):
+        return f"Num ({self.n})"
 
 class Fnum(Expression):
     """cot_fnum (fpc: floating point constant)"""
@@ -495,10 +533,12 @@ class Fnum(Expression):
         self.fpc = fpc
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Fnum":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Fnum":
         node_id = item.obj_id
         return cls(node_id=node_id, fpc=item.fpc.fnum)
 
+    def __repr__(self):
+        return f"Fnum ({self.fpc})"
 
 class Str(Expression):
     """cot_fnum (string constant)"""
@@ -508,10 +548,12 @@ class Str(Expression):
         self.string = string
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Str":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Str":
         node_id = item.obj_id
         return cls(node_id=node_id, string=item.string)
 
+    def __repr__(self):
+        return f"Str ({self.string})"
 
 class Obj(Expression):
     """cot_obj (obj_ea)"""
@@ -521,9 +563,14 @@ class Obj(Expression):
         self.obj_ea = obj_ea
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Obj":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Obj":
         node_id = item.obj_id
         return cls(node_id=node_id, obj_ea=item.obj_ea)
+
+    def __repr__(self):
+        # If this is a function show its name, otherwise show the offset
+        func_name = ida.get_func_name(self.obj_ea)
+        return func_name if func_name else f"Obj ({self.obj_ea})"
 
 
 class Var(Expression):
@@ -532,16 +579,20 @@ class Var(Expression):
     idx is an offset into lvars_t, used by the AST to generate a Variable object.
     """
 
-    def __init__(self, node_id: int, idx: int):
+    def __init__(self, node_id: int, idx: int, lvars: ida.lvars_t):
         self.node_id = node_id
         self.idx = idx
+        self.lvar = lvars[self.idx]
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Var":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Var":
         node_id = item.obj_id
         idx = item.v.idx
-        return cls(node_id=node_id, idx=idx)
+        return cls(node_id=node_id, idx=idx, lvars=lvars)
 
+    def __repr__(self):
+        # typ = TypeLib.parse_ida_type(self.lvar.type)
+        return f"{self.lvar.name}"
 
 class Insn(Expression):
     """cot_insn (instruction in expression, internal representation only)"""
@@ -569,9 +620,12 @@ class Type(Expression):
         self.typ = typ
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t) -> "Type":
+    def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Type":
         node_id = item.obj_id
         return cls(node_id=node_id, typ=TypeLib.parse_ida_type(item.type))
+
+    def __repr__(self):
+        return f"Type ({self.typ})"
 
 
 ########## Statements ##########
@@ -585,11 +639,16 @@ class Block(Statement):
         self.statements = statements
 
     @classmethod
-    def from_item(cls, item: ida.cblock_t) -> "Block":
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Block":
         node_id = item.obj_id
-        statements = [parse_hexrays_statement(i) for i in item]
+        # Ignore cit_empty
+        statements = [
+            parse_hexrays_statement(i, lvars) for i in item.cblock if i.op != ida.cit_empty
+        ]
         return cls(node_id=node_id, statements=statements)
 
+    def __repr__(self):
+        return f"{self.statements}"
 
 class ExprStatement(Statement):
     """A statement that has an expression"""
@@ -603,7 +662,11 @@ class If(ExprStatement):
     """cit_if"""
 
     def __init__(
-        self, node_id: int, expr: Expression, ithen: Statement, ielse: Statement
+        self,
+        node_id: int,
+        expr: Expression,
+        ithen: t.Optional[Statement],
+        ielse: t.Optional[Statement],
     ):
         self.node_id = node_id
         self.ithen = ithen
@@ -611,13 +674,16 @@ class If(ExprStatement):
         self.expr = expr
 
     @classmethod
-    def from_item(cls, item: ida.cif_t) -> "If":
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "If":
         node_id = item.obj_id
-        ithen = parse_hexrays_statement(item.ithen)
-        ielse = parse_hexrays_statement(item.ielse)
-        expr = parse_hexrays_expression(item.expr)
+        stmt = item.cif
+        ithen = parse_hexrays_statement(stmt.ithen, lvars) if stmt.ithen else None
+        ielse = parse_hexrays_statement(stmt.ielse, lvars) if stmt.ielse else None
+        expr = parse_hexrays_expression(stmt.expr, lvars)
         return cls(node_id=node_id, ithen=ithen, ielse=ielse, expr=expr)
 
+    def __repr__(self):
+        return f"If (expr: {self.expr}, ithen: {self.ithen}, ielse: {self.ielse})"
 
 class Loop(ExprStatement):
     """A generic loop. body is the loop body, while expr is the guard expression"""
@@ -632,22 +698,29 @@ class Do(Loop):
     """cit_do"""
 
     @classmethod
-    def from_item(cls, item: ida.cdo_t) -> "Loop":
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Loop":
         node_id = item.obj_id
-        body = parse_hexrays_statement(item.body)
-        expr = parse_hexrays_expression(item.expr)
+        stmt = item.cdo
+        body = parse_hexrays_statement(stmt.body, lvars)
+        expr = parse_hexrays_expression(stmt.expr, lvars)
         return cls(node_id=node_id, body=body, expr=expr)
 
+    def __repr__(self):
+        return f"Do (expr: {self.expr}, body: {self.body})"
 
 class While(Loop):
     """cit_while"""
 
     @classmethod
-    def from_item(cls, item: ida.cwhile_t) -> "Loop":
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Loop":
         node_id = item.obj_id
-        body = parse_hexrays_statement(item.body)
-        expr = parse_hexrays_expression(item.expr)
+        stmt = item.cwhile
+        body = parse_hexrays_statement(stmt.body, lvars)
+        expr = parse_hexrays_expression(stmt.expr, lvars)
         return cls(node_id=node_id, body=body, expr=expr)
+
+    def __repr__(self):
+        return f"While (expr: {self.expr}, body: {self.body})"
 
 
 class For(Loop):
@@ -666,22 +739,30 @@ class For(Loop):
         self.step = step
 
     @classmethod
-    def from_item(cls, item: ida.cfor_t) -> "For":
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "For":
         node_id = item.obj_id
-        body = parse_hexrays_statement(item.body)
-        expr = parse_hexrays_expression(item.expr)
-        init = parse_hexrays_expression(item.init)
-        step = parse_hexrays_expression(item.step)
-        return cls(node_id=node_id, body=body, expr=expr, init=init, step=step,)
+        stmt = item.cfor
+        body = parse_hexrays_statement(stmt.body, lvars)
+        expr = parse_hexrays_expression(stmt.expr, lvars)
+        init = parse_hexrays_expression(stmt.init, lvars)
+        step = parse_hexrays_expression(stmt.step, lvars)
+        return cls(node_id=node_id, body=body, expr=expr, init=init, step=step)
 
+    def __repr__(self):
+        return f"For (expr: {self.expr}, init: {self.init}, step: {self.step}, body: {self.body})"
 
 class Switch(ExprStatement):
     """cit_switch"""
 
     class Case(Statement):
-        def __init__(self, item: ida.ccase_t):
+        def __init__(self, item: ida.ccase_t, lvars: ida.lvars_t):
             self.node_id = item.obj_id
-            self.values = item.values
+            # Have to manually convert this into a list
+            self.values = list(item.values)
+            self.stmt = parse_hexrays_statement(item, lvars)
+
+        def __repr__(self):
+            return f"Case (values: {self.values}, stmt: {self.stmt})"
 
     def __init__(
         self,
@@ -695,11 +776,12 @@ class Switch(ExprStatement):
         self.cases = cases
 
     @classmethod
-    def from_item(cls, item: ida.cswitch_t) -> "Switch":
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Switch":
         node_id = item.obj_id
-        expr = parse_hexrays_expression(item.expr)
+        stmt = item.cswitch
+        expr = parse_hexrays_expression(stmt.expr, lvars)
         # mvnf = ...
-        cases = [Switch.Case(c) for c in item.cases]
+        cases = [Switch.Case(c, lvars) for c in stmt.cases]
         return cls(
             node_id=node_id,
             expr=expr,
@@ -707,12 +789,22 @@ class Switch(ExprStatement):
             cases=cases,
         )
 
+    def __repr__(self):
+        return f"Switch: (expr: {self.expr}, cases: {self.cases})"
+
 
 class Return(ExprStatement):
     """cit_return"""
 
-    pass
+    @classmethod
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Return":
+        node_id = item.obj_id
+        stmt = item.creturn
+        expr = parse_hexrays_expression(stmt.expr, lvars)
+        return cls(node_id=node_id, expr=expr)
 
+    def __repr__(self):
+        return f"Return (expr: {self.expr})"
 
 class Goto(Statement):
     """cit_goto"""
@@ -722,10 +814,13 @@ class Goto(Statement):
         self.label_num = label_num
 
     @classmethod
-    def from_item(cls, item: ida.cgoto_t) -> "Goto":
+    def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Goto":
         node_id = item.obj_id
-        return cls(node_id=node_id, label_num=item.label_num)
+        stmt = item.cgoto
+        return cls(node_id=node_id, label_num=stmt.label_num)
 
+    def __repr__(self):
+        return f"Goto (label: {self.label_num})"
 
 class Asm(Statement):
     """cit_asm, not supported"""
@@ -745,7 +840,7 @@ class Continue(Statement):
     pass
 
 
-def parse_hexrays_expression(expr: ida.cexpr_t) -> Expression:
+def parse_hexrays_expression(expr: ida.cexpr_t, lvars: ida.lvars_t) -> Expression:
     """Parses a HexRays expression and returns an Expression object"""
     classes: t.Dict[t.Type[ida.ctype_t], t.Type["Expression"]] = {
         ida.cot_comma: Comma,
@@ -818,11 +913,13 @@ def parse_hexrays_expression(expr: ida.cexpr_t) -> Expression:
         ida.cot_helper: Helper,
         ida.cot_type: Type,
     }
-    return classes[expr.op].from_item(expr) # type: ignore
+    return classes[expr.op].from_item(expr, lvars)  # type: ignore
 
 
-def parse_hexrays_statement(stmt: ida.cinsn_t) -> Statement:
+def parse_hexrays_statement(stmt: ida.cinsn_t, lvars: ida.lvars_t) -> Statement:
     """Parses a HexRays statement and returns a Statement object"""
+    if stmt.op == ida.cit_expr:
+        return parse_hexrays_expression(stmt.cexpr, lvars)
     classes: t.Dict[t.Type[ida.ctype_t], t.Type[Statement]] = {
         ida.cit_block: Block,
         ida.cit_if: If,
@@ -836,11 +933,14 @@ def parse_hexrays_statement(stmt: ida.cinsn_t) -> Statement:
         ida.cit_break: Break,
         ida.cit_continue: Continue,
     }
-    return classes[stmt.op].from_item(stmt) # type: ignore
+    return classes[stmt.op].from_item(stmt, lvars)  # type: ignore
 
 
 class AST:
     def __init__(self, function: ida.cfunc_t):
         print("Creating AST")
         self.function = function
-        self.root = Block.from_item(function.body)
+        print(ida.get_func_name(self.function.entry_ea))
+        self.root = parse_hexrays_statement(function.body, function.lvars)
+        print(self.root)
+        print("Done creating AST")

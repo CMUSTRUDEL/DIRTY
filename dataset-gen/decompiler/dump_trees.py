@@ -6,6 +6,7 @@ import pickle
 import idaapi as ida
 from idautils import Functions
 
+from ida_ast import AST
 from collect import Collector
 from function import Function
 from typeinfo import TypeLib
@@ -15,22 +16,24 @@ class CollectDecompiler(Collector):
     """Class for collecting decompiler-specific information"""
 
     def __init__(self):
+        print("Initializing collect decompiler")
+        super().__init__()
+        print("Loading functions")
         # Load the functions collected by CollectDebug
         with open(os.environ["FUNCTIONS"], "rb") as functions_fh:
             self.debug_functions: Dict[int, Function] = pickle.load(functions_fh)
+        print("Done")
         self.decompiler_functions: Dict[int, Function] = dict()
-        super().__init__()
 
     # FIXME
     def write_info(self) -> None:
-        pass
+        print("DONE")
 
     def activate(self, ctx) -> int:
         """Collects types, user-defined variables, their locations in addition to the
         AST and raw code.
         """
         print("Collecting vars and types.")
-        # `ea` is the start address of a single function
         for ea in Functions():
             # Decompile
             f = ida.get_func(ea)
@@ -56,6 +59,7 @@ class CollectDecompiler(Collector):
                 cfunc.get_stkoff_delta(),
                 [v for v in cfunc.get_lvars() if not v.is_arg_var],
             )
+            ast = AST(function=cfunc)
             self.decompiler_functions[ea] = Function(
                 name=name,
                 return_type=return_type,
@@ -78,4 +82,5 @@ if not ida.init_hexrays_plugin():
 
 decompiler = CollectDecompiler()
 decompiler.activate(None)
+print("Done with activate")
 ida.qexit(0)
