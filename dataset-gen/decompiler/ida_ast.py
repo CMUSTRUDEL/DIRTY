@@ -82,7 +82,7 @@ class Comma(BinaryExpression):
 class Asg(BinaryExpression):
     """cot_asg (x = y)"""
 
-    meta = ida.cot_comma
+    meta = ida.cot_asg
 
 
 
@@ -885,103 +885,33 @@ class Continue(Statement):
 
     meta = ida.cit_continue
 
+#################### Utilities ####################
+
+def _get_all_classes(cls) -> set:
+    all_classes = set()
+    for subclass in cls.__subclasses__():
+        if hasattr(subclass, "meta"):
+            all_classes.add(subclass)
+        all_classes.update(_get_all_classes(subclass))
+    return all_classes
+
+
+all_classes = _get_all_classes(Statement)
+expressions = { c.meta: c for c in all_classes if c.meta <= ida.cot_last }
+statements = { c.meta: c for c in all_classes if c.meta > ida.cot_last }
 
 def parse_hexrays_expression(expr: ida.cexpr_t, lvars: ida.lvars_t) -> Expression:
     """Parses a HexRays expression and returns an Expression object"""
-    classes: t.Dict[t.Type[ida.ctype_t], t.Type["Expression"]] = {
-        ida.cot_comma: Comma,
-        ida.cot_asg: Asg,
-        ida.cot_asgbor: Asgbor,
-        ida.cot_asgxor: Asgxor,
-        ida.cot_asgband: Asgband,
-        ida.cot_asgadd: Asgadd,
-        ida.cot_asgsub: Asgsub,
-        ida.cot_asgmul: Asgmul,
-        ida.cot_asgsshr: Asgsshr,
-        ida.cot_asgushr: Asgushr,
-        ida.cot_asgshl: Asgshl,
-        ida.cot_asgsdiv: Asgsdiv,
-        ida.cot_asgudiv: Asgudiv,
-        ida.cot_asgsmod: Asgsmod,
-        ida.cot_asgumod: Asgumod,
-        ida.cot_tern: Tern,
-        ida.cot_lor: Lor,
-        ida.cot_land: Land,
-        ida.cot_bor: Bor,
-        ida.cot_xor: Xor,
-        ida.cot_band: Band,
-        ida.cot_eq: Eq,
-        ida.cot_ne: Ne,
-        ida.cot_sge: Sge,
-        ida.cot_uge: Uge,
-        ida.cot_sle: Sle,
-        ida.cot_ule: Ule,
-        ida.cot_sgt: Sgt,
-        ida.cot_ugt: Ugt,
-        ida.cot_slt: Slt,
-        ida.cot_ult: Ult,
-        ida.cot_sshr: Sshr,
-        ida.cot_ushr: Ushr,
-        ida.cot_shl: Shl,
-        ida.cot_add: Add,
-        ida.cot_sub: Sub,
-        ida.cot_mul: Mul,
-        ida.cot_sdiv: Sdiv,
-        ida.cot_udiv: Udiv,
-        ida.cot_smod: Smod,
-        ida.cot_umod: Umod,
-        ida.cot_fadd: Fadd,
-        ida.cot_fsub: Fsub,
-        ida.cot_fmul: Fmul,
-        ida.cot_fdiv: Fdiv,
-        ida.cot_fneg: Fneg,
-        ida.cot_neg: Neg,
-        ida.cot_cast: Cast,
-        ida.cot_lnot: Lnot,
-        ida.cot_bnot: Bnot,
-        ida.cot_ptr: Ptr,
-        ida.cot_ref: Ref,
-        ida.cot_postinc: Postinc,
-        ida.cot_postdec: Postdec,
-        ida.cot_preinc: Preinc,
-        ida.cot_predec: Predec,
-        ida.cot_call: Call,
-        ida.cot_idx: Idx,
-        ida.cot_memref: Memref,
-        ida.cot_memptr: Memptr,
-        ida.cot_num: Num,
-        ida.cot_fnum: Fnum,
-        ida.cot_fnum: Str,
-        ida.cot_obj: Obj,
-        ida.cot_var: Var,
-        ida.cot_insn: Insn,
-        ida.cot_sizeof: Sizeof,
-        ida.cot_helper: Helper,
-        ida.cot_type: Type,
-    }
-    return classes[expr.op].from_item(expr, lvars)  # type: ignore
+    return expressions[expr.op].from_item(expr, lvars)  # type: ignore
 
 
 def parse_hexrays_statement(stmt: ida.cinsn_t, lvars: ida.lvars_t) -> Statement:
     """Parses a HexRays statement and returns a Statement object"""
     if stmt.op == ida.cit_expr:
         return parse_hexrays_expression(stmt.cexpr, lvars)
-    classes: t.Dict[t.Type[ida.ctype_t], t.Type[Statement]] = {
-        ida.cit_block: Block,
-        ida.cit_if: If,
-        ida.cit_do: Do,
-        ida.cit_while: While,
-        ida.cit_for: For,
-        ida.cit_switch: Switch,
-        ida.cit_return: Return,
-        ida.cit_goto: Goto,
-        ida.cit_asm: Asm,
-        ida.cit_break: Break,
-        ida.cit_continue: Continue,
-    }
-    return classes[stmt.op].from_item(stmt, lvars)  # type: ignore
+    return statements[stmt.op].from_item(stmt, lvars)  # type: ignore
 
-
+#################### AST ####################
 class AST:
     def __init__(self, function: ida.cfunc_t):
         print("Creating AST")
