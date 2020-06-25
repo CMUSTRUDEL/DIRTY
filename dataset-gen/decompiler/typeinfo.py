@@ -89,19 +89,12 @@ class TypeLib:
             """Sorts the internal list by frequency"""
             self._data.sort(reverse=True, key=lambda entry: entry.frequency)
 
-        @classmethod
-        def _from_json(cls, d: t.Dict[str, t.Any]) -> "TypeLib.EntryList":
-            encoded_data = d["d"]
-            data: t.List["TypeLib.Entry"] = list()
-            for (frequency, typeinfo) in encoded_data:
-                data.append(TypeLib.Entry(frequency, typeinfo))
-            return cls(data)
+        # @classmethod
+        # def _from_json(cls, d) -> "TypeLib.EntryList":
+        #     return cls(d)
 
-        def _to_json(self,) -> t.Dict[str, t.Union[str, t.List["TypeLib.Entry"]]]:
-            return {
-                "d": self._data,
-                "T": "E",
-            }
+        def _to_json(self) -> t.Dict[str, t.Union[str, t.List["TypeLib.Entry"]]]:
+            return self._data
 
         def __iter__(self):
             return self
@@ -268,7 +261,8 @@ class TypeLib:
         for key, lib_entry in d.items():
             if key == "T":
                 continue
-            data[int(key)] = TypeLib.EntryList._from_json(lib_entry)
+            entry_list = [TypeLib.Entry(frequency=f, typeinfo=ti) for (f, ti) in lib_entry]
+            data[int(key)] = TypeLib.EntryList(entry_list)
         return cls(data)
 
     def _to_json(self) -> t.Dict[t.Any, t.Any]:
@@ -298,7 +292,7 @@ class TypeLib:
             8: Function Pointer
         """
         encoded: t.Dict[t.Any, t.Any] = {
-            str(key): val for key, val in self._data.items()
+            str(key): val._to_json() for key, val in self._data.items()
         }
         encoded["T"] = 0
         return encoded
@@ -786,7 +780,6 @@ class TypeLibCodec:
                 9: FunctionPointer,
             }
             return classes[d["T"]]._from_json(d)
-
         return loads(encoded, object_hook=read_metadata)
 
     class _Encoder(JSONEncoder):

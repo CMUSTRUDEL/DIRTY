@@ -74,7 +74,7 @@ class TimedRun:
         self.timer = timer
         timer.binary = binary
         self.env = env
-        self.functions = None
+        # self.functions = None
         self.orig = None
         self.stripped = None
 
@@ -83,11 +83,12 @@ class TimedRun:
         self.functions = tempfile.NamedTemporaryFile()
         self.orig = tempfile.NamedTemporaryFile()
         self.stripped = tempfile.NamedTemporaryFile()
-        self.env['FUNCTIONS'] = self.functions.name
+        # FIXME
+        self.env['FUNCTIONS'] = "functions.txt"
         return self
 
     def __exit__(self, type, value, traceback):
-        self.functions.close()
+        # self.functions.close()
         self.orig.close()
         self.stripped.close()
         if type is KeyboardInterrupt:
@@ -177,8 +178,8 @@ class Runner:
                     # Collect from original
                     subprocess.check_output(['cp', file_path, r.orig.name])
                     # Timeout after 30s for the collect run
-                    self.run_decompiler(r.orig.name, self.COLLECT, timeout=30)
-                    # Dump trees
-                    subprocess.call(['cp', file_path, r.stripped.name])
-                    subprocess.call(['strip', '--strip-debug', r.stripped.name])
-                    self.run_decompiler(r.stripped.name, self.DUMP_TREES, timeout=300)
+                    self.run_decompiler(r.orig.name, self.COLLECT, timeout=10)
+                    # # Dump trees
+                    # subprocess.call(['cp', file_path, r.stripped.name])
+                    # subprocess.call(['strip', '--strip-debug', r.stripped.name])
+                    # self.run_decompiler(r.stripped.name, self.DUMP_TREES, timeout=300)

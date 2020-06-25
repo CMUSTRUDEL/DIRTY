@@ -6,9 +6,9 @@ from idautils import Functions
 import pickle
 import os
 
-from decompiler.function import Function
-from decompiler.typeinfo import TypeInfo, TypeLib, TypeLibCodec
-from decompiler.variable import Location, Stack, Register, Variable
+from function import Function
+from typeinfo import TypeInfo, TypeLib, TypeLibCodec
+from variable import Location, Stack, Register, Variable
 
 
 class Collector(ida.action_handler_t):
@@ -20,16 +20,19 @@ class Collector(ida.action_handler_t):
             with open(os.environ["TYPE_LIB"], "rb") as type_lib_file:
                 self.type_lib = TypeLibCodec.decode(type_lib_file.read())
         except Exception as e:
+            print(e)
             print("Could not find type library, creating a new one")
             self.type_lib = TypeLib()
-        super().__init__(self)
+        super().__init__()
 
     def write_type_lib(self) -> None:
         """Dumps the type library to the file specified by the environment variable
         `TYPE_LIB`.
         """
+        print(self.type_lib)
         with open(os.environ["TYPE_LIB"], "w") as type_lib_fh:
-            type_lib_fh.write(TypeLibCodec.encode(self.type_lib))
+            encoded = TypeLibCodec.encode(self.type_lib)
+            type_lib_fh.write(encoded)
             type_lib_fh.flush()
 
     def collect_variables(

@@ -4,8 +4,8 @@ from collections import defaultdict
 
 import idaapi as ida
 
-from decompiler.typeinfo import TypeLib, TypeInfo
-from decompiler.variable import Variable
+from typeinfo import TypeLib, TypeInfo
+from variable import Variable
 
 
 class Statement:
@@ -841,5 +841,6 @@ def parse_hexrays_statement(stmt: ida.cinsn_t) -> Statement:
 
 class AST:
     def __init__(self, function: ida.cfunc_t):
+        print("Creating AST")
         self.function = function
         self.root = Block.from_item(function.body)

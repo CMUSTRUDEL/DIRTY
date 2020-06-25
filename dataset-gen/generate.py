@@ -11,7 +11,7 @@ import os
 from runner import Runner
 
 dire_dir = os.path.dirname(os.path.abspath(__file__))
-COLLECT = os.path.join(dire_dir, 'decompiler', 'collect.py')
+COLLECT = os.path.join(dire_dir, 'decompiler', 'debug.py')
 DUMP_TREES = os.path.join(dire_dir, 'decompiler', 'dump_trees.py')
 
 parser = argparse.ArgumentParser(

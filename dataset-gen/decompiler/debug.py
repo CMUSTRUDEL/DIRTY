@@ -4,16 +4,16 @@ import pickle
 import idaapi as ida
 from idautils import Functions
 
-from decompiler.collect import Collector
-from decompiler.function import Function
-from decompiler.typeinfo import TypeLib
+from collect import Collector
+from function import Function
+from typeinfo import TypeLib
 
 class CollectDebug(Collector):
     """Class for collecting debug information"""
 
     def __init__(self):
         self.functions: Dict[int, Function] = dict()
-        super().__init__(self)
+        super().__init__()
 
     def write_functions(self) -> None:
         """Dumps the collected functions to the file specified by the environment
@@ -40,16 +40,15 @@ class CollectDebug(Collector):
 
             # Function info
             name: str = ida.get_func_name(ea)
-
             self.type_lib.add_ida_type(cfunc.type.get_rettype())
             return_type = TypeLib.parse_ida_type(cfunc.type.get_rettype())
 
             arguments = self.collect_variables(
-                f.frsize, f.get_stkoff_delta(), cfunc.arguments
+                f.frsize, cfunc.get_stkoff_delta(), cfunc.arguments
             )
             local_vars = self.collect_variables(
                 f.frsize,
-                f.get_stkoff_delta(),
+                cfunc.get_stkoff_delta(),
                 [v for v in cfunc.get_lvars() if not v.is_arg_var],
             )
             self.functions[ea] = Function(
@@ -58,8 +57,10 @@ class CollectDebug(Collector):
                 arguments=arguments,
                 local_vars=local_vars,
             )
+
         self.write_type_lib()
-        self.write_functions()
+        # FIXME
+        # self.write_functions()
         return 1
 
 

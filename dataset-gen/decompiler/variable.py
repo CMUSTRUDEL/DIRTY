@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from decompiler.typeinfo import TypeInfo
+from typeinfo import TypeInfo
 
 class Location:
     """A variable location"""

@@ -6,9 +6,9 @@ import pickle
 import idaapi as ida
 from idautils import Functions
 
-from decompiler.collect import Collector
-from decompiler.function import Function
-from decompiler.typeinfo import TypeLib
+from collect import Collector
+from function import Function
+from typeinfo import TypeLib
 
 
 class CollectDecompiler(Collector):
@@ -19,7 +19,7 @@ class CollectDecompiler(Collector):
         with open(os.environ["FUNCTIONS"], "rb") as functions_fh:
             self.debug_functions: Dict[int, Function] = pickle.load(functions_fh)
         self.decompiler_functions: Dict[int, Function] = dict()
-        super().__init__(self)
+        super().__init__()
 
     # FIXME
     def write_info(self) -> None:
@@ -49,11 +49,11 @@ class CollectDecompiler(Collector):
             return_type = TypeLib.parse_ida_type(cfunc.type.get_rettype())
 
             arguments = self.collect_variables(
-                f.frsize, f.get_stkoff_delta(), cfunc.arguments
+                f.frsize, cfunc.get_stkoff_delta(), cfunc.arguments
             )
             local_vars = self.collect_variables(
                 f.frsize,
-                f.get_stkoff_delta(),
+                cfunc.get_stkoff_delta(),
                 [v for v in cfunc.get_lvars() if not v.is_arg_var],
             )
             self.decompiler_functions[ea] = Function(
