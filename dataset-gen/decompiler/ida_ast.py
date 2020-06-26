@@ -15,11 +15,20 @@ from typeinfo import TypeLib, TypeInfo
 from variable import Variable
 
 
+#################### AST Nodes ####################
+
 class Statement:
     """A statement. Corresponds to the Hex-Rays ctype_t types"""
 
+    # A dummy meta. If this is hit during decoding there is a problem
+    meta = -1
+
     def __init__(self, node_id: int):
         self.node_id = node_id
+
+    def to_json(self):
+        """Encodes the node as JSON"""
+        return { "meta": self.meta }
 
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Statement":
@@ -45,6 +54,14 @@ class UnaryExpression(Expression):
         self.node_id = node_id
         self.x = x
 
+    def to_json(self):
+        x = self.x.to_json()
+        return {
+            "id": self.node_id,
+            "x": x,
+            "M": self.meta,
+        }
+
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "UnaryExpression":
         node_id = item.obj_id
@@ -61,6 +78,16 @@ class BinaryExpression(Expression):
         self.node_id = node_id
         self.x = x
         self.y = y
+
+    def to_json(self):
+        x = self.x.to_json()
+        y = self.x.to_json()
+        return {
+            "id": self.node_id,
+            "x": x,
+            "y": y,
+            "M": self.meta,
+        }
 
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "BinaryExpression":
@@ -174,6 +201,18 @@ class Tern(Expression):
         self.x = x
         self.y = y
         self.z = z
+
+    def to_json(self):
+        x = self.x.to_json()
+        y = self.x.to_json()
+        z = self.x.to_json()
+        return {
+            "id": self.node_id,
+            "x": x,
+            "y": y,
+            "z": z,
+            "M": self.meta
+        }
 
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Tern":
@@ -400,6 +439,14 @@ class Ptr(Expression):
         self.x = x
         self.ptrsize = ptrsize
 
+    def to_json(self):
+        x = self.x.to_json()
+        return {
+            "id": self.node_id,
+            "x": x,
+            "M": self.meta,
+        }
+
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Ptr":
         node_id = item.obj_id
@@ -460,6 +507,14 @@ class Call(Expression):
                 self.name = lvars[self.idx].name
             self.formal_type: TypeInfo = TypeLib.parse_ida_type(item.formal_type)
 
+        def to_json(self):
+            return {
+                "id": self.node_id,
+                "va": self.is_vararg,
+                "i": self.idx,
+                "n": self.name,
+            }
+
         def __repr__(self):
             if self.is_vararg:
                 return "Vararg"
@@ -469,6 +524,16 @@ class Call(Expression):
         self.node_id = node_id
         self.x = x
         self.a = a
+
+    def to_json(self):
+        x = self.x.to_json()
+        a = [ arg.to_json() for arg in self.a ]
+        return {
+            "id": self.node_id,
+            "x": x,
+            "a": a,
+            "M": self.meta,
+        }
 
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Call":
@@ -497,6 +562,15 @@ class Memref(Expression):
         self.x = x
         self.m = m
 
+    def to_json(self):
+        x = self.x.to_json()
+        return {
+            "id": self.node_id,
+            "x": x,
+            "m": self.m,
+            "M": self.meta,
+        }
+
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Memref":
         node_id = item.obj_id
@@ -518,6 +592,16 @@ class Memptr(Expression):
         self.m = m
         self.ptrsize = ptrsize
 
+    def to_json(self):
+        x = self.x.to_json()
+        return {
+            "id": self.node_id,
+            "x": x,
+            "m": self.m,
+            "p": self.ptrsize,
+            "M": self.meta,
+        }
+
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Memptr":
         node_id = item.obj_id
@@ -537,6 +621,13 @@ class Num(Expression):
         self.node_id = node_id
         self.n = n
 
+    def to_json(self):
+        return {
+            "id": self.node_id,
+            "n": self.n,
+            "M": self.meta,
+        }
+
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Num":
         node_id = item.obj_id
@@ -553,6 +644,13 @@ class Fnum(Expression):
     def __init__(self, node_id: int, fpc: int):
         self.node_id = node_id
         self.fpc = fpc
+
+    def to_json(self):
+        return {
+            "id": self.node_id,
+            "f": self.fpc,
+            "M": self.meta,
+        }
 
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Fnum":
@@ -571,6 +669,13 @@ class Str(Expression):
         self.node_id = node_id
         self.string = string
 
+    def to_json(self):
+        return {
+            "id": self.node_id,
+            "s": self.string,
+            "M": self.meta,
+        }
+
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Str":
         node_id = item.obj_id
@@ -587,6 +692,16 @@ class Obj(Expression):
     def __init__(self, node_id: int, obj_ea: int):
         self.node_id = node_id
         self.obj_ea = obj_ea
+        func_name = ida.get_func_name(self.obj_ea)
+        self.func_name = func_name if func_name else None
+
+    def to_json(self):
+        return {
+            "id": self.node_id,
+            "e": self.obj_ea,
+            "n": self.func_name,
+            "M": self.meta,
+        }
 
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Obj":
@@ -595,8 +710,7 @@ class Obj(Expression):
 
     def __repr__(self):
         # If this is a function show its name, otherwise show the offset
-        func_name = ida.get_func_name(self.obj_ea)
-        return func_name if func_name else f"Obj ({self.obj_ea})"
+        return self.func_name if self.func_name else f"Obj ({self.obj_ea})"
 
 
 class Var(Expression):
@@ -612,6 +726,14 @@ class Var(Expression):
         self.idx = idx
         self.lvar = lvars[self.idx]
 
+    def to_json(self):
+        return {
+            "id": self.node_id,
+            "i": self.idx,
+            "n": self.lvar.name,
+            "M": self.meta,
+        }
+
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Var":
         node_id = item.obj_id
@@ -619,6 +741,7 @@ class Var(Expression):
         return cls(node_id=node_id, idx=idx, lvars=lvars)
 
     def __repr__(self):
+        # FIXME
         # typ = TypeLib.parse_ida_type(self.lvar.type)
         return f"{self.lvar.name}"
 
@@ -649,6 +772,13 @@ class Type(Expression):
         self.node_id = node_id
         self.typ = typ
 
+    def to_json(self):
+        return {
+            "id": self.node_id,
+            "t": self.typ,
+            "M": self.meta,
+        }
+
     @classmethod
     def from_item(cls, item: ida.cexpr_t, lvars: ida.lvars_t) -> "Type":
         node_id = item.obj_id
@@ -669,6 +799,13 @@ class Block(Statement):
     def __init__(self, node_id: int, statements: t.List[Statement]):
         self.node_id = node_id
         self.statements = statements
+
+    def to_json(self):
+        return {
+            "id": self.node_id,
+            "M": self.meta,
+            "s": [ stmt.to_json() for stmt in self.statements ],
+        }
 
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Block":
@@ -707,6 +844,18 @@ class If(ExprStatement):
         self.ielse = ielse
         self.expr = expr
 
+    def to_json(self):
+        ithen = self.ithen.to_json() if self.ithen else None
+        ielse = self.ielse.to_json() if self.ielse else None
+        expr = self.expr.to_json()
+        return {
+            "id": self.node_id,
+            "M": self.meta,
+            "e": expr,
+            "t": ithen,
+            "f": ielse,
+        }
+
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "If":
         node_id = item.obj_id
@@ -733,6 +882,16 @@ class Do(Loop):
 
     meta = ida.cit_do
 
+    def to_json(self):
+        body = self.body.to_json()
+        expr = self.expr.to_json()
+        return {
+            "id": self.node_id,
+            "M": self.meta,
+            "e": expr,
+            "b": body,
+        }
+
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Loop":
         node_id = item.obj_id
@@ -748,6 +907,16 @@ class While(Loop):
     """cit_while"""
 
     meta = ida.cit_while
+
+    def to_json(self):
+        body = self.body.to_json()
+        expr = self.expr.to_json()
+        return {
+            "id": self.node_id,
+            "M": self.meta,
+            "e": expr,
+            "b": body,
+        }
 
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Loop":
@@ -778,6 +947,20 @@ class For(Loop):
         self.init = init
         self.step = step
 
+    def to_json(self):
+        body = self.body.to_json()
+        expr = self.expr.to_json()
+        init = self.init.to_json()
+        step = self.step.to_json()
+        return {
+            "id": self.node_id,
+            "M": self.meta,
+            "e": expr,
+            "b": body,
+            "i": init,
+            "s": step,
+        }
+
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "For":
         node_id = item.obj_id
@@ -803,6 +986,13 @@ class Switch(ExprStatement):
             self.values = list(item.values)
             self.stmt = parse_hexrays_statement(item, lvars)
 
+        def to_json(self):
+            return {
+                "id": self.node_id,
+                "v": self.values,
+                "s": self.stmt.to_json(),
+            }
+
         def __repr__(self):
             return f"Case (values: {self.values}, stmt: {self.stmt})"
 
@@ -816,6 +1006,16 @@ class Switch(ExprStatement):
         super().__init__(node_id, expr)
         # self.mvnf = mvnf
         self.cases = cases
+
+    def to_json(self):
+        expr = self.expr.to_json()
+        cases = [ case.to_json() for case in self.cases ]
+        return {
+            "id": self.node_id,
+            "M": self.meta,
+            "e": expr,
+            "c": cases,
+        }
 
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Switch":
@@ -847,6 +1047,14 @@ class Return(ExprStatement):
         expr = parse_hexrays_expression(stmt.expr, lvars)
         return cls(node_id=node_id, expr=expr)
 
+    def to_json(self):
+        expr = self.expr.to_json()
+        return {
+            "id": self.node_id,
+            "M": self.meta,
+            "e": expr,
+        }
+
     def __repr__(self):
         return f"Return (expr: {self.expr})"
 
@@ -858,6 +1066,13 @@ class Goto(Statement):
     def __init__(self, node_id: int, label_num: int):
         self.node_id = node_id
         self.label_num = label_num
+
+    def to_json(self):
+        return {
+            "id": self.node_id,
+            "M": self.meta,
+            "l": self.label_num,
+        }
 
     @classmethod
     def from_item(cls, item: ida.citem_t, lvars: ida.lvars_t) -> "Goto":
@@ -885,6 +1100,7 @@ class Continue(Statement):
 
     meta = ida.cit_continue
 
+
 #################### Utilities ####################
 
 def _get_all_classes(cls) -> set:
@@ -911,6 +1127,7 @@ def parse_hexrays_statement(stmt: ida.cinsn_t, lvars: ida.lvars_t) -> Statement:
         return parse_hexrays_expression(stmt.cexpr, lvars)
     return statements[stmt.op].from_item(stmt, lvars)  # type: ignore
 
+
 #################### AST ####################
 class AST:
     def __init__(self, function: ida.cfunc_t):
@@ -920,3 +1137,4 @@ class AST:
         self.root = parse_hexrays_statement(function.body, function.lvars)
         print(self.root)
         print("Done creating AST")
+        print(self.root.to_json())
