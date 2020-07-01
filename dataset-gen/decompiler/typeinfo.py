@@ -757,30 +757,32 @@ class TypeLibCodec:
     def decode(encoded: str) -> CodecTypes:
         """Decodes a JSON string"""
 
-        def read_metadata(d: t.Dict[str, t.Any]) -> TypeLibCodec.CodecTypes:
-            classes: t.Dict[
-                t.Union[int, str],
-                t.Union[
-                    t.Type["TypeLib"],
-                    t.Type["TypeLib.EntryList"],
-                    t.Type["TypeInfo"],
-                    t.Type["UDT.Member"],
-                ],
-            ] = {
-                "E": TypeLib.EntryList,
-                0: TypeLib,
-                1: TypeInfo,
-                2: Array,
-                3: Pointer,
-                4: UDT.Field,
-                5: UDT.Padding,
-                6: Struct,
-                7: Union,
-                8: Void,
-                9: FunctionPointer,
-            }
-            return classes[d["T"]]._from_json(d)
         return loads(encoded, object_hook=read_metadata)
+
+    @staticmethod
+    def read_metadata(d: t.Dict[str, t.Any]) -> "TypeLibCodec.CodecTypes":
+        classes: t.Dict[
+            t.Union[int, str],
+            t.Union[
+                t.Type["TypeLib"],
+                t.Type["TypeLib.EntryList"],
+                t.Type["TypeInfo"],
+                t.Type["UDT.Member"],
+            ],
+        ] = {
+            "E": TypeLib.EntryList,
+            0: TypeLib,
+            1: TypeInfo,
+            2: Array,
+            3: Pointer,
+            4: UDT.Field,
+            5: UDT.Padding,
+            6: Struct,
+            7: Union,
+            8: Void,
+            9: FunctionPointer,
+        }
+        return classes[d["T"]]._from_json(d)
 
     class _Encoder(JSONEncoder):
         def default(self, obj: t.Any) -> t.Any:
