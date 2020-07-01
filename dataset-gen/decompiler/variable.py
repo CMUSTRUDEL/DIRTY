@@ -2,12 +2,14 @@
 
 from typing import Any, Optional
 
-from typeinfo import TypeInfo
+from typeinfo import TypeLibCodec, TypeInfo
+
 
 class Location:
     """A variable location"""
-
-    pass
+    def json_key(self):
+        """Returns a string suitable as a key in a JSON dict"""
+        pass
 
 
 class Register(Location):
@@ -18,6 +20,9 @@ class Register(Location):
 
     def __init__(self, name: int):
         self.name = name
+
+    def json_key(self):
+        return f"r{self.name}"
 
     def __eq__(self, other: Any) -> bool:
         return isinstance(other, Register) and self.name == other.name
@@ -38,6 +43,9 @@ class Stack(Location):
     def __init__(self, offset: int):
         self.offset = offset
 
+    def json_key(self):
+        return f"s{self.offset}"
+
     def __eq__(self, other: Any) -> bool:
         return isinstance(other, Stack) and self.offset == other.offset
 
@@ -47,6 +55,13 @@ class Stack(Location):
     def __repr__(self) -> str:
         return f"Stk 0x{self.offset:x}"
 
+
+def location_from_json_key(key: str) -> "Location":
+    """Hacky way to return a location from a JSON key"""
+    if key.startswith("s"):
+        return Stack(int(key[:-1]))
+    else:
+        return Register(key[:-1])
 
 class Variable:
     """A variable
@@ -60,6 +75,18 @@ class Variable:
         self.typ = typ
         self.name = name
         self.user = user
+
+    def to_json(self):
+        return {
+            "t": self.typ._to_json(),
+            "n": self.name,
+            "u": self.user,
+        }
+
+    @classmethod
+    def from_json(cls, d):
+        typ = TypeLibCodec.read_metadata(d["t"])
+        return cls(typ=typ, name=d["n"], user=d["u"])
 
     def __eq__(self, other: Any) -> bool:
         return (

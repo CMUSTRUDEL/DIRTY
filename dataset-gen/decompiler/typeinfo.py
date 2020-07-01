@@ -253,15 +253,15 @@ class TypeLib:
         return self._data.values()
 
     @classmethod
-    def _from_json(
-        cls, d: t.Dict[str, t.Any]
-    ) -> "TypeLib":
+    def _from_json(cls, d: t.Dict[str, t.Any]) -> "TypeLib":
         data: t.DefaultDict[int, "TypeLib.EntryList"] = defaultdict(TypeLib.EntryList)
         # Convert lists of types into sets
         for key, lib_entry in d.items():
             if key == "T":
                 continue
-            entry_list = [TypeLib.Entry(frequency=f, typeinfo=ti) for (f, ti) in lib_entry]
+            entry_list = [
+                TypeLib.Entry(frequency=f, typeinfo=ti) for (f, ti) in lib_entry
+            ]
             data[int(key)] = TypeLib.EntryList(entry_list)
         return cls(data)
 
@@ -757,7 +757,7 @@ class TypeLibCodec:
     def decode(encoded: str) -> CodecTypes:
         """Decodes a JSON string"""
 
-        return loads(encoded, object_hook=read_metadata)
+        return loads(encoded, object_hook=TypeLibCodec.read_metadata)
 
     @staticmethod
     def read_metadata(d: t.Dict[str, t.Any]) -> "TypeLibCodec.CodecTypes":

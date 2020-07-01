@@ -1,14 +1,18 @@
 import idaapi as ida
 
+import jsonlines
 import os
 import pickle
 
+from typing import Dict, List
+
 import idaapi as ida
+from ida_lines import tag_remove
 from idautils import Functions
 
 from ida_ast import AST
 from collect import Collector
-from function import Function
+from function import CollectedFunction, Function
 from typeinfo import TypeLib
 
 
@@ -23,18 +27,21 @@ class CollectDecompiler(Collector):
         with open(os.environ["FUNCTIONS"], "rb") as functions_fh:
             self.debug_functions: Dict[int, Function] = pickle.load(functions_fh)
         print("Done")
-        self.decompiler_functions: Dict[int, Function] = dict()
+        self.functions: List[CollectedFunction] = list()
 
     # FIXME
     def write_info(self) -> None:
-        print("DONE")
+        with open("dump.jsonl", 'a+') as jsonl_file:
+            with jsonlines.Writer(jsonl_file, compact=True) as writer:
+                for cf in self.functions:
+                    writer.write(cf.to_json())
 
     def activate(self, ctx) -> int:
         """Collects types, user-defined variables, their locations in addition to the
         AST and raw code.
         """
         print("Collecting vars and types.")
-        for ea in Functions():
+        for ea in (ea for ea in Functions() if ea in self.debug_functions):
             # Decompile
             f = ida.get_func(ea)
             cfunc = None
@@ -59,12 +66,24 @@ class CollectDecompiler(Collector):
                 cfunc.get_stkoff_delta(),
                 [v for v in cfunc.get_lvars() if not v.is_arg_var],
             )
+            raw_code = ""
+            for line in cfunc.get_pseudocode():
+                raw_code += f"{' '.join(tag_remove(line.line).split())}\n"
             ast = AST(function=cfunc)
-            self.decompiler_functions[ea] = Function(
+            decompiler = Function(
+                ast=ast,
                 name=name,
                 return_type=return_type,
                 arguments=arguments,
                 local_vars=local_vars,
+                raw_code=raw_code,
+            )
+            self.functions.append(
+                CollectedFunction(
+                    ea=ea,
+                    debug=self.debug_functions[ea],
+                    decompiler=decompiler,
+                )
             )
         self.write_info()
         return 1

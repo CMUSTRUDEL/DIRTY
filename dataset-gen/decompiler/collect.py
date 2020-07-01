@@ -29,7 +29,6 @@ class Collector(ida.action_handler_t):
         """Dumps the type library to the file specified by the environment variable
         `TYPE_LIB`.
         """
-        print(self.type_lib)
         with open(os.environ["TYPE_LIB"], "w") as type_lib_fh:
             encoded = TypeLibCodec.encode(self.type_lib)
             type_lib_fh.write(encoded)
@@ -56,7 +55,7 @@ class Collector(ida.action_handler_t):
             if v.is_reg_var():
                 loc = Register(v.get_reg1())
             collected_vars[loc].add(
-                Variable(typ=typ, name=v.name, user=v.has_user_name)
+                Variable(typ=typ, name=v.name, user=v.has_user_info)
             )
         return collected_vars
 

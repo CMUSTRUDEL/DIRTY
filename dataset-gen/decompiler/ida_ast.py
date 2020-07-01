@@ -31,7 +31,7 @@ class Statement:
 
     def to_json(self):
         """Encodes the node as JSON"""
-        return { "id": self.node_id, "M": self.meta }
+        return {"id": self.node_id, "M": self.meta}
 
     @classmethod
     def from_json(cls, d) -> "Statement":
@@ -57,6 +57,10 @@ class Expression(Statement):
     def from_item(cls, item: ida.citem_t, ast: "AST") -> "Expression":
         return cls(node_id=ast.next_id())
 
+
+class Empty(Expression):
+    """An empty expression"""
+    meta = ida.cot_empty
 
 class UnaryExpression(Expression):
     """A unary expression. Has one operand stored in x"""
@@ -550,7 +554,6 @@ class Call(Expression):
 
         @classmethod
         def from_json(cls, d) -> "Call.Arg":
-            # FIXME: this
             formal_type = TypeLibCodec.read_metadata(d["t"])
             return cls(
                 node_id=d["id"],
@@ -724,29 +727,6 @@ class Fnum(Expression):
     """cot_fnum (fpc: floating point constant)"""
 
     meta = ida.cot_fnum
-
-    def __init__(self, node_id: int, fpc: int):
-        self.node_id = node_id
-        self.fpc = fpc
-
-    def to_json(self):
-        return {
-            "id": self.node_id,
-            "f": self.fpc,
-            "M": self.meta,
-        }
-
-    @classmethod
-    def from_json(cls, d) -> "Fnum":
-        return cls(node_id=d["id"], fpc=d["f"])
-
-    @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Fnum":
-        node_id = ast.next_id()
-        return cls(node_id=node_id, fpc=item.fpc.fnum)
-
-    def __repr__(self):
-        return f"Fnum ({self.fpc})"
 
 
 class Str(Expression):
@@ -1303,9 +1283,11 @@ expressions_and_statements = {c.meta: c for c in all_classes}
 expressions = {c.meta: c for c in all_classes if c.meta <= ida.cot_last}
 statements = {c.meta: c for c in all_classes if c.meta > ida.cot_last}
 
+
 def parse_hexrays_expression(expr: ida.cexpr_t, ast: "AST") -> Expression:
     """Parses a HexRays expression and returns an Expression object"""
     return expressions[expr.op].from_item(expr, ast)  # type: ignore
+
 
 def parse_hexrays_statement(stmt: ida.cinsn_t, ast: "AST") -> Statement:
     """Parses a HexRays statement and returns a Statement object"""
@@ -1322,15 +1304,30 @@ def decode_json(d) -> "Statement":
 
 #################### AST ####################
 class AST:
-    def __init__(self, function: ida.cfunc_t):
+    def __init__(
+        self,
+        function: t.Optional[ida.cfunc_t] = None,
+        root: t.Optional["Statement"] = None,
+    ):
         self._next_id = 0
-        print("Creating AST")
         self.function = function
-        print(ida.get_func_name(self.function.entry_ea))
-        self.root = parse_hexrays_statement(function.body, self)
-        print("Done creating AST")
+        if root is None and function is not None:
+            print(ida.get_func_name(self.function.entry_ea))
+            self.root = parse_hexrays_statement(function.body, self)
+        else:
+            self.root = root
 
     def next_id(self):
         next_id = self._next_id
         self._next_id += 1
         return next_id
+
+    def to_json(self):
+        return self.root.to_json()
+
+    @classmethod
+    def from_json(cls, d):
+        return cls(root=decode_json(d))
+
+    def __repr__(self):
+        return str(self.root)

@@ -8,6 +8,7 @@ from collect import Collector
 from function import Function
 from typeinfo import TypeLib
 
+
 class CollectDebug(Collector):
     """Class for collecting debug information"""
 

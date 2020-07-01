@@ -177,8 +177,8 @@ class Runner:
                     # Collect from original
                     subprocess.check_output(['cp', file_path, r.orig.name])
                     # Timeout after 30s for the collect run
-                    self.run_decompiler(r.orig.name, self.COLLECT, timeout=10)
+                    self.run_decompiler(r.orig.name, self.COLLECT, timeout=30)
                     # Dump trees
                     subprocess.call(['cp', file_path, r.stripped.name])
                     subprocess.call(['strip', '--strip-debug', r.stripped.name])
-                    self.run_decompiler(r.stripped.name, self.DUMP_TREES, timeout=10)
+                    self.run_decompiler(r.stripped.name, self.DUMP_TREES, timeout=120)
