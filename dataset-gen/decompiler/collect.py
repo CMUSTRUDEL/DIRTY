@@ -1,10 +1,11 @@
-from collections import defaultdict
-from typing import DefaultDict, Dict, Iterable, Optional, Set
-
+import gzip
 import idaapi as ida
 from idautils import Functions
 import pickle
 import os
+
+from collections import defaultdict
+from typing import DefaultDict, Dict, Iterable, Optional, Set
 
 from function import Function
 from typeinfo import TypeInfo, TypeLib, TypeLibCodec
@@ -16,8 +17,9 @@ class Collector(ida.action_handler_t):
 
     def __init__(self):
         # Load the type library
+        self.type_lib_file_name = os.environ["TYPE_LIB"] + ".json.gz"
         try:
-            with open(os.environ["TYPE_LIB"], "rb") as type_lib_file:
+            with gzip.open(self.type_lib_file_name, "rt") as type_lib_file:
                 self.type_lib = TypeLibCodec.decode(type_lib_file.read())
         except Exception as e:
             print(e)
@@ -29,10 +31,10 @@ class Collector(ida.action_handler_t):
         """Dumps the type library to the file specified by the environment variable
         `TYPE_LIB`.
         """
-        with open(os.environ["TYPE_LIB"], "w") as type_lib_fh:
+        with gzip.open(self.type_lib_file_name, "wt") as type_lib_file:
             encoded = TypeLibCodec.encode(self.type_lib)
-            type_lib_fh.write(encoded)
-            type_lib_fh.flush()
+            type_lib_file.write(encoded)
+            type_lib_file.flush()
 
     def collect_variables(
         self, frsize: int, stkoff_delta: int, variables: Iterable[ida.lvar_t],

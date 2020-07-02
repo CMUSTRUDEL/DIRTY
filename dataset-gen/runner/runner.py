@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import errno
 import pickle
 import os
@@ -129,7 +130,10 @@ class Runner:
         # Use RAM-backed memory for tmp if available
         if os.path.exists('/dev/shm'):
             tempfile.tempdir = '/dev/shm'
-        self.run()
+        try:
+            self.run()
+        except KeyboardInterrupt:
+            pass
 
     @staticmethod
     def make_dir(dir_path):
@@ -170,10 +174,18 @@ class Runner:
         with tempfile.TemporaryDirectory() as tempdir:
             tempfile.tempdir = tempdir
             for binary in self.binaries:
-                self.env['PREFIX'] = binary
                 file_path = os.path.join(self.binaries_dir, binary)
-
+                # Build up hash string in 4k blocks
+                file_hash = hashlib.sha256()
+                with open(file_path, "rb") as f:
+                    for byte_block in iter(lambda: f.read(4096), b""):
+                        file_hash.update(byte_block)
+                prefix = f"{file_hash.hexdigest()}_{binary}"
+                self.env['PREFIX'] = prefix
                 with TimedRun(timer, binary, self.env) as r:
+                    if os.path.exists(os.path.join(self.output_dir, prefix + ".jsonl.gz")):
+                        timer.message(f"{prefix} exists, skipping")
+                        continue
                     # Collect from original
                     subprocess.check_output(['cp', file_path, r.orig.name])
                     # Timeout after 30s for the collect run

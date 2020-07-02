@@ -1,5 +1,6 @@
 import idaapi as ida
 
+import gzip
 import jsonlines
 import os
 import pickle
@@ -28,11 +29,12 @@ class CollectDecompiler(Collector):
             self.debug_functions: Dict[int, Function] = pickle.load(functions_fh)
         print("Done")
         self.functions: List[CollectedFunction] = list()
+        self.output_file_name = os.path.join(os.environ['OUTPUT_DIR'],
+                                             os.environ['PREFIX']) + '.jsonl.gz'
 
-    # FIXME
     def write_info(self) -> None:
-        with open("dump.jsonl", 'a+') as jsonl_file:
-            with jsonlines.Writer(jsonl_file, compact=True) as writer:
+        with gzip.open(self.output_file_name, 'wt') as output_file:
+            with jsonlines.Writer(output_file, compact=True) as writer:
                 for cf in self.functions:
                     writer.write(cf.to_json())
 

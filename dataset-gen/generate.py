@@ -23,8 +23,8 @@ parser.add_argument('--ida',
                     )
 parser.add_argument('--type-lib',
                     metavar='LIB',
-                    help="type library",
-                    default='types.json',
+                    help="name of type library",
+                    default='types',
                     )
 parser.add_argument('binaries_dir',
                     metavar='BINARIES_DIR',
