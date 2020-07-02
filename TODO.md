@@ -9,7 +9,7 @@ TODO List for DIRE update
 - [ ] Implement `TypeLib.get_replacements()`. This function should take as input
       memory layout and output a generator of lists of possible type
       replacements.
-- [ ] Output serialized data directly to compressed files.
+- [x] Output serialized data directly to compressed files.
 - [ ] (Maybe) API calls for `CollectedFunction` that aligns debug and decompiler
       variable names. At the moment you can just compare `Location`s; if they're
       in the same location then they're the same variable. Note that it's
