@@ -23,4 +23,4 @@ TODO List for DIRE update
       `TypeInfo`). I don't like
       this (older) method, so I'd like to change it to be more in line with
       everything else.
-- [ ] Recursively traverse directories for binaries.
+- [x] Recursively traverse directories for binaries.
