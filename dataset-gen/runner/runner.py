@@ -1,3 +1,4 @@
+import argparse
 import datetime
 import hashlib
 import errno
@@ -107,14 +108,14 @@ class TimedRun:
 
 class Runner:
     def __init__(
-        self, ida, type_lib, binaries_dir, output_dir, verbose, COLLECT, DUMP_TREES
+            self, args: argparse.Namespace, COLLECT, DUMP_TREES
     ):
-        self.ida = ida
-        self.type_lib = type_lib
-        self.binaries_dir = binaries_dir
-        self.output_dir = output_dir
-        self._num_files = None
-        self.verbose = verbose
+        self.ida = args.ida
+        self.type_lib = args.type_lib
+        self.binaries_dir = args.binaries_dir
+        self.output_dir = args.output_dir
+        self._num_files = args.num_files
+        self.verbose = args.verbose
         self.COLLECT = COLLECT
         self.DUMP_TREES = DUMP_TREES
 
@@ -123,7 +124,7 @@ class Runner:
         self.env["OUTPUT_DIR"] = self.output_dir
         self.env["TYPE_LIB"] = self.type_lib
 
-        self.make_dir(output_dir)
+        self.make_dir(self.output_dir)
 
         # Use RAM-backed memory for tmp if available
         if os.path.exists("/dev/shm"):
