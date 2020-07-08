@@ -24,3 +24,4 @@ TODO List for DIRE update
       this (older) method, so I'd like to change it to be more in line with
       everything else.
 - [x] Recursively traverse directories for binaries.
+- [ ] Add environment management for dependencies.
