@@ -100,7 +100,7 @@ class TimedRun:
         elif type is pickle.UnpicklingError:
             self.timer.message("Unpickling error")
         elif type is not None:
-            self.timer.message(f"{Type}: value")
+            self.timer.message(f"{type}: value")
             return False
         self.timer.update(self.start_time, datetime.datetime.now())
         return True
