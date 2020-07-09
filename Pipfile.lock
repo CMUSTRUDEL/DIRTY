@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "6fb7e99cb216a8e05251ba960d9e249b16b037eb2082ee85f55a4782a8f4e7af"
+            "sha256": "4620f4e5b8b8aaae0eb4e5faee426061e7284e4e12426f3fc730cc9e7160a178"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -16,6 +16,14 @@
         ]
     },
     "default": {
+        "idaenv": {
+            "hashes": [
+                "sha256:85655525881d0b4f0d17c841dd62506cf7036ecbbe03d4147f0cd64b352f6c73",
+                "sha256:de115d905fdb0c5583570407fe0028156c065299b327a1979378d96184018fe1"
+            ],
+            "index": "pypi",
+            "version": "==0.4.0"
+        },
         "jsonlines": {
             "hashes": [
                 "sha256:0ebd5b0c3efe0d4b5018b320fb0ee1a7b680ab39f6eb853715859f818d386cc8",

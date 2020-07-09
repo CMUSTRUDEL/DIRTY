@@ -17,7 +17,11 @@ class Collector(ida.action_handler_t):
 
     def __init__(self):
         # Load the type library
-        self.type_lib_file_name = os.environ["TYPE_LIB"] + ".json.gz"
+        self.type_lib_file_name = os.path.join(
+            os.environ["OUTPUT_DIR"],
+            "types",
+            os.environ["PREFIX"] + ".json.gz",
+        )
         try:
             with gzip.open(self.type_lib_file_name, "rt") as type_lib_file:
                 self.type_lib = TypeLibCodec.decode(type_lib_file.read())

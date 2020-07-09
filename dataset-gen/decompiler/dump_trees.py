@@ -29,8 +29,11 @@ class CollectDecompiler(Collector):
             self.debug_functions: Dict[int, Function] = pickle.load(functions_fh)
         print("Done")
         self.functions: List[CollectedFunction] = list()
-        self.output_file_name = os.path.join(os.environ['OUTPUT_DIR'],
-                                             os.environ['PREFIX']) + '.jsonl.gz'
+        self.output_file_name = os.path.join(
+            os.environ['OUTPUT_DIR'],
+            "bins",
+            os.environ['PREFIX'] + ".jsonl.gz",
+        )
 
     def write_info(self) -> None:
         with gzip.open(self.output_file_name, 'wt') as output_file:
