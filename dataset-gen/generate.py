@@ -56,16 +56,19 @@ class Runner:
 
         def is_elf64(root: str, path: str) -> bool:
             file_path = os.path.join(root, path)
-            with open(file_path, "rb") as f:
-                header = f.read(5)
-                # '\x7fELF' means it's an ELF file, '\x02' means 64-bit
-                return header == b"\x7fELF\x02"
+            try:
+                with open(file_path, "rb") as f:
+                    header = f.read(5)
+                    # '\x7fELF' means it's an ELF file, '\x02' means 64-bit
+                    return header == b"\x7fELF\x02"
+            except IOError:
+                return False
 
         return (
             (root, f)
             for root, _, files in os.walk(self.binaries_dir)
             for f in files
-            if is_elf64(root, f) and os.access(os.path.join(root, f), os.R_OK)
+            if is_elf64(root, f)
         )
 
     @property
