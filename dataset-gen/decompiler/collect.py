@@ -53,16 +53,17 @@ class Collector(ida.action_handler_t):
             self.type_lib.add_ida_type(v.type())
             typ: TypeInfo = TypeLib.parse_ida_type(v.type())
 
-            loc: Location
+            loc: Optional[Location] = None
             if v.is_stk_var():
                 corrected = v.get_stkoff() - stkoff_delta
                 offset = frsize - corrected
                 loc = Stack(offset)
             if v.is_reg_var():
                 loc = Register(v.get_reg1())
-            collected_vars[loc].add(
-                Variable(typ=typ, name=v.name, user=v.has_user_info)
-            )
+            if loc is not None:
+                collected_vars[loc].add(
+                    Variable(typ=typ, name=v.name, user=v.has_user_info)
+                )
         return collected_vars
 
     def activate(self, ctx) -> int:
