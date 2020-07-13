@@ -52,7 +52,7 @@ class Runner:
 
     @property
     def binaries(self) -> Iterable[Tuple[str, str]]:
-        """64-bit ELFs in the binaries_dir and their paths"""
+        """Readable 64-bit ELFs in the binaries_dir and their paths"""
 
         def is_elf64(root: str, path: str) -> bool:
             file_path = os.path.join(root, path)
@@ -65,7 +65,7 @@ class Runner:
             (root, f)
             for root, _, files in os.walk(self.binaries_dir)
             for f in files
-            if is_elf64(root, f)
+            if is_elf64(root, f) and os.access(os.path.join(root, f), os.R_OK)
         )
 
     @property
