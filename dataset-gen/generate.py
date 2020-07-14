@@ -118,9 +118,9 @@ class Runner:
         path, binary = args
         new_env = self.env.copy()
         with tf.TemporaryDirectory() as tempdir:
-            with tf.NamedTemporaryFile(dir=tempdir) as functions, \
-                 tf.NamedTemporaryFile(dir=tempdir) as orig, \
-                 tf.NamedTemporaryFile(dir=tempdir) as stripped:
+            with tf.NamedTemporaryFile(dir=tempdir) as functions, tf.NamedTemporaryFile(
+                dir=tempdir
+            ) as orig, tf.NamedTemporaryFile(dir=tempdir) as stripped:
                 file_path = os.path.join(path, binary)
                 new_env["FUNCTIONS"] = functions.name
                 # Build up hash string in 4k blocks
@@ -130,11 +130,23 @@ class Runner:
                         file_hash.update(byte_block)
                 prefix = f"{file_hash.hexdigest()}_{binary}"
                 new_env["PREFIX"] = prefix
-                if os.path.exists(os.path.join(self.output_dir, "bins", prefix + ".jsonl.gz")):
+                # Try stripping first, if it fails return
+                subprocess.call(["cp", file_path, stripped.name])
+                try:
+                    subprocess.call(["strip", "--strip-debug", stripped.name])
+                except subprocess.CalledProcessError:
+                    if self.verbose:
+                        print(f"Could not strip {prefix}, skipping.")
+                    return
+                if os.path.exists(
+                    os.path.join(self.output_dir, "bins", prefix + ".jsonl.gz")
+                ):
                     if self.verbose:
                         print(f"{prefix} already collected, skipping")
                     return
-                if os.path.exists(os.path.join(self.output_dir, "types", prefix + ".jsonl.gz")):
+                if os.path.exists(
+                    os.path.join(self.output_dir, "types", prefix + ".jsonl.gz")
+                ):
                     if self.verbose:
                         print(f"{prefix} types already collected, skipping")
                 else:
@@ -143,9 +155,9 @@ class Runner:
                     # Timeout after 30s for the collect run
                     self.run_decompiler(new_env, orig.name, self.COLLECT, timeout=30)
                 # Dump trees
-                subprocess.call(["cp", file_path, stripped.name])
-                subprocess.call(["strip", "--strip-debug", stripped.name])
-                self.run_decompiler(new_env, stripped.name, self.DUMP_TREES, timeout=120)
+                self.run_decompiler(
+                    new_env, stripped.name, self.DUMP_TREES, timeout=120
+                )
 
     def run(self):
         # File counts for progress output
@@ -157,6 +169,7 @@ class Runner:
                 pool.imap_unordered(self.run_one, self.binaries), total=self.num_files
             ):
                 pass
+
 
 parser = argparse.ArgumentParser(description="Run the decompiler to generate a corpus.")
 parser.add_argument(
