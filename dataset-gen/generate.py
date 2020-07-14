@@ -171,6 +171,7 @@ class Runner:
                     leave=True,
                     dynamic_ncols=True,
                     unit="bin",
+                    smoothing=0.1,
             ):
                 pass
 
