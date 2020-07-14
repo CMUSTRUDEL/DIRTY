@@ -166,7 +166,11 @@ class Runner:
         # additional files that we can't clean up from here
         with Pool(self.num_threads) as pool:
             for p in tqdm(
-                pool.imap_unordered(self.run_one, self.binaries), total=self.num_files
+                    pool.imap_unordered(self.run_one, self.binaries),
+                    total=self.num_files,
+                    leave=True,
+                    dynamic_ncols=True,
+                    unit="bin",
             ):
                 pass
 
