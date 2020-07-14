@@ -131,10 +131,12 @@ class Runner:
                 prefix = f"{file_hash.hexdigest()}_{binary}"
                 new_env["PREFIX"] = prefix
                 if os.path.exists(os.path.join(self.output_dir, "bins", prefix + ".jsonl.gz")):
-                    print(f"{prefix} already collected, skipping")
+                    if self.verbose:
+                        print(f"{prefix} already collected, skipping")
                     return
                 if os.path.exists(os.path.join(self.output_dir, "types", prefix + ".jsonl.gz")):
-                    print(f"{prefix} types already collected, skipping")
+                    if self.verbose:
+                        print(f"{prefix} types already collected, skipping")
                 else:
                     # Collect from original
                     subprocess.check_output(["cp", file_path, orig.name])
