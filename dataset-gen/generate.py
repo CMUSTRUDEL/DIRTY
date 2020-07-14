@@ -33,6 +33,7 @@ class Runner:
         self.output_dir = args.output_dir
         self._num_files = args.num_files
         self.verbose = args.verbose
+        self.num_threads = args.num_threads
 
         self.env = os.environ.copy()
         self.env["IDALOG"] = "/dev/stdout"
@@ -116,38 +117,40 @@ class Runner:
     def run_one(self, args: Tuple[str, str]) -> None:
         path, binary = args
         new_env = self.env.copy()
-        with tf.NamedTemporaryFile() as functions, tf.NamedTemporaryFile() as orig, tf.NamedTemporaryFile() as stripped:
-            file_path = os.path.join(path, binary)
-            new_env["FUNCTIONS"] = functions.name
-            # Build up hash string in 4k blocks
-            file_hash = hashlib.sha256()
-            with open(file_path, "rb") as f:
-                for byte_block in iter(lambda: f.read(4096), b""):
-                    file_hash.update(byte_block)
-            prefix = f"{file_hash.hexdigest()}_{binary}"
-            new_env["PREFIX"] = prefix
-            if os.path.exists(os.path.join(self.output_dir, "bins", prefix + ".jsonl.gz")):
-                print(f"{prefix} already collected, skipping")
-                return
-            if os.path.exists(os.path.join(self.output_dir, "types", prefix + ".jsonl.gz")):
-                print(f"{prefix} types already collected, skipping")
-            else:
-                # Collect from original
-                subprocess.check_output(["cp", file_path, orig.name])
-                # Timeout after 30s for the collect run
-                self.run_decompiler(new_env, orig.name, self.COLLECT, timeout=30)
-            # Dump trees
-            subprocess.call(["cp", file_path, stripped.name])
-            subprocess.call(["strip", "--strip-debug", stripped.name])
-            self.run_decompiler(new_env, stripped.name, self.DUMP_TREES, timeout=120)
+        with tf.TemporaryDirectory() as tempdir:
+            with tf.NamedTemporaryFile(dir=tempdir) as functions, \
+                 tf.NamedTemporaryFile(dir=tempdir) as orig, \
+                 tf.NamedTemporaryFile(dir=tempdir) as stripped:
+                file_path = os.path.join(path, binary)
+                new_env["FUNCTIONS"] = functions.name
+                # Build up hash string in 4k blocks
+                file_hash = hashlib.sha256()
+                with open(file_path, "rb") as f:
+                    for byte_block in iter(lambda: f.read(4096), b""):
+                        file_hash.update(byte_block)
+                prefix = f"{file_hash.hexdigest()}_{binary}"
+                new_env["PREFIX"] = prefix
+                if os.path.exists(os.path.join(self.output_dir, "bins", prefix + ".jsonl.gz")):
+                    print(f"{prefix} already collected, skipping")
+                    return
+                if os.path.exists(os.path.join(self.output_dir, "types", prefix + ".jsonl.gz")):
+                    print(f"{prefix} types already collected, skipping")
+                else:
+                    # Collect from original
+                    subprocess.check_output(["cp", file_path, orig.name])
+                    # Timeout after 30s for the collect run
+                    self.run_decompiler(new_env, orig.name, self.COLLECT, timeout=30)
+                # Dump trees
+                subprocess.call(["cp", file_path, stripped.name])
+                subprocess.call(["strip", "--strip-debug", stripped.name])
+                self.run_decompiler(new_env, stripped.name, self.DUMP_TREES, timeout=120)
 
     def run(self):
         # File counts for progress output
 
         # Create a temporary directory, since the decompiler makes a lot of
         # additional files that we can't clean up from here
-        with tf.TemporaryDirectory() as tempdir, Pool(4) as pool:
-            tf.tempdir = tempdir
+        with Pool(self.num_threads) as pool:
             for p in tqdm(
                 pool.imap_unordered(self.run_one, self.binaries), total=self.num_files
             ):
@@ -159,6 +162,14 @@ parser.add_argument(
     metavar="IDA",
     help="location of the idat64 binary",
     default="/home/jlacomis/bin/ida/idat64",
+)
+parser.add_argument(
+    "-t",
+    "--num-threads",
+    metavar="N",
+    help="number of threads to use",
+    default=4,
+    type=int,
 )
 parser.add_argument(
     "-n",
