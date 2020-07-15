@@ -2,8 +2,11 @@
 
 from typing import Any, Optional
 
-from dire_types import TypeLibCodec, TypeInfo
-
+# Huge hack to get importing to work with the decompiler
+try:
+    from dire_types import TypeLibCodec, TypeInfo
+except ImportError:
+    from .dire_types import TypeLibCodec, TypeInfo
 
 class Location:
     """A variable location"""

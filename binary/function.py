@@ -2,9 +2,15 @@ from collections import defaultdict
 
 from typing import DefaultDict, Mapping, Optional, Set
 
-from ast import AST
-from dire_types import TypeLibCodec, TypeInfo
-from variable import Location, Variable, location_from_json_key
+# Huge hack to get importing to work with the decompiler
+try:
+    from ida_ast import AST
+    from dire_types import TypeLibCodec, TypeInfo
+    from variable import Location, Variable, location_from_json_key
+except ImportError:
+    from .ida_ast import AST
+    from .dire_types import TypeLibCodec, TypeInfo
+    from .variable import Location, Variable, location_from_json_key
 
 
 class Function:

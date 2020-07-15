@@ -9,12 +9,21 @@ import typing as t
 
 from collections import defaultdict
 
-import idaapi as ida
+# Import IDA stubs if can't find the IDA API
+try:
+    import idaapi as ida
+except:
+    import idastubs.idaapi as ida
 
 from json import dumps, loads
 
-from dire_types import TypeLib, TypeLibCodec, TypeInfo
-from variable import Variable
+# Huge hack to get importing to work with the decompiler
+try:
+    from dire_types import TypeLib, TypeLibCodec, TypeInfo
+    from variable import Variable
+except ImportError:
+    from .dire_types import TypeLib, TypeLibCodec, TypeInfo
+    from .variable import Variable
 
 
 #################### AST Nodes ####################
