@@ -6,7 +6,7 @@ from idautils import Functions
 
 from collect import Collector
 from function import Function
-from typeinfo import TypeLib
+from dire_types import TypeLib
 
 
 class CollectDebug(Collector):

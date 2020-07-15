@@ -14,7 +14,7 @@ from idautils import Functions
 from ida_ast import AST
 from collect import Collector
 from function import CollectedFunction, Function
-from typeinfo import TypeLib
+from dire_types import TypeLib
 
 
 class CollectDecompiler(Collector):

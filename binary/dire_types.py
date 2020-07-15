@@ -237,6 +237,11 @@ class TypeLib:
                     typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
                     self.add_ida_type(member.type, worklist)
 
+    def add_json(self, d: t.Dict[str, t.Any]) -> None:
+        """Adds the info in a serialized JSON file to this TypeInfo"""
+        # TODO
+        pass
+
     def get_replacements(
         self, types: t.Tuple["TypeInfo", ...]
     ) -> t.Iterable[t.Tuple["TypeInfo", ...]]:

@@ -8,7 +8,7 @@ from collections import defaultdict
 from typing import DefaultDict, Dict, Iterable, Optional, Set
 
 from function import Function
-from typeinfo import TypeInfo, TypeLib, TypeLibCodec
+from dire_types import TypeInfo, TypeLib, TypeLibCodec
 from variable import Location, Stack, Register, Variable
 
 
