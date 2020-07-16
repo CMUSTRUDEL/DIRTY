@@ -7,10 +7,13 @@ Note that all sizes are in 8-bit bytes
 """
 from collections import defaultdict
 from json import JSONEncoder, dumps, loads
+
+import gzip
+import os
 import typing as t
 
 try:
-    import ida_typeinf
+    import ida_typeinf # type: ignore
 except ImportError:
     print("Could not import ida_typeinf. Cannot parse IDA types.")
 
@@ -55,8 +58,8 @@ class TypeLib:
             """The total frequency for this entry list"""
             return sum(c.frequency for c in self._data)
 
-        def add(self, item: "TypeInfo") -> bool:
-            """Add an item, increasing frequency if it already exists.
+        def add_n(self, item: "TypeInfo", n: int) -> bool:
+            """Add n items, increasing frequency if it already exists.
             Returns True if the item already existed.
             """
             update_idx: t.Optional[int] = None
@@ -69,7 +72,7 @@ class TypeLib:
             if update_idx is not None:
                 old_entry = self._data[update_idx]
                 self._data[update_idx] = TypeLib.Entry(
-                    frequency=old_entry.frequency + 1, typeinfo=old_entry.typeinfo
+                    frequency=old_entry.frequency + n, typeinfo=old_entry.typeinfo
                 )
                 self._sort()
                 return True
@@ -77,6 +80,21 @@ class TypeLib:
                 # Don't need to sort if we're just appending with freq 1
                 self._data.append(TypeLib.Entry(frequency=1, typeinfo=item))
                 return False
+
+        def add(self, item: "TypeInfo") -> bool:
+            """Add an item, increasing frequency if it already exists.
+            Returns True if the item already existed.
+            """
+            return self.add_n(item, 1)
+
+        def add_entry(self, entry: "TypeLib.Entry") -> bool:
+            """Add an Entry, returns True if the entry already existed"""
+            return self.add_n(entry.typeinfo, entry.frequency)
+
+        def add_all(self, other: "TypeLib.EntryList") -> None:
+            """Add all entries in other"""
+            for entry in other:
+                self.add_entry(entry)
 
         def get_freq(self, item: "TypeInfo") -> t.Optional[int]:
             """Get the frequency of an item, None if it does not exist"""
@@ -89,19 +107,11 @@ class TypeLib:
             """Sorts the internal list by frequency"""
             self._data.sort(reverse=True, key=lambda entry: entry.frequency)
 
-        # @classmethod
-        # def _from_json(cls, d) -> "TypeLib.EntryList":
-        #     return cls(d)
-
         def _to_json(self) -> t.Dict[str, t.Union[str, t.List["TypeLib.Entry"]]]:
             return self._data
 
         def __iter__(self):
-            return self
-
-        def __next__(self):
-            for entry in self._data:
-                yield entry
+            yield from self._data
 
         def __len__(self) -> int:
             return len(self._data)
@@ -207,10 +217,6 @@ class TypeLib:
         self, typ: "ida_typeinf.tinfo_t", worklist: t.Optional[t.Set[str]] = None
     ) -> None:
         """Adds an element to the TypeLib by parsing an IDA tinfo_t object"""
-        try:
-            import ida_typeinf
-        except ImportError:
-            raise ImportError("Could not import ida_typeinf. Cannot add IDA type.")
         if worklist is None:
             worklist = set()
         if typ.dstr() in worklist or typ.is_void():
@@ -237,10 +243,21 @@ class TypeLib:
                     typ.find_udt_member(member, ida_typeinf.STRMEM_INDEX)
                     self.add_ida_type(member.type, worklist)
 
-    def add_json(self, d: t.Dict[str, t.Any]) -> None:
-        """Adds the info in a serialized JSON file to this TypeInfo"""
-        # TODO
-        pass
+    def add_entry_list(self, size: int, entries: "TypeLib.EntryList") -> None:
+        """Add an entry list of items of size 'size'"""
+        if size in self:
+            self[size].add_all(entries)
+        else:
+            self[size] = entries
+
+    def add_json_file(self, json_file: str) -> None:
+        """Adds the info in a serialized (gzipped) JSON file to this TypeLib"""
+        other: t.Optional[t.Any] = None
+        with gzip.open(json_file, "rt") as other_file:
+            other = TypeLibCodec.decode(other_file.read())
+        if other is not None and isinstance(other, TypeLib):
+            for size, entries in other.items():
+                self.add_entry_list(size, entries)
 
     def get_replacements(
         self, types: t.Tuple["TypeInfo", ...]
@@ -256,6 +273,19 @@ class TypeLib:
 
     def values(self) -> t.ValuesView["TypeLib.EntryList"]:
         return self._data.values()
+
+    @classmethod
+    def load_dir(cls, path: str) -> t.Optional["TypeLib"]:
+        """Loads all the serialized (gzipped) JSON files in a directory"""
+        files = [os.path.join(path, f) for f in os.listdir(path)
+                 if os.path.isfile(os.path.join(path, f))]
+        new_lib: t.Optional[t.Any] = None
+        with gzip.open(files[0], "rt") as first_serialized:
+            new_lib = TypeLibCodec.decode(first_serialized.read())
+        if new_lib is not None and isinstance(new_lib, TypeLib):
+            for f in files[1:]:
+                new_lib.add_json_file(f)
+        return new_lib
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "TypeLib":
