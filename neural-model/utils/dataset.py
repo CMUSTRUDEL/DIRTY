@@ -80,7 +80,7 @@ class Batcher(object):
             self.vocab = Vocab.load(config['data']['vocab_file'])
             self.grammar = self.vocab.grammar
 
-        self.use_seq_encoder = config['encoder']['type'] == 'SequentialEncoder'
+        self.use_seq_encoder = config['encoder']['type'] == 'SequentialEncoder' or config['encoder']['type'] == 'XfmrSequentialEncoder'
         self.use_hybrid_encoder = config['encoder']['type'] == 'HybridEncoder'
         self.init_gnn_with_seq_encoding = config['encoder']['type'] == 'GraphASTEncoder' and config['encoder']['init_with_seq_encoding']
 
@@ -97,6 +97,7 @@ class Batcher(object):
         if self.annotate_sequential_input:
             src_bpe_model = self.vocab.source_tokens.subtoken_model
             snippet = example.code_tokens
+            # np.random.shuffle(snippet)
             snippet = ' '.join(snippet)
             sub_tokens = ['<s>'] + src_bpe_model.encode_as_pieces(snippet) + ['</s>']
             sub_token_ids = [src_bpe_model.bos_id()] + src_bpe_model.encode_as_ids(snippet) + [src_bpe_model.eos_id()]
@@ -145,6 +146,7 @@ class Batcher(object):
 
     def to_tensor_dict(self, examples: List[Example], return_prediction_target=True) -> Dict[str, torch.Tensor]:
         from model.sequential_encoder import SequentialEncoder
+        from model.xfmr_sequential_encoder import XfmrSequentialEncoder
         from model.graph_encoder import GraphASTEncoder
 
         if not hasattr(examples[0], 'target_prediction_seq_length'):
@@ -166,6 +168,8 @@ class Batcher(object):
             tensor_dict.update(_tensors)
         elif self.config['encoder']['type'] == 'SequentialEncoder':
             tensor_dict = SequentialEncoder.to_tensor_dict(examples)
+        elif self.config['encoder']['type'] == 'XfmrSequentialEncoder':
+            tensor_dict = XfmrSequentialEncoder.to_tensor_dict(examples)
         elif self.config['encoder']['type'] == 'HybridEncoder':
             packed_graph, gnn_tensor_dict = GraphASTEncoder.to_packed_graph([e.ast for e in examples],
                                                                             connections=self.config['encoder']['graph_encoder']['connections'])

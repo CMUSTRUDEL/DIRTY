@@ -30,6 +30,7 @@ from tqdm import tqdm
 import psutil, gc
 
 import torch
+import wandb
 
 from model.ensemble_model import EnsembleModel
 from model.simple_decoder import SimpleDecoder
@@ -68,12 +69,14 @@ def train(args):
     model = RenamingModel.build(config)
     config = model.config
     model.train()
+    
+    wandb.init(name=work_dir, project="dire", config=config)
 
     if args['--cuda']:
         model = model.cuda()
 
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.Adam(params, lr=0.001)
+    optimizer = torch.optim.AdamW(params, lr=config["lr"] if "lr" in config else 0.001)
     nn_util.glorot_init(params)
 
     # set the padding index for embedding layers to zeros
@@ -90,6 +93,7 @@ def train(args):
     log_every = config['train']['log_every']
     evaluate_every_nepoch = config['train']['evaluate_every_nepoch']
     max_epoch = config['train']['max_epoch']
+    
     max_patience = config['train']['patience']
     cum_loss = 0.
     patience = 0.
@@ -132,6 +136,7 @@ def train(args):
             if train_iter % log_every == 0:
                 print(f'[Learner] train_iter={train_iter} avg. loss={cum_loss / cum_examples}, '
                       f'{cum_examples} examples ({cum_examples / (time.time() - t_log)} examples/s)', file=sys.stderr)
+                wandb.log({"loss": cum_loss / cum_examples})
 
                 cum_loss = cum_examples = 0.
                 t_log = time.time()
@@ -145,6 +150,14 @@ def train(args):
             eval_results = Evaluator.decode_and_evaluate(model, dev_set, config)
             # print(f'[Learner] Evaluation result ppl={ppl} (took {time.time() - t1}s)', file=sys.stderr)
             print(f'[Learner] Evaluation result {eval_results} (took {time.time() - t1}s)', file=sys.stderr)
+            wandb.log({
+                "func_body_in_train_acc": eval_results['func_body_in_train_acc']['accuracy'],
+                "func_body_in_train_cer": eval_results['func_body_in_train_acc']['cer'],
+                "func_body_not_in_train_acc": eval_results['func_body_not_in_train_acc']['accuracy'],
+                "func_body_not_in_train_cer": eval_results['func_body_not_in_train_acc']['cer'],
+                "acc": eval_results['corpus_acc']['accuracy'],
+                "cer": eval_results['corpus_acc']['cer'],
+                })
             dev_metric = eval_results['func_body_not_in_train_acc']['accuracy']
             # dev_metric = -ppl
             if len(history_accs) == 0 or dev_metric > max(history_accs):

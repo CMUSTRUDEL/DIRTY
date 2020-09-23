@@ -1,2 +1,5 @@
 *__pycache__*
 *.pyc
+data/
+exp_runs/
+wandb/

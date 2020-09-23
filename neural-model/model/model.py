@@ -15,6 +15,7 @@ from model.simple_decoder import SimpleDecoder
 from model.encoder import Encoder
 from model.hybrid_encoder import HybridEncoder
 from model.sequential_encoder import SequentialEncoder
+from model.xfmr_sequential_encoder import XfmrSequentialEncoder
 from model.graph_encoder import GraphASTEncoder
 from utils.graph import PackedGraph
 from utils.dataset import Batcher, Example
