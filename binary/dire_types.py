@@ -79,12 +79,12 @@ class TypeLib:
                 self._data[update_idx] = TypeLib.Entry(
                     frequency=old_entry.frequency + n, typeinfo=old_entry.typeinfo
                 )
-                self._sort()
+                # self._sort()
                 return True
             else:
                 # Don't need to sort if we're just appending with freq 1
+                self._typeinfo_to_idx[item] = len(self._data)
                 self._data.append(TypeLib.Entry(frequency=1, typeinfo=item))
-                self._typeinfo_to_idx[self._data[-1]] = len(self._data)
                 return False
 
         def add(self, item: "TypeInfo") -> bool:
@@ -136,7 +136,7 @@ class TypeLib:
             return f"{[(entry) for entry in self._data]}"
         
         def prune(self, freq) -> None:
-            return [entry for entry in self._data if entry[0] >= freq]
+            self._data = [entry for entry in self._data if entry[0] >= freq]
 
     def __init__(
         self, data: t.Optional[t.DefaultDict[int, "TypeLib.EntryList"]] = None
