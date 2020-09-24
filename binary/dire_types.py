@@ -52,6 +52,7 @@ class TypeLib:
                 self._data = data
             else:
                 self._data = list()
+            self._typeinfo_to_idx: t.Dict[str, int] = dict()
 
         @property
         def frequency(self) -> int:
@@ -65,10 +66,14 @@ class TypeLib:
             update_idx: t.Optional[int] = None
             frequency: int
             typeinfo: "TypeInfo"
-            for idx, entry in enumerate(self._data):
-                if entry.typeinfo == item:
-                    update_idx = idx
-                    break
+            if item in self._typeinfo_to_idx:
+                update_idx = self._typeinfo_to_idx[item]
+            else:
+                update_idx = None
+            # for idx, entry in enumerate(self._data):
+            #     if entry.typeinfo == item:
+            #         update_idx = idx
+            #         break
             if update_idx is not None:
                 old_entry = self._data[update_idx]
                 self._data[update_idx] = TypeLib.Entry(
@@ -79,6 +84,7 @@ class TypeLib:
             else:
                 # Don't need to sort if we're just appending with freq 1
                 self._data.append(TypeLib.Entry(frequency=1, typeinfo=item))
+                self._typeinfo_to_idx[self._data[-1]] = len(self._data)
                 return False
 
         def add(self, item: "TypeInfo") -> bool:
@@ -106,6 +112,10 @@ class TypeLib:
         def _sort(self) -> None:
             """Sorts the internal list by frequency"""
             self._data.sort(reverse=True, key=lambda entry: entry.frequency)
+            self._typeinfo_to_idx = {
+                entry: idx
+                for idx, entry in enumerate(self._data)
+            }
 
         def _to_json(self) -> t.Dict[str, t.Union[str, t.List["TypeLib.Entry"]]]:
             return self._data
@@ -124,6 +134,9 @@ class TypeLib:
 
         def __repr__(self) -> str:
             return f"{[(entry) for entry in self._data]}"
+        
+        def prune(self, freq) -> None:
+            return [entry for entry in self._data if entry[0] >= freq]
 
     def __init__(
         self, data: t.Optional[t.DefaultDict[int, "TypeLib.EntryList"]] = None
@@ -350,6 +363,10 @@ class TypeLib:
         for n in sorted(self._data.keys()):
             ret += f"{n}: {self._data[n]}\n"
         return ret
+
+    def prune(self, freq) -> None:
+        for key in self._data:
+            self._data[key].prune(freq)
 
 
 class TypeInfo:

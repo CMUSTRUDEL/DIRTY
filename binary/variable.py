@@ -62,9 +62,9 @@ class Stack(Location):
 def location_from_json_key(key: str) -> "Location":
     """Hacky way to return a location from a JSON key"""
     if key.startswith("s"):
-        return Stack(int(key[:-1]))
+        return Stack(int(key[1:]))
     else:
-        return Register(key[:-1])
+        return Register(key[1:])
 
 class Variable:
     """A variable
