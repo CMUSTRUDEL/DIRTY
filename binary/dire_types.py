@@ -52,7 +52,10 @@ class TypeLib:
                 self._data = data
             else:
                 self._data = list()
-            self._typeinfo_to_idx: t.Dict[str, int] = dict()
+            self._typeinfo_to_idx: t.Dict[str, int] = {
+                entry.typeinfo: idx
+                for idx, entry in enumerate(self._data)
+            }
 
         @property
         def frequency(self) -> int:
@@ -113,9 +116,12 @@ class TypeLib:
             """Sorts the internal list by frequency"""
             self._data.sort(reverse=True, key=lambda entry: entry.frequency)
             self._typeinfo_to_idx = {
-                entry: idx
+                entry.typeinfo: idx
                 for idx, entry in enumerate(self._data)
             }
+
+        def sort(self) -> None:
+            self._sort()
 
         def _to_json(self) -> t.Dict[str, t.Union[str, t.List["TypeLib.Entry"]]]:
             return self._data
@@ -271,6 +277,10 @@ class TypeLib:
         if other is not None and isinstance(other, TypeLib):
             for size, entries in other.items():
                 self.add_entry_list(size, entries)
+    
+    def sort(self) -> None:
+        for size, entries in self.items():
+            entries.sort()
 
     def get_replacements(
         self, types: t.Tuple["TypeInfo", ...]
@@ -367,6 +377,11 @@ class TypeLib:
     def prune(self, freq) -> None:
         for key in self._data:
             self._data[key].prune(freq)
+        self._data = {
+            key: entry
+            for key, entry in self._data.items()
+            if len(entry) > 0
+        }
 
 
 class TypeInfo:

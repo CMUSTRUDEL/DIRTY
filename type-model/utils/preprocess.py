@@ -102,7 +102,7 @@ def main(args):
 
     os.system(f"mkdir -p {tgt_folder}")
     os.system(f"mkdir -p {tgt_folder}/files")
-    num_workers = 14
+    num_workers = 16
 
     valid_example_count = 0
 
@@ -125,12 +125,12 @@ def main(args):
         json_iter = pool.imap(
             json_line_reader,
             ((input_folder, fname) for fname in input_fnames),
-            chunksize=512,
+            chunksize=64,
         )
 
-        example_iter = pool.imap(example_generator, json_iter, chunksize=512)
+        example_iter = pool.imap(example_generator, json_iter, chunksize=64)
 
-        for examples in example_iter:
+        for examples in tqdm(example_iter):
             if not examples: continue
             json_file_name = examples[0].binary_file["file_name"].split("/")[-1]
             with open(os.path.join(tgt_folder, "files/", json_file_name), "w") as f:
