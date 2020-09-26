@@ -16,8 +16,10 @@ import gzip
 import multiprocessing
 import os
 import random
+import shutil
 import sys
 import tarfile
+from json import dumps
 from multiprocessing import Process
 from typing import Tuple
 
@@ -29,39 +31,19 @@ from tqdm import tqdm
 from utils.code_processing import canonicalize_code, tokenize_raw_code
 from utils.dataset import Example
 from utils.dire_types import TypeInfo, TypeLib, TypeLibCodec
+from utils.function import CollectedFunction
 
 all_functions = dict()  # indexed by binaries
 
 
-def is_valid_example(example):
-    try:
-        is_valid = example.num_vars > 0
-    except RecursionError:
-        is_valid = False
-
-    return is_valid
-
-
 def example_generator(json_str_list):
-    enable_filter = True
     examples = []
     for json_str, meta in json_str_list:
-        tree_json_dict = json.loads(json_str)
+        json_dict = json.loads(json_str)
+        cf = CollectedFunction.from_json(json_dict)
+        example = Example.from_cf(cf, binary_file=meta)
 
-        code_tokens = tokenize_raw_code(tree_json_dict["c"]["c"])
-        tree_json_dict["code_tokens"] = code_tokens
-        raw_code = tree_json_dict["c"]["c"]
-        del tree_json_dict["b"]["t"]
-        del tree_json_dict["c"]["t"]
-        del tree_json_dict["c"]["c"]
-        json_str = json.dumps(tree_json_dict)
-
-        example = Example.from_json_dict(
-            tree_json_dict, binary_file=meta, json_str=json_str, raw_code=raw_code,
-        )
-
-        is_valid = is_valid_example(example) if enable_filter else True
-        if is_valid:
+        if example.is_valid_example:
             canonical_code = canonicalize_code(example.raw_code)
             example.canonical_code = canonical_code
             examples.append(example)
@@ -102,6 +84,11 @@ def main(args):
                 break
     shard_size = int(args["--shard-size"])
 
+    if os.path.exists(tgt_folder):
+        op = input(f"{tgt_folder} exists. remove? (y/n) ")
+        if op == "y":
+            shutil.rmtree(tgt_folder)
+
     os.system(f"mkdir -p {tgt_folder}")
     os.system(f"mkdir -p {tgt_folder}/files")
     num_workers = 16
@@ -123,9 +110,9 @@ def main(args):
             json_file_name = examples[0].binary_file["file_name"].split("/")[-1]
             with open(os.path.join(tgt_folder, "files/", json_file_name), "w") as f:
                 for example in examples:
-                    f.write(example.json_str + "\n")
+                    f.write(dumps(example.to_json()) + "\n")
                     all_functions.setdefault(json_file_name, dict())[
-                        example.ea
+                        example.name
                     ] = example.canonical_code
 
             valid_example_count += len(examples)
@@ -218,7 +205,7 @@ def main(args):
                 replace_lines = []
                 for line in all_lines:
                     json_dict = json.loads(line.strip())
-                    func_name = json_dict["e"]
+                    func_name = json_dict["name"]
                     canonical_code = all_functions[last_file_name][func_name]
                     func_name_in_train = False
                     func_body_in_train = False
