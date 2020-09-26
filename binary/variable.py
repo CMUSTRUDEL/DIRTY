@@ -1,5 +1,6 @@
 """Information about variables in a function"""
 
+from json import dumps
 from typing import Any, Optional
 
 # Huge hack to get importing to work with the decompiler
@@ -88,7 +89,7 @@ class Variable:
 
     @classmethod
     def from_json(cls, d):
-        typ = TypeLibCodec.read_metadata(d["t"])
+        typ = TypeLibCodec.decode(dumps(d["t"]))
         return cls(typ=typ, name=d["n"], user=d["u"])
 
     def __eq__(self, other: Any) -> bool:

@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+from json import dumps
 from typing import DefaultDict, Mapping, Optional, Set
 
 # Huge hack to get importing to work with the decompiler
@@ -58,8 +59,8 @@ class Function:
 
     @classmethod
     def from_json(cls, d):
-        ast = AST.from_json(d["t"])
-        return_type = TypeLibCodec.read_metadata(d["r"])
+        ast = AST.from_json(d["t"]) if d["t"] else None
+        return_type = TypeLibCodec.decode(dumps(d["r"]))
         arguments = dict()
         for key, args in d["a"].items():
             arguments[location_from_json_key(key)] = \
@@ -74,7 +75,7 @@ class Function:
             return_type=return_type,
             arguments=arguments,
             local_vars=local_vars,
-            raw_code=d["r"],
+            raw_code=d["c"],
         )
 
     @property

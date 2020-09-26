@@ -8,6 +8,7 @@ ctype_t, which is just an integer. This is stored in "meta"
 import typing as t
 
 from collections import defaultdict
+from json import dumps
 
 # Import IDA stubs if can't find the IDA API
 try:
@@ -563,7 +564,7 @@ class Call(Expression):
 
         @classmethod
         def from_json(cls, d) -> "Call.Arg":
-            formal_type = TypeLibCodec.read_metadata(d["t"])
+            formal_type = TypeLibCodec.decode(dumps(d["t"]))
             return cls(
                 node_id=d["id"],
                 is_vararg=d["va"],
@@ -878,7 +879,7 @@ class Type(Expression):
 
     @classmethod
     def from_json(cls, d) -> "Type":
-        typ = TypeLibCodec.read_metadata(d["t"])
+        typ = TypeLibCodec.decode(dumps(d["t"]))
         return cls(node_id=d["id"], typ=typ)
 
     @classmethod
