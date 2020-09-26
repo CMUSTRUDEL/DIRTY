@@ -6,7 +6,7 @@ Usage:
 Options:
     -h --help                  Show this screen.
     --max=<int>                max dataset size [default: 10000]
-    --shard-size=<int>         shard size [default: 3000]
+    --shard-size=<int>         shard size [default: 30000]
     --test-file=<file>         test file
     --no-filtering             do not filter files
 """
@@ -94,10 +94,12 @@ def main(args):
     input_fnames = []
     max_files = int(args["--max"])
     with open(input_fnames_file) as f:
-        while len(input_fnames) < max_files:
-            s = f.readline().strip()
+        for s in f:
+            s = s.strip()
             if s.endswith(".gz"):
                 input_fnames.append(s)
+            if len(input_fnames) >= max_files:
+                break
     shard_size = int(args["--shard-size"])
 
     os.system(f"mkdir -p {tgt_folder}")
@@ -105,20 +107,6 @@ def main(args):
     num_workers = 16
 
     valid_example_count = 0
-
-    print("reading typelib")
-    typelib = TypeLib()
-    for fname in tqdm(input_fnames):
-        type_lib_file_name = os.path.join(
-            input_folder, "types", fname[: fname.index(".")] + ".json.gz"
-        )
-        typelib.add_json_file(type_lib_file_name)
-    typelib.prune(5)
-
-    print("dumping typelib")
-    with open(os.path.join(tgt_folder, "typelib.json"), "w") as type_lib_file:
-        encoded = TypeLibCodec.encode(typelib)
-        type_lib_file.write(encoded)
 
     print("loading examples")
     with multiprocessing.Pool(num_workers) as pool:
@@ -179,6 +167,20 @@ def main(args):
     np.random.shuffle(train_files)
     dev_files = train_files[-dev_file_num:]
     train_files = train_files[:-dev_file_num]
+
+    print("reading typelib")
+    typelib = TypeLib()
+    for fname in tqdm(train_files):
+        fname = os.path.basename(fname)
+        fname = fname[:fname.index(".")] + ".json.gz"
+        typelib.add_json_file(os.path.join(input_folder, "types", fname))
+    typelib.prune(5)
+    typelib.sort()
+
+    print("dumping typelib")
+    with open(os.path.join(tgt_folder, "typelib.json"), "w") as type_lib_file:
+        encoded = TypeLibCodec.encode(typelib)
+        type_lib_file.write(encoded)
 
     train_functions = dict()
     for train_file in train_files:
