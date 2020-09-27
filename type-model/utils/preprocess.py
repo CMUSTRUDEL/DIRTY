@@ -28,27 +28,11 @@ import ujson as json
 from docopt import docopt
 from tqdm import tqdm
 
-from utils.code_processing import canonicalize_code, tokenize_raw_code
-from utils.dataset import Example
+from utils.dataset import Example, example_generator
 from utils.dire_types import TypeInfo, TypeLib, TypeLibCodec
 from utils.function import CollectedFunction
 
 all_functions = dict()  # indexed by binaries
-
-
-def example_generator(json_str_list):
-    examples = []
-    for json_str, meta in json_str_list:
-        json_dict = json.loads(json_str)
-        cf = CollectedFunction.from_json(json_dict)
-        example = Example.from_cf(cf, binary_file=meta)
-
-        if example.is_valid_example:
-            canonical_code = canonicalize_code(example.raw_code)
-            example.canonical_code = canonical_code
-            examples.append(example)
-
-    return examples
 
 
 def json_line_reader(args):
