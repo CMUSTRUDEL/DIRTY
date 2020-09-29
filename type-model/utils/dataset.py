@@ -78,10 +78,11 @@ class Example:
         code_tokens = tokenize_raw_code(raw_code)
         name = cf.decompiler.name
 
-        source_locals = Example.filter(cf.decompiler.local_vars, code_tokens)
-        source_args = Example.filter(cf.decompiler.arguments, code_tokens)
-        target_locals = Example.filter(cf.debug.local_vars, code_tokens)
-        target_args = Example.filter(cf.debug.arguments, code_tokens)
+        code_tokens_set = set(code_tokens)
+        source_locals = Example.filter(cf.decompiler.local_vars, code_tokens_set)
+        source_args = Example.filter(cf.decompiler.arguments, code_tokens_set)
+        target_locals = Example.filter(cf.debug.local_vars, code_tokens_set)
+        target_args = Example.filter(cf.debug.arguments, code_tokens_set)
 
         valid = (
             name == cf.debug.name
@@ -101,7 +102,7 @@ class Example:
         )
 
     @staticmethod
-    def filter(mapping: Mapping[Location, Set[Variable]], code_tokens: List[str]):
+    def filter(mapping: Mapping[Location, Set[Variable]], code_tokens: Set[str]):
         """Discard and leave these for future work:
 
         Register locations
