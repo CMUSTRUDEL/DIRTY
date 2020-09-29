@@ -13,7 +13,6 @@ from tqdm import tqdm
 from utils.code_processing import tokenize_raw_code
 from utils.function import CollectedFunction
 from utils.variable import Location, Variable, location_from_json_key
-from utils.vocab import Vocab
 
 
 class Example:
@@ -130,6 +129,7 @@ class Dataset(wds.Dataset):
         super().__init__(urls)
         if vocab_fname:
             # annotate example for training
+            from utils.vocab import Vocab
             self.vocab = Vocab.load(vocab_fname)
             annotate_and_filter = self._annotate_and_filter
         else:
