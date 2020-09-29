@@ -2,7 +2,7 @@ import glob
 import multiprocessing as mp
 import tarfile
 from collections import defaultdict
-from typing import DefaultDict, Dict, Iterable, List, Mapping, Set
+from typing import Optional, DefaultDict, Dict, Iterable, List, Mapping, Set
 
 import numpy as np
 import torch
@@ -123,26 +123,46 @@ class Example:
 
 class Dataset(wds.Dataset):
 
-    def __init__(self, url, vocab_fname=None):
+    SHUFFLE_BUFFER = 5000
+    SORT_BUFFER = 512
+
+    def __init__(self, url: str, annotate_args: Optional[Dict] = None):
         # support wildcards
         urls = glob.glob(url)
         super().__init__(urls)
-        if vocab_fname:
+        if annotate_args:
             # annotate example for training
             from utils.vocab import Vocab
-            self.vocab = Vocab.load(vocab_fname)
-            annotate_and_filter = self._annotate_and_filter
+            self.vocab = Vocab.load(annotate_args['vocab_fname'])
+            self.max_src_tokens_len = annotate_args['max_src_tokens_len']
+            annotate = self._annotate
+            sort = Dataset._sort
         else:
             # for creating the vocab
-            annotate_and_filter = lambda x: x
+            annotate = lambda x: x
+            sort = lambda x: x
         self = (
             self.pipe(Dataset._file_iter_to_line_iter)
             .decode()
             .map(lambda x: x["json"])
             .map(Example.from_json)
-            .pipe(annotate_and_filter)
-            .shuffle(5000)
+            .map(annotate)
+            .shuffle(Dataset.SHUFFLE_BUFFER)
+            .pipe(sort)
         )
+
+    @staticmethod
+    def _sort(example_iter):
+        sort_pool = []
+        for example in example_iter:
+            sort_pool.append(example)
+            if len(sort_pool) == Dataset.SORT_BUFFER:
+                sort_pool.sort(key=lambda e: e.source_seq_length)
+                yield from sort_pool
+                sort_pool.clear()
+        if sort_pool:
+            sort_pool.sort(key=lambda e: e.source_seq_length)
+            yield from sort_pool
 
     @staticmethod
     def _file_iter_to_line_iter(jsonl_iter):
@@ -153,28 +173,31 @@ class Dataset(wds.Dataset):
                     continue
                 yield {"json": line}
 
-    def _annotate_and_filter(self, example_iter):
-        for example in example_iter:
-            src_bpe_model = self.vocab.source_tokens.subtoken_model
-            snippet = example.code_tokens
-            snippet = ' '.join(snippet)
-            sub_tokens = ['<s>'] + src_bpe_model.encode_as_pieces(snippet) + ['</s>']
-            sub_token_ids = [src_bpe_model.bos_id()] + src_bpe_model.encode_as_ids(snippet) + [src_bpe_model.eos_id()]
-            setattr(example, 'sub_tokens', sub_tokens)
-            setattr(example, 'sub_token_ids', sub_token_ids)
-            setattr(example, 'source_seq_length', len(sub_tokens))
-            if len(sub_tokens) < 510:
-                yield example
+    def _annotate(self, example: Example):
+        src_bpe_model = self.vocab.source_tokens.subtoken_model
+        snippet = example.code_tokens
+        snippet = ' '.join(snippet)
+        sub_tokens = ['<s>'] + src_bpe_model.encode_as_pieces(snippet)[:self.max_src_tokens_len] + ['</s>']
+        sub_token_ids = [src_bpe_model.bos_id()] + src_bpe_model.encode_as_ids(snippet)[:self.max_src_tokens_len] + [src_bpe_model.eos_id()]
+        setattr(example, 'sub_tokens', sub_tokens)
+        setattr(example, 'sub_token_ids', sub_token_ids)
+        setattr(example, 'source_seq_length', len(sub_tokens))
+        return example
 
     @staticmethod
     def collate_fn(batch_examples: List[Example]):
-        print([len(e.code_tokens) for e in batch_examples])
+        from utils.vocab import PAD_ID
+        token_ids = [torch.tensor(e.sub_token_ids) for e in batch_examples]
+        return pad_sequence(token_ids, batch_first=True, padding_value=PAD_ID)
+        # print([len(e.code_tokens) for e in batch_examples])
 
+from torch.nn.utils.rnn import pad_sequence
 
 if __name__ == "__main__":
-    dataset = Dataset("data/train-shard-*.tar", "data/vocab.bpe10000")
+    dataset = Dataset("data/train-shard-*.tar", {"vocab_fname": "data/vocab.bpe10000", "max_src_tokens_len": 510})
     dataloader = torch.utils.data.DataLoader(
         dataset, num_workers=4, batch_size=16, collate_fn=Dataset.collate_fn
     )
     for x in tqdm(dataloader):
-        pass
+        print(x.shape)
+
