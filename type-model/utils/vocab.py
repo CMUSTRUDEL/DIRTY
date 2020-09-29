@@ -202,10 +202,15 @@ if __name__ == '__main__':
                                                  freq_cutoff=int(args['--freq-cutoff']))
 
     src_code_tokens_file = vocab_file + '.src_code_tokens.txt'
+    preserved_tokens = set()
     with open(src_code_tokens_file, 'w') as f_src_token:
         tgt_words = []
         for example in tqdm(train_set):
             code_tokens = example.code_tokens
+            for loc in ["a", "l"]:
+                for key, var_set in example.source[loc].items():
+                    varname = list(var_set)[0].name
+                    preserved_tokens.add(varname)
             f_src_token.write(' '.join(code_tokens) + '\n')
 
     assert args['--use-bpe']
@@ -213,7 +218,9 @@ if __name__ == '__main__':
 
     print('building source code tokens vocabulary')
     # train subtoken models
+    preserved_tokens = ','.join(preserved_tokens)
     spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id={PAD_ID} --bos_id=1 --eos_id=2 --unk_id=3 '
+                                    f'--user_defined_symbols={preserved_tokens} '
                                     f'--vocab_size={vocab_size} '
                                     f'--model_prefix={vocab_file}.src_code_tokens --model_type=bpe '
                                     f'--input={src_code_tokens_file}')
