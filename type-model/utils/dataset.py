@@ -38,17 +38,17 @@ class Example:
     def from_json(cls, d: Dict):
         source = defaultdict(dict)
         for loc in ["a", "l"]:
-            if not loc in d:
+            if not loc in d["source"]:
                 continue
-            for key, args in d[loc].items():
+            for key, args in d["source"][loc].items():
                 source[loc][location_from_json_key(key)] = {
                     Variable.from_json(arg) for arg in args
                 }
         target = defaultdict(dict)
         for loc in ["a", "l"]:
-            if not loc in d:
+            if not loc in d["target"]:
                 continue
-            for key, args in d[loc].items():
+            for key, args in d["target"][loc].items():
                 target[loc][location_from_json_key(key)] = {
                     Variable.from_json(arg) for arg in args
                 }
@@ -78,10 +78,10 @@ class Example:
         code_tokens = tokenize_raw_code(raw_code)
         name = cf.decompiler.name
 
-        source_locals = Example.filter(cf.decompiler.local_vars)
-        source_args = Example.filter(cf.decompiler.arguments)
-        target_locals = Example.filter(cf.debug.local_vars)
-        target_args = Example.filter(cf.debug.arguments)
+        source_locals = Example.filter(cf.decompiler.local_vars, code_tokens)
+        source_args = Example.filter(cf.decompiler.arguments, code_tokens)
+        target_locals = Example.filter(cf.debug.local_vars, code_tokens)
+        target_args = Example.filter(cf.debug.arguments, code_tokens)
 
         valid = (
             name == cf.debug.name
@@ -101,7 +101,7 @@ class Example:
         )
 
     @staticmethod
-    def filter(mapping: Mapping[Location, Set[Variable]]):
+    def filter(mapping: Mapping[Location, Set[Variable]], code_tokens: List[str]):
         """Discard and leave these for future work:
 
         Register locations
@@ -112,6 +112,8 @@ class Example:
             if location.json_key().startswith("r"):
                 continue
             if len(variable_set) > 1:
+                continue
+            if not list(variable_set)[0].name in code_tokens:
                 continue
             ret[location] = variable_set
         return ret
