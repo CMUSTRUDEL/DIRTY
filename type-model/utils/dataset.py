@@ -1,13 +1,11 @@
 import glob
-import multiprocessing as mp
-import tarfile
 from collections import defaultdict
-from typing import Optional, DefaultDict, Dict, Iterable, List, Mapping, Set
+from typing import Dict, List, Mapping, Optional, Set
 
 import numpy as np
 import torch
-import ujson as json
 import webdataset as wds
+from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
 from utils.code_processing import tokenize_raw_code
@@ -81,12 +79,15 @@ class Example:
         code_tokens_set = set(code_tokens)
         source_locals = Example.filter(cf.decompiler.local_vars, code_tokens_set)
         source_args = Example.filter(cf.decompiler.arguments, code_tokens_set)
-        target_locals = Example.filter(cf.debug.local_vars, code_tokens_set)
-        target_args = Example.filter(cf.debug.arguments, code_tokens_set)
+        target_locals = Example.filter(
+            cf.debug.local_vars, None, set(source_locals.keys())
+        )
+        target_args = Example.filter(cf.debug.arguments, None, set(source_args.keys()))
 
         valid = (
             name == cf.debug.name
             and set(source_args.keys()) == set(target_args.keys())
+            and set(source_locals.keys()) == set(target_locals.keys())
             and len(source_args) + len(source_locals) > 0
             and len(code_tokens) < 500
         )
@@ -102,7 +103,11 @@ class Example:
         )
 
     @staticmethod
-    def filter(mapping: Mapping[Location, Set[Variable]], code_tokens: Set[str]):
+    def filter(
+        mapping: Mapping[Location, Set[Variable]],
+        code_tokens: Optional[Set[str]] = None,
+        locations: Optional[Set[Location]] = None,
+    ):
         """Discard and leave these for future work:
 
         Register locations
@@ -114,7 +119,9 @@ class Example:
                 continue
             if len(variable_set) > 1:
                 continue
-            if not list(variable_set)[0].name in code_tokens:
+            if code_tokens and not list(variable_set)[0].name in code_tokens:
+                continue
+            if locations and not location in locations:
                 continue
             ret[location] = variable_set
         return ret
@@ -136,8 +143,9 @@ class Dataset(wds.Dataset):
         if annotate_args:
             # annotate example for training
             from utils.vocab import Vocab
-            self.vocab = Vocab.load(annotate_args['vocab_fname'])
-            self.max_src_tokens_len = annotate_args['max_src_tokens_len']
+
+            self.vocab = Vocab.load(annotate_args["vocab_fname"])
+            self.max_src_tokens_len = annotate_args["max_src_tokens_len"]
             annotate = self._annotate
             sort = Dataset._sort
         else:
@@ -179,28 +187,88 @@ class Dataset(wds.Dataset):
     def _annotate(self, example: Example):
         src_bpe_model = self.vocab.source_tokens.subtoken_model
         snippet = example.code_tokens
-        snippet = ' '.join(snippet)
-        sub_tokens = ['<s>'] + src_bpe_model.encode_as_pieces(snippet)[:self.max_src_tokens_len] + ['</s>']
-        sub_token_ids = [src_bpe_model.bos_id()] + src_bpe_model.encode_as_ids(snippet)[:self.max_src_tokens_len] + [src_bpe_model.eos_id()]
-        setattr(example, 'sub_tokens', sub_tokens)
-        setattr(example, 'sub_token_ids', sub_token_ids)
-        setattr(example, 'source_seq_length', len(sub_tokens))
+        snippet = " ".join(snippet)
+        sub_tokens = (
+            ["<s>"]
+            + src_bpe_model.encode_as_pieces(snippet)[: self.max_src_tokens_len]
+            + ["</s>"]
+        )
+        sub_token_ids = (
+            [src_bpe_model.bos_id()]
+            + src_bpe_model.encode_as_ids(snippet)[: self.max_src_tokens_len]
+            + [src_bpe_model.eos_id()]
+        )
+        setattr(example, "sub_tokens", sub_tokens)
+        setattr(example, "sub_token_ids", sub_token_ids)
+        setattr(example, "source_seq_length", len(sub_tokens))
+
+        types_model = self.vocab.types
+        src_var_names = []
+        tgt_var_types = []
+        for loc in ["a", "l"]:
+            for key in example.source[loc]:
+                src_var = list(example.source[loc][key])[0]
+                tgt_var = list(example.target[loc][key])[0]
+                src_var_names.append(src_var.name)
+                tgt_var_types.append(types_model[str(tgt_var.typ)])
+        setattr(example, "src_var_names", src_var_names)
+        setattr(example, "tgt_var_types", tgt_var_types)
+
         return example
 
     @staticmethod
-    def collate_fn(batch_examples: List[Example]):
+    def collate_fn(examples: List[Example]):
         from utils.vocab import PAD_ID
-        token_ids = [torch.tensor(e.sub_token_ids) for e in batch_examples]
-        return pad_sequence(token_ids, batch_first=True, padding_value=PAD_ID)
-        # print([len(e.code_tokens) for e in batch_examples])
 
-from torch.nn.utils.rnn import pad_sequence
+        token_ids = [torch.tensor(e.sub_token_ids) for e in examples]
+        input = pad_sequence(token_ids, batch_first=True, padding_value=PAD_ID)
+        max_time_step = input.shape[1]
+        # corresponding var_id of each token in sub_tokens
+        variable_mention_to_variable_id = torch.zeros(
+            len(examples), max_time_step, dtype=torch.long
+        )
+        # if each token in sub_tokens is a variable
+        variable_mention_mask = torch.zeros(len(examples), max_time_step)
+        # the number of mentioned times for each var_id
+        variable_mention_num = torch.zeros(
+            len(examples), max(len(e.src_var_names) for e in examples)
+        )
+
+        for e_id, example in enumerate(examples):
+            var_name_to_id = {name: i for i, name in enumerate(example.src_var_names)}
+            for i, sub_token in enumerate(example.sub_tokens):
+                if sub_token in example.src_var_names:
+                    var_id = var_name_to_id[sub_token]
+                    variable_mention_to_variable_id[e_id, i] = var_id
+                    variable_mention_mask[e_id, i] = 1.0
+                    variable_mention_num[e_id, var_name_to_id[sub_token]] += 1
+        # if mentioned for each var_id
+        variable_encoding_mask = variable_mention_num > 0
+
+        type_ids = [torch.tensor(e.tgt_var_types) for e in examples]
+        variable_tgt_name_id = pad_sequence(type_ids, batch_first=True)
+        assert variable_tgt_name_id.shape == variable_mention_num.shape
+
+        return (
+            dict(
+                src_code_tokens=input,
+                variable_mention_to_variable_id=variable_mention_to_variable_id,
+                variable_mention_mask=variable_mention_mask,
+                variable_mention_num=variable_mention_num,
+                variable_encoding_mask=variable_encoding_mask,
+                batch_size=len(examples),
+            ),
+            dict(variable_tgt_name_id=variable_tgt_name_id),
+        )
+
 
 if __name__ == "__main__":
-    dataset = Dataset("data/train-shard-*.tar", {"vocab_fname": "data/vocab.bpe10000", "max_src_tokens_len": 510})
+    dataset = Dataset(
+        "data/train-shard-*.tar",
+        {"vocab_fname": "data/vocab.bpe10000", "max_src_tokens_len": 510},
+    )
     dataloader = torch.utils.data.DataLoader(
         dataset, num_workers=4, batch_size=16, collate_fn=Dataset.collate_fn
     )
     for x in tqdm(dataloader):
-        print(x.shape)
-
+        print(x)
