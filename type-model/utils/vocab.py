@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Usage:
-    vocab.py [options] TRAIN_FILE VOCAB_FILE
+    vocab.py [options] TRAIN_FILE TYPE_FILE VOCAB_FILE
 
 Options:
     -h --help                  Show this screen.
@@ -20,8 +20,7 @@ import json
 import sentencepiece as spm
 from tqdm import tqdm
 
-# from utils.grammar import Grammar
-from utils.dataset import Dataset
+from utils.dire_types import TypeLibCodec
 
 
 SAME_VARIABLE_TOKEN = '<IDENTITY>'
@@ -117,9 +116,13 @@ class VocabEntry:
 
     @staticmethod
     def from_corpus(corpus, size, freq_cutoff=0, predefined_tokens=None):
+        word_freq = Counter(chain(*corpus))
+        return VocabEntry.from_counter(word_freq, size, freq_cutoff, predefined_tokens)
+    
+    @staticmethod
+    def from_counter(word_freq, size, freq_cutoff=0, predefined_tokens=None):
         vocab_entry = VocabEntry()
 
-        word_freq = Counter(chain(*corpus))
         freq_words = [w for w in word_freq if word_freq[w] >= freq_cutoff]
         print('number of word types: %d, number of word types w/ frequency >= %d: %d' % (len(word_freq), freq_cutoff,
                                                                                        len(freq_words)))
@@ -178,21 +181,32 @@ class Vocab(object):
 
 
 if __name__ == '__main__':
+    from utils.dataset import Dataset
 
     args = docopt(__doc__)
     vocab_size = int(args['--size'])
     vocab_file = args['VOCAB_FILE']
+    type_file = args['TYPE_FILE']
     train_set = Dataset(args['TRAIN_FILE'])
 
+    # Treat types as discrete tokens
+    with open(type_file) as type_f:
+        typelib = TypeLibCodec.decode(type_f.read())
+        type_counter = Counter()
+        for size in typelib:
+            for freq, tp in typelib[size]:
+                type_counter[str(tp)] = freq
+    print(f"{len(type_counter)} types in typelib")
+
+    type_vocab_entry = VocabEntry.from_counter(type_counter, size=vocab_size,
+                                                 freq_cutoff=int(args['--freq-cutoff']))
+
     src_code_tokens_file = vocab_file + '.src_code_tokens.txt'
-    f_src_token = open(src_code_tokens_file, 'w')
-
-    tgt_words = []
-    for example in tqdm(train_set.get_iterator(num_workers=8)):
-        code_tokens = example.code_tokens
-        f_src_token.write(' '.join(code_tokens) + '\n')
-
-    f_src_token.close()
+    with open(src_code_tokens_file, 'w') as f_src_token:
+        tgt_words = []
+        for example in tqdm(train_set):
+            code_tokens = example.code_tokens
+            f_src_token.write(' '.join(code_tokens) + '\n')
 
     assert args['--use-bpe']
     print('use bpe')
@@ -205,8 +219,10 @@ if __name__ == '__main__':
                                     f'--input={src_code_tokens_file}')
     src_code_tokens_vocab_entry = VocabEntry(vocab_file + '.src_code_tokens.model')
 
+
     vocab = Vocab(
         source_tokens=src_code_tokens_vocab_entry,
+        types=type_vocab_entry
     )
 
     vocab.save(args['VOCAB_FILE'])

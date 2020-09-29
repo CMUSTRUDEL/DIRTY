@@ -1,16 +1,19 @@
+import glob
 import multiprocessing as mp
 import tarfile
 from collections import defaultdict
-from typing import DefaultDict, Dict, Iterable, Mapping, Set
-import glob
+from typing import DefaultDict, Dict, Iterable, List, Mapping, Set
 
 import numpy as np
+import torch
 import ujson as json
+import webdataset as wds
 from tqdm import tqdm
 
-from utils.code_processing import canonicalize_code, tokenize_raw_code
+from utils.code_processing import tokenize_raw_code
 from utils.function import CollectedFunction
 from utils.variable import Location, Variable, location_from_json_key
+from utils.vocab import Vocab
 
 
 class Example:
@@ -36,14 +39,16 @@ class Example:
     def from_json(cls, d: Dict):
         source = defaultdict(dict)
         for loc in ["a", "l"]:
-            if not loc in d: continue
+            if not loc in d:
+                continue
             for key, args in d[loc].items():
                 source[loc][location_from_json_key(key)] = {
                     Variable.from_json(arg) for arg in args
                 }
         target = defaultdict(dict)
         for loc in ["a", "l"]:
-            if not loc in d: continue
+            if not loc in d:
+                continue
             for key, args in d[loc].items():
                 target[loc][location_from_json_key(key)] = {
                     Variable.from_json(arg) for arg in args
@@ -83,6 +88,7 @@ class Example:
             name == cf.debug.name
             and set(source_args.keys()) == set(target_args.keys())
             and len(source_args) + len(source_locals) > 0
+            and len(code_tokens) < 500
         )
 
         return cls(
@@ -115,40 +121,60 @@ class Example:
     def is_valid_example(self):
         return self._is_valid
 
-class Dataset(object):
-    def __init__(self, file_paths):
-        assert isinstance(file_paths, str)
-        self.file_paths = glob.glob(file_paths)
 
-    def get_iterator(self, shuffle=False, num_workers=1):
-        json_iter = get_json_iterator_from_tar_file(self.file_paths, shuffle=shuffle)
-        with mp.Pool(processes=num_workers) as pool:
-            examples_iter = pool.imap(example_generator, json_iter)
-            for example in examples_iter:
+class Dataset(wds.Dataset):
+
+    def __init__(self, url, vocab_fname=None):
+        # support wildcards
+        urls = glob.glob(url)
+        super().__init__(urls)
+        if vocab_fname:
+            # annotate example for training
+            self.vocab = Vocab.load(vocab_fname)
+            annotate_and_filter = self._annotate_and_filter
+        else:
+            # for creating the vocab
+            annotate_and_filter = lambda x: x
+        self = (
+            self.pipe(Dataset._file_iter_to_line_iter)
+            .decode()
+            .map(lambda x: x["json"])
+            .map(Example.from_json)
+            .pipe(annotate_and_filter)
+            .shuffle(5000)
+        )
+
+    @staticmethod
+    def _file_iter_to_line_iter(jsonl_iter):
+        for jsonl in jsonl_iter:
+            lines = jsonl["jsonl"].split(b"\n")
+            for line in lines:
+                if not line:
+                    continue
+                yield {"json": line}
+
+    def _annotate_and_filter(self, example_iter):
+        for example in example_iter:
+            src_bpe_model = self.vocab.source_tokens.subtoken_model
+            snippet = example.code_tokens
+            snippet = ' '.join(snippet)
+            sub_tokens = ['<s>'] + src_bpe_model.encode_as_pieces(snippet) + ['</s>']
+            sub_token_ids = [src_bpe_model.bos_id()] + src_bpe_model.encode_as_ids(snippet) + [src_bpe_model.eos_id()]
+            setattr(example, 'sub_tokens', sub_tokens)
+            setattr(example, 'sub_token_ids', sub_token_ids)
+            setattr(example, 'source_seq_length', len(sub_tokens))
+            if len(sub_tokens) < 510:
                 yield example
 
-def get_json_iterator_from_tar_file(file_paths, shuffle=False) -> Iterable:
-    if shuffle:
-        np.random.shuffle(file_paths)
+    @staticmethod
+    def collate_fn(batch_examples: List[Example]):
+        print([len(e.code_tokens) for e in batch_examples])
 
-    for file_path in file_paths:
-        with tarfile.open(file_path, 'r') as f:
-            files = [x.name for x in f.getmembers() if x.name.endswith('.jsonl')]
-            if shuffle:
-                np.random.shuffle(files)
 
-            for filename in files:
-                jsonl_file = f.extractfile(filename)
-                if jsonl_file is not None:
-                    for line_no, json_str in enumerate(jsonl_file):
-                        payload = json_str, dict(file_name=filename, line_num=line_no)
-                        yield payload
-
-def example_generator(json_str_list):
-    json_str, meta = json_str_list
-    json_dict = json.loads(json_str)
-    example = Example.from_json(json_dict)
-    # if example.is_valid_example:
-    #     canonical_code = canonicalize_code(example.raw_code)
-    #     example.canonical_code = canonical_code
-    return example
+if __name__ == "__main__":
+    dataset = Dataset("data/train-shard-*.tar", "data/vocab.bpe10000")
+    dataloader = torch.utils.data.DataLoader(
+        dataset, num_workers=4, batch_size=16, collate_fn=Dataset.collate_fn
+    )
+    for x in tqdm(dataloader):
+        pass

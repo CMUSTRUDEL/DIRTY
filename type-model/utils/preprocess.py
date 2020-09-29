@@ -6,7 +6,7 @@ Usage:
 Options:
     -h --help                  Show this screen.
     --max=<int>                max dataset size [default: 10000]
-    --shard-size=<int>         shard size [default: 30000]
+    --shard-size=<int>         shard size [default: 5000]
     --test-file=<file>         test file
     --no-filtering             do not filter files
 """
@@ -28,24 +28,43 @@ import ujson as json
 from docopt import docopt
 from tqdm import tqdm
 
-from utils.dataset import Example, example_generator
+from utils.dataset import Example
 from utils.dire_types import TypeInfo, TypeLib, TypeLibCodec
 from utils.function import CollectedFunction
+from utils.code_processing import canonicalize_code
 
 all_functions = dict()  # indexed by binaries
+
+
+def example_generator(json_str_list):
+    examples = []
+    for json_str, meta in json_str_list:
+        json_dict = json.loads(json_str)
+        cf = CollectedFunction.from_json(json_dict)
+        example = Example.from_cf(cf, binary_file=meta)
+
+        if example.is_valid_example:
+            canonical_code = canonicalize_code(example.raw_code)
+            example.canonical_code = canonical_code
+            examples.append(example)
+
+    return examples
 
 
 def json_line_reader(args):
     fdir, fname = args
     bin_file_name = os.path.join(fdir, "bins", fname)
     func_json_list = []
-    with gzip.open(bin_file_name, "rt") as bin_file:
-        for line_no, line in enumerate(bin_file):
-            json_str = line.strip()
-            if json_str:
-                func_json_list.append(
-                    (json_str, dict(file_name=fname[:-3], line_num=line_no))
-                )
+    try:
+        with gzip.open(bin_file_name, "rt") as bin_file:
+            for line_no, line in enumerate(bin_file):
+                json_str = line.strip()
+                if json_str:
+                    func_json_list.append(
+                        (json_str, dict(file_name=fname[:-3], line_num=line_no))
+                    )
+    except (gzip.BadGzipFile, EOFError) as e:
+        print(f"Bad Gzip file {bin_file_name}")
 
     return func_json_list
 
