@@ -705,7 +705,10 @@ class Struct(UDT):
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "Struct":
-        return cls(name=d["n"], layout=d["l"])
+        layout = []
+        for encoded_member in d["l"]:
+            layout.append(TypeLibCodec.read_metadata(encoded_member))
+        return cls(name=d["n"], layout=layout)
 
     def _to_json(self) -> t.Dict[str, t.Any]:
         return {
