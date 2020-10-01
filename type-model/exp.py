@@ -66,7 +66,7 @@ def train(args):
         dev_set,
         batch_size=batch_size,
         collate_fn=Dataset.collate_fn,
-        num_workers=8,
+        num_workers=1,
         pin_memory=True,
     )
 
@@ -74,11 +74,14 @@ def train(args):
     model = TypeReconstructionModel(config)
 
     wandb_logger = WandbLogger(name=work_dir, project="dire")
+    wandb_logger.log_hyperparams(config)
     trainer = pl.Trainer(
         max_epochs=config["train"]["max_epoch"],
         logger=wandb_logger,
         gpus=1 if args["--cuda"] else None,
         auto_select_gpus=True,
+        val_check_interval=3000,
+        limit_val_batches=300,
     )
     trainer.fit(model, train_loader, val_loader)
 

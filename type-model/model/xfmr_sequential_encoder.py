@@ -44,7 +44,7 @@ class TransformerModel(nn.Module):
 
     def forward(self, src, src_padding):
         src = src * math.sqrt(self.ninp)
-        # src = self.pos_encoder(src)
+        src = self.pos_encoder(src)
         output = self.transformer_encoder(src, src_key_padding_mask=src_padding)
         # set state and cell to the average of output
         masked_sum = (

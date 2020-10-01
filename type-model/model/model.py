@@ -5,6 +5,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from pytorch_lightning.metrics.functional import accuracy
+from pytorch_lightning.metrics.sklearns import F1
 from torch import nn
 from torchvision import transforms
 
@@ -18,6 +19,8 @@ class TypeReconstructionModel(pl.LightningModule):
         self.encoder = XfmrSequentialEncoder.build(config["encoder"])
         self.decoder = SimpleDecoder.build(config["decoder"])
         self.config = config
+        self.f1_macro = F1(average='macro')
+        self.f1_micro = F1(average='micro')
 
     def forward(self, x_dict):
         embedding = self.encoder(x_dict)
@@ -49,17 +52,10 @@ class TypeReconstructionModel(pl.LightningModule):
 
         return result
 
-    def validation_step(self, batch, batch_idx):
-        return self._shared_eval(batch, batch_idx, "val")
-
-    def test_step(self, batch, batch_idx):
-        return self._shared_eval(batch, batch_idx, "test")
-
-    def _shared_eval(
+    def validation_step(
         self,
         batch: Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, torch.Tensor]],
         batch_idx,
-        prefix: str,
     ):
         input_dict, target_dict = batch
         context_encoding = self.encoder(input_dict)
@@ -72,13 +68,19 @@ class TypeReconstructionModel(pl.LightningModule):
             reduce=False,
         )
         loss = loss[target_dict["target_mask"]]
-        loss = loss.mean()
-        result = pl.EvalResult()
-        result.log(f"{prefix}_loss", loss)
+        preds = variable_type_logits[target_dict["target_mask"]].argmax(dim=1)
+        targets = target_dict["target_type_id"][target_dict["target_mask"]]
+        return {"loss": loss.detach().cpu(), "preds": preds.detach().cpu(), "targets": targets.detach().cpu()}
 
-        pred = variable_type_logits[target_dict["target_mask"]].argmax(dim=1)
-        target = target_dict["target_type_id"][target_dict["target_mask"]]
-        result.log(f"{prefix}_acc", accuracy(pred, target))
+    def validation_epoch_end(self, outputs):
+        preds = torch.cat([x['preds'] for x in outputs])
+        targets = torch.cat([x['targets'] for x in outputs])
+        loss = torch.cat([x['loss'] for x in outputs]).mean()
+        result = pl.EvalResult(early_stop_on=loss, checkpoint_on=loss)
+        result.log('val_loss', loss, prog_bar=True)
+        result.log('val_acc', accuracy(preds, targets))
+        result.log('val_f1_macro', self.f1_macro(preds, targets))
+        result.log('val_f1_micro', self.f1_micro(preds, targets))
         return result
 
     def configure_optimizers(self):
