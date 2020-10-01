@@ -26,7 +26,7 @@ from utils.dire_types import TypeLibCodec
 SAME_VARIABLE_TOKEN = '<IDENTITY>'
 END_OF_VARIABLE_TOKEN = '</s>'
 PAD_ID = 0
-
+assert PAD_ID == 0
 
 class VocabEntry:
     def __init__(self, subtoken_model_path=None):

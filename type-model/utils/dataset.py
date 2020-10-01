@@ -1,6 +1,6 @@
 import glob
 from collections import defaultdict
-from typing import Dict, List, Mapping, Optional, Set
+from typing import Dict, List, Mapping, Optional, Set, Tuple, Union
 
 import numpy as np
 import torch
@@ -136,16 +136,16 @@ class Dataset(wds.Dataset):
     SHUFFLE_BUFFER = 5000
     SORT_BUFFER = 512
 
-    def __init__(self, url: str, annotate_args: Optional[Dict] = None):
+    def __init__(self, url: str, config: Optional[Dict] = None):
         # support wildcards
         urls = glob.glob(url)
         super().__init__(urls)
-        if annotate_args:
+        if config:
             # annotate example for training
             from utils.vocab import Vocab
 
-            self.vocab = Vocab.load(annotate_args["vocab_fname"])
-            self.max_src_tokens_len = annotate_args["max_src_tokens_len"]
+            self.vocab = Vocab.load(config["vocab_file"])
+            self.max_src_tokens_len = config["max_src_tokens_len"]
             annotate = self._annotate
             sort = Dataset._sort
         else:
@@ -217,11 +217,9 @@ class Dataset(wds.Dataset):
         return example
 
     @staticmethod
-    def collate_fn(examples: List[Example]):
-        from utils.vocab import PAD_ID
-
+    def collate_fn(examples: List[Example]) -> Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, torch.Tensor]]:
         token_ids = [torch.tensor(e.sub_token_ids) for e in examples]
-        input = pad_sequence(token_ids, batch_first=True, padding_value=PAD_ID)
+        input = pad_sequence(token_ids, batch_first=True)
         max_time_step = input.shape[1]
         # corresponding var_id of each token in sub_tokens
         variable_mention_to_variable_id = torch.zeros(
@@ -243,11 +241,11 @@ class Dataset(wds.Dataset):
                     variable_mention_mask[e_id, i] = 1.0
                     variable_mention_num[e_id, var_name_to_id[sub_token]] += 1
         # if mentioned for each var_id
-        variable_encoding_mask = variable_mention_num > 0
+        variable_encoding_mask = (variable_mention_num > 0).float()
 
         type_ids = [torch.tensor(e.tgt_var_types) for e in examples]
-        variable_tgt_name_id = pad_sequence(type_ids, batch_first=True)
-        assert variable_tgt_name_id.shape == variable_mention_num.shape
+        target_type_id = pad_sequence(type_ids, batch_first=True)
+        assert target_type_id.shape == variable_mention_num.shape
 
         return (
             dict(
@@ -258,7 +256,10 @@ class Dataset(wds.Dataset):
                 variable_encoding_mask=variable_encoding_mask,
                 batch_size=len(examples),
             ),
-            dict(variable_tgt_name_id=variable_tgt_name_id),
+            dict(
+                target_type_id=target_type_id,
+                target_mask=target_type_id > 0
+            ),
         )
 
 
