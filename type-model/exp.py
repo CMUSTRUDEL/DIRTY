@@ -66,7 +66,7 @@ def train(args):
         dev_set,
         batch_size=batch_size,
         collate_fn=Dataset.collate_fn,
-        num_workers=1,
+        num_workers=8,
         pin_memory=True,
     )
 
@@ -80,8 +80,7 @@ def train(args):
         logger=wandb_logger,
         gpus=1 if args["--cuda"] else None,
         auto_select_gpus=True,
-        val_check_interval=3000,
-        limit_val_batches=300,
+        val_check_interval=5000,
     )
     trainer.fit(model, train_loader, val_loader)
 
