@@ -130,6 +130,13 @@ class Example:
     def is_valid_example(self):
         return self._is_valid
 
+# HACK: Stupid global lambda functions to get distributed training working
+def identity(x):
+    return x
+def get_key_json(x):
+    return x['json']
+def get_src_len(e):
+    return e.source_seq_length
 
 class Dataset(wds.Dataset):
 
@@ -147,15 +154,15 @@ class Dataset(wds.Dataset):
             self.vocab = Vocab.load(config["vocab_file"])
             self.max_src_tokens_len = config["max_src_tokens_len"]
             annotate = self._annotate
-            sort = Dataset._sort if url.startswith("train") else lambda x: x
+            sort = Dataset._sort if url.startswith("train") else identity
         else:
             # for creating the vocab
-            annotate = lambda x: x
-            sort = lambda x: x
+            annotate = identity
+            sort = identity
         self = (
             self.pipe(Dataset._file_iter_to_line_iter)
             .decode()
-            .map(lambda x: x["json"])
+            .map(get_key_json)
             .map(Example.from_json)
             .map(annotate)
             .shuffle(Dataset.SHUFFLE_BUFFER)
@@ -168,11 +175,11 @@ class Dataset(wds.Dataset):
         for example in example_iter:
             sort_pool.append(example)
             if len(sort_pool) == Dataset.SORT_BUFFER:
-                sort_pool.sort(key=lambda e: e.source_seq_length)
+                sort_pool.sort(key=get_src_len)
                 yield from sort_pool
                 sort_pool.clear()
         if sort_pool:
-            sort_pool.sort(key=lambda e: e.source_seq_length)
+            sort_pool.sort(key=get_src_len)
             yield from sort_pool
 
     @staticmethod

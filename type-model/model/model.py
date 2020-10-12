@@ -4,8 +4,7 @@ from typing import Dict, Tuple, Union
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-from pytorch_lightning.metrics.functional import accuracy
-from pytorch_lightning.metrics.sklearns import F1
+from pytorch_lightning.metrics.functional.classification import accuracy, f1_score
 from torch import nn
 from torchvision import transforms
 from utils.vocab import Vocab
@@ -23,7 +22,6 @@ class TypeReconstructionModel(pl.LightningModule):
         self.decoder = Decoder.build(config["decoder"])
         self.config = config
         self.vocab = Vocab.load(config["data"]["vocab_file"])
-        self.f1_macro = F1(average="macro")
         self._preprocess_udt_idxs()
 
     def _preprocess_udt_idxs(self):
@@ -48,18 +46,12 @@ class TypeReconstructionModel(pl.LightningModule):
             # cross_entropy requires num_classes at the second dimension
             variable_type_logits.transpose(1, 2),
             target_dict["target_type_id"],
-            reduce=False,
+            reduction='none',
         )
         loss = loss[target_dict["target_mask"]]
         loss = loss.mean()
-        result = pl.TrainResult(loss)
-        result.log("train_loss", loss)
-
-        pred = self.decoder.predict(variable_type_logits, target_dict)
-        target = target_dict["target_type_id"][target_dict["target_mask"]]
-        result.log("train_acc", accuracy(pred, target))
-
-        return result
+        self.log('train_loss', loss, prog_bar=True)
+        return loss
 
     def validation_step(self, batch, batch_idx):
         return self._shared_eval_step(batch, batch_idx)
@@ -78,17 +70,16 @@ class TypeReconstructionModel(pl.LightningModule):
         loss = F.cross_entropy(
             variable_type_logits.transpose(1, 2),
             target_dict["target_type_id"],
-            reduce=False,
+            reduction='none',
         )
         loss = loss[target_dict["target_mask"]]
-        preds = self.decoder.predict(variable_type_logits, target_dict)
+        preds = self.decoder.predict(context_encoding, target_dict, variable_type_logits)
         targets = target_dict["target_type_id"][target_dict["target_mask"]]
-        ret = {
-            "loss": loss.detach().cpu(),
-            "preds": preds.detach().cpu(),
-            "targets": targets.detach().cpu(),
-        }
-        return ret
+        return dict(
+            loss=loss.detach().cpu(),
+            preds=preds.detach().cpu(),
+            targets=targets.detach().cpu(),
+        )
 
     def validation_epoch_end(self, outputs):
         return self._shared_epoch_end(outputs, "val")
@@ -100,23 +91,16 @@ class TypeReconstructionModel(pl.LightningModule):
         preds = torch.cat([x["preds"] for x in outputs])
         targets = torch.cat([x["targets"] for x in outputs])
         loss = torch.cat([x["loss"] for x in outputs]).mean()
-        result = pl.EvalResult(early_stop_on=loss, checkpoint_on=loss)
-        result.log(f"{prefix}_loss", loss, prog_bar=True)
-        result.log(f"{prefix}_acc", accuracy(preds, targets))
-        result.log(f"{prefix}_f1_macro", self.f1_macro(preds, targets))
+        self.log(f"{prefix}_loss", loss)
+        self.log(f"{prefix}_acc", accuracy(preds, targets))
+        self.log(f"{prefix}_f1_macro", f1_score(preds, targets, class_reduction='macro'))
         struc_mask = torch.zeros(len(targets), dtype=torch.bool)
         for idx, target in enumerate(targets):
             if target.item() in self.vocab.types.struct_set:
                 struc_mask[idx] = 1
         if struc_mask.sum() > 0:
-            result.log(
-                f"{prefix}_struc_acc", accuracy(preds[struc_mask], targets[struc_mask])
-            )
-            result.log(
-                f"{prefix}_struc_f1_macro",
-                self.f1_macro(preds[struc_mask], targets[struc_mask]),
-            )
-        return result
+            self.log(f"{prefix}_struc_acc", accuracy(preds[struc_mask], targets[struc_mask]))
+            self.log(f"{prefix}_struc_f1_macro", f1_score(preds[struc_mask], targets[struc_mask], class_reduction='macro'))
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.config["train"]["lr"])

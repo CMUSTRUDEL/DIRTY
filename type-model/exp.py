@@ -10,7 +10,7 @@ Options:
     --cuda                                      Use GPU
     --debug                                     Debug mode
     --seed=<int>                                Seed [default: 0]
-    --work-dir=<dir>                            work dir [default: data/exp_runs/]
+    --expname=<str>                            work dir [default: type]
     --extra-config=<str>                        extra config [default: {}]
     --ensemble                                  Use ensemble
     --save-to=<str>                             Save decode results to path
@@ -28,6 +28,7 @@ import torch
 import wandb
 from docopt import docopt
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from torch.utils.data import DataLoader
 
 from model.model import TypeReconstructionModel
@@ -36,20 +37,12 @@ from utils.dataset import Dataset
 
 
 def train(args):
-    work_dir = args["--work-dir"]
     config = json.loads(_jsonnet.evaluate_file(args["CONFIG_FILE"]))
-    config["work_dir"] = work_dir
-
-    if not os.path.exists(work_dir):
-        print(f"creating work dir [{work_dir}]", file=sys.stderr)
-        os.makedirs(work_dir)
 
     if args["--extra-config"]:
         extra_config = args["--extra-config"]
         extra_config = json.loads(extra_config)
         config = util.update(config, extra_config)
-
-    json.dump(config, open(os.path.join(work_dir, "config.json"), "w"), indent=2)
 
     # dataloaders
     batch_size = config["train"]["batch_size"]
@@ -73,15 +66,16 @@ def train(args):
     # model
     model = TypeReconstructionModel(config)
 
-    wandb_logger = WandbLogger(name=work_dir, project="dire")
+    wandb_logger = WandbLogger(name=args["--expname"], project="dire")
     wandb_logger.log_hyperparams(config)
     trainer = pl.Trainer(
         max_epochs=config["train"]["max_epoch"],
         logger=wandb_logger,
         gpus=1 if args["--cuda"] else None,
         auto_select_gpus=True,
-        val_check_interval=5000,
+        val_check_interval=15000,
         gradient_clip_val=1,
+        callbacks=[EarlyStopping(monitor='val_loss')]
     )
     trainer.fit(model, train_loader, val_loader)
 

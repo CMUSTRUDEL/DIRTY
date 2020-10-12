@@ -62,16 +62,12 @@ class XfmrDecoder(nn.Module):
         tgt = self.target_embedding(target_dict["target_type_id"])
         # Shift 1 position to right
         tgt = torch.cat([torch.zeros_like(tgt[:, :1]), tgt[:, :-1]], dim=1)
-        tgt = torch.cat(
-            [
-                context_encoding["variable_encoding"],
-                tgt
-            ],
-            dim=-1,
-        )
+        tgt = torch.cat([context_encoding["variable_encoding"], tgt], dim=-1)
         tgt = self.target_transform(tgt)
         # mask out attention to subsequent inputs which include the ground truth for current step
-        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(tgt.shape[1]).to(tgt.device)
+        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(tgt.shape[1]).to(
+            tgt.device
+        )
         # TransformerModels have batch_first=False
         hidden = self.decoder(
             tgt.transpose(0, 1),
@@ -84,16 +80,56 @@ class XfmrDecoder(nn.Module):
         return logits
 
     def predict(
-        self, variable_type_logits: torch.Tensor, target_dict: Dict[str, torch.Tensor]
+        self,
+        context_encoding: Dict[str, torch.Tensor],
+        target_dict: Dict[str, torch.Tensor],
+        variable_type_logits: torch.Tensor,
     ):
-        # HACK
-        return variable_type_logits[target_dict["target_mask"]].argmax(dim=1)
+        """Greedy decoding"""
+
+        batch_size, max_time_step, _ = context_encoding["variable_encoding"].shape
+        tgt = torch.zeros(batch_size, 1, self.config["target_embedding_size"]).to(
+            context_encoding["variable_encoding"].device
+        )
+        tgt = self.target_transform(
+            torch.cat([context_encoding["variable_encoding"][:, :1], tgt], dim=-1)
+        )
+        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step).to(
+            tgt.device
+        )
+        logits_list = []
+        for idx in range(max_time_step):
+            hidden = self.decoder(
+                tgt.transpose(0, 1),
+                memory=context_encoding["code_token_encoding"].transpose(0, 1),
+                tgt_mask=tgt_mask[: idx + 1, : idx + 1],
+                tgt_key_padding_mask=~target_dict["target_mask"][:, : idx + 1],
+                memory_key_padding_mask=~context_encoding["code_token_mask"],
+            ).transpose(0, 1)
+            # Save logits for the current step
+            logits = self.output(hidden[:, -1:])
+            logits_list.append(logits)
+            # Update tgt for next step with prediction at the current step
+            if idx < max_time_step - 1:
+                tgt_step = self.target_embedding(logits.argmax(dim=2))
+                tgt_step = torch.cat(
+                    [context_encoding["variable_encoding"][:, idx + 1 : idx + 2], tgt_step],
+                    dim=-1,
+                )
+                tgt_step = self.target_transform(tgt_step)
+                tgt = torch.cat([tgt, tgt_step], dim=1)
+        logits = torch.cat(logits_list, dim=1)
+        return logits[target_dict["target_mask"]].argmax(dim=1)
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int) -> torch.Tensor:
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
-            Unmasked positions are filled with float(0.0).
+        Unmasked positions are filled with float(0.0).
         """
         mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        mask = (
+            mask.float()
+            .masked_fill(mask == 0, float("-inf"))
+            .masked_fill(mask == 1, float(0.0))
+        )
         return mask
