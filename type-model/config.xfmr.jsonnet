@@ -1,23 +1,26 @@
 {
   "data": {
-    "train_file": "data/train-shard-*.tar",
-    "dev_file": "data/dev.tar",
-    "vocab_file": "data/vocab.bpe10000",
+    "train_file": "data1/train-shard-*.tar",
+    "dev_file": "data1/dev-*.tar",
+    "test_file": "data1/test.tar",
+    "vocab_file": "data1/vocab.bpe10000",
     "max_src_tokens_len": 510,
   },
   "encoder":{
     "type": "XfmrSequentialEncoder",
     "source_embedding_size": 256,
-    "source_encoding_size": 256,
+    "hidden_size": 256,
     "vocab_file": $['data'].vocab_file,
-    "decoder_hidden_size": $['decoder'].hidden_size,
     "dropout": 0.1,
     "num_layers": 2,
   },
   "decoder": {
-    "type": 'SimpleDecoder',
+    "type": 'XfmrDecoder',
     "vocab_file": $['data'].vocab_file,
-    "hidden_size": 256,
+    "target_embedding_size": $['encoder'].source_embedding_size,
+    "hidden_size": $['encoder'].hidden_size,
+    "dropout": 0.1,
+    "num_layers": 2,
   },
   "train": {
     "batch_size": 64,

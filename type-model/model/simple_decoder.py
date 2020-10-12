@@ -29,6 +29,9 @@ class SimpleDecoder(nn.Module):
         model = cls(params)
         return model
 
-    def forward(self, context_encoding: Dict[str, torch.Tensor]):
+    def forward(self, context_encoding: Dict[str, torch.Tensor], target_dict: Dict[str, torch.Tensor]):
         logits = self.output(context_encoding["variable_encoding"])
         return logits
+
+    def predict(self, variable_type_logits: torch.Tensor, target_dict: Dict[str, torch.Tensor]):
+        return variable_type_logits[target_dict["target_mask"]].argmax(dim=1)

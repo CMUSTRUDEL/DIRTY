@@ -81,6 +81,7 @@ def train(args):
         gpus=1 if args["--cuda"] else None,
         auto_select_gpus=True,
         val_check_interval=5000,
+        gradient_clip_val=1,
     )
     trainer.fit(model, train_loader, val_loader)
 

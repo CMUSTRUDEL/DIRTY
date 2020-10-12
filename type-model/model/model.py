@@ -10,8 +10,8 @@ from torch import nn
 from torchvision import transforms
 from utils.vocab import Vocab
 
-from model.simple_decoder import SimpleDecoder
-from model.xfmr_sequential_encoder import XfmrSequentialEncoder
+from model.encoder import Encoder
+from model.decoder import Decoder
 
 
 class TypeReconstructionModel(pl.LightningModule):
@@ -19,8 +19,8 @@ class TypeReconstructionModel(pl.LightningModule):
         super().__init__()
         if config_load is not None:
             config = config_load
-        self.encoder = XfmrSequentialEncoder.build(config["encoder"])
-        self.decoder = SimpleDecoder.build(config["decoder"])
+        self.encoder = Encoder.build(config["encoder"])
+        self.decoder = Decoder.build(config["decoder"])
         self.config = config
         self.vocab = Vocab.load(config["data"]["vocab_file"])
         self.f1_macro = F1(average="macro")
@@ -43,10 +43,9 @@ class TypeReconstructionModel(pl.LightningModule):
     ):
         input_dict, target_dict = batch
         context_encoding = self.encoder(input_dict)
-        # (batch_size, max_variable_memtion_num, num_types)
-        variable_type_logits = self.decoder(context_encoding)
-        # (batch_size, max_variable_memtion_num)
+        variable_type_logits = self.decoder(context_encoding, target_dict)
         loss = F.cross_entropy(
+            # cross_entropy requires num_classes at the second dimension
             variable_type_logits.transpose(1, 2),
             target_dict["target_type_id"],
             reduce=False,
@@ -56,7 +55,7 @@ class TypeReconstructionModel(pl.LightningModule):
         result = pl.TrainResult(loss)
         result.log("train_loss", loss)
 
-        pred = variable_type_logits[target_dict["target_mask"]].argmax(dim=1)
+        pred = self.decoder.predict(variable_type_logits, target_dict)
         target = target_dict["target_type_id"][target_dict["target_mask"]]
         result.log("train_acc", accuracy(pred, target))
 
@@ -75,16 +74,14 @@ class TypeReconstructionModel(pl.LightningModule):
     ):
         input_dict, target_dict = batch
         context_encoding = self.encoder(input_dict)
-        # (batch_size, max_variable_memtion_num, num_types)
-        variable_type_logits = self.decoder(context_encoding)
-        # (batch_size, max_variable_memtion_num)
+        variable_type_logits = self.decoder(context_encoding, target_dict)
         loss = F.cross_entropy(
             variable_type_logits.transpose(1, 2),
             target_dict["target_type_id"],
             reduce=False,
         )
         loss = loss[target_dict["target_mask"]]
-        preds = variable_type_logits[target_dict["target_mask"]].argmax(dim=1)
+        preds = self.decoder.predict(variable_type_logits, target_dict)
         targets = target_dict["target_type_id"][target_dict["target_mask"]]
         ret = {
             "loss": loss.detach().cpu(),
@@ -112,8 +109,13 @@ class TypeReconstructionModel(pl.LightningModule):
             if target.item() in self.vocab.types.struct_set:
                 struc_mask[idx] = 1
         if struc_mask.sum() > 0:
-            result.log(f"{prefix}_struc_acc", accuracy(preds[struc_mask], targets[struc_mask]))
-            result.log(f"{prefix}_struc_f1_macro", self.f1_macro(preds[struc_mask], targets[struc_mask]))
+            result.log(
+                f"{prefix}_struc_acc", accuracy(preds[struc_mask], targets[struc_mask])
+            )
+            result.log(
+                f"{prefix}_struc_f1_macro",
+                self.f1_macro(preds[struc_mask], targets[struc_mask]),
+            )
         return result
 
     def configure_optimizers(self):
