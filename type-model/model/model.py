@@ -50,7 +50,7 @@ class TypeReconstructionModel(pl.LightningModule):
         )
         loss = loss[target_dict["target_mask"]]
         loss = loss.mean()
-        self.log('train_loss', loss, prog_bar=True)
+        self.log('train_loss', loss)
         return loss
 
     def validation_step(self, batch, batch_idx):

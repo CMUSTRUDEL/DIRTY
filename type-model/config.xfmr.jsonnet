@@ -25,7 +25,6 @@
   "train": {
     "batch_size": 64,
     "eval_batch_size": 64,
-    "patience": 10,
     "max_epoch": 60,
     "lr": 1e-3,
   }

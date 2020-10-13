@@ -141,7 +141,7 @@ def get_src_len(e):
 class Dataset(wds.Dataset):
 
     SHUFFLE_BUFFER = 5000
-    SORT_BUFFER = 256
+    SORT_BUFFER = 512
 
     def __init__(self, url: str, config: Optional[Dict] = None):
         # support wildcards
@@ -154,7 +154,7 @@ class Dataset(wds.Dataset):
             self.vocab = Vocab.load(config["vocab_file"])
             self.max_src_tokens_len = config["max_src_tokens_len"]
             annotate = self._annotate
-            sort = Dataset._sort if url.startswith("train") else identity
+            sort = Dataset._sort
         else:
             # for creating the vocab
             annotate = identity

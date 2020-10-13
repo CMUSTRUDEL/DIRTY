@@ -65,9 +65,7 @@ class XfmrDecoder(nn.Module):
         tgt = torch.cat([context_encoding["variable_encoding"], tgt], dim=-1)
         tgt = self.target_transform(tgt)
         # mask out attention to subsequent inputs which include the ground truth for current step
-        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(tgt.shape[1]).to(
-            tgt.device
-        )
+        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(tgt.shape[1], tgt.device)
         # TransformerModels have batch_first=False
         hidden = self.decoder(
             tgt.transpose(0, 1),
@@ -94,9 +92,7 @@ class XfmrDecoder(nn.Module):
         tgt = self.target_transform(
             torch.cat([context_encoding["variable_encoding"][:, :1], tgt], dim=-1)
         )
-        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step).to(
-            tgt.device
-        )
+        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step, tgt.device)
         logits_list = []
         for idx in range(max_time_step):
             hidden = self.decoder(
@@ -122,11 +118,11 @@ class XfmrDecoder(nn.Module):
         return logits[target_dict["target_mask"]].argmax(dim=1)
 
     @staticmethod
-    def generate_square_subsequent_mask(sz: int) -> torch.Tensor:
+    def generate_square_subsequent_mask(sz: int, device: torch.device) -> torch.Tensor:
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
         Unmasked positions are filled with float(0.0).
         """
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+        mask = (torch.triu(torch.ones(sz, sz, device=device)) == 1).transpose(0, 1)
         mask = (
             mask.float()
             .masked_fill(mask == 0, float("-inf"))
