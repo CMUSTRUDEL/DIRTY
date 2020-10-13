@@ -1,17 +1,17 @@
 from collections import defaultdict
 
 from json import dumps
-from typing import DefaultDict, Mapping, Optional, Set
+from typing import DefaultDict, Mapping, Optional, Set, Tuple
 
 # Huge hack to get importing to work with the decompiler
 try:
     from ida_ast import AST
     from dire_types import TypeLibCodec, TypeInfo
-    from variable import Location, Variable, location_from_json_key
+    from variable import Location, Stack, Variable, location_from_json_key
 except ImportError:
     from .ida_ast import AST
     from .dire_types import TypeLibCodec, TypeInfo
-    from .variable import Location, Variable, location_from_json_key
+    from .variable import Location, Stack, Variable, location_from_json_key
 
 
 class Function:
@@ -111,6 +111,35 @@ class Function:
     @property
     def raw_code(self) -> str:
         return self._raw_code
+
+    def stack_layout(self) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+        """Returns the layout of the stack as a pair of tuples. The first
+        tuple is the accessible offsets on the stack, while the second
+        are the start offsets of data in the stack.
+
+        This is useful for using with a TypeLib to get the next replacement
+        types. For example, if you have a TypeLib in the variable `lib` and
+        you want to get the list of next possible retypings for a function in
+        the variable `f`, you would use:
+
+        accessible, starts = f.stack_layout()
+        lib.get_next_replacements(accessible, starts)
+        """
+        # List of tuples of (offset, TypeInfo)
+        accessible = set()
+        starts = set()
+        for loc in self.local_vars:
+            if isinstance(loc, Stack):
+                for v in self.local_vars[loc]:
+                    accessible |= set(
+                        loc.offset + acc for acc in v.typ.accessible_offsets()
+                    )
+                    starts |= set(
+                        loc.offset + start for start in v.typ.start_offsets()
+                    )
+        accessible = tuple(sorted(list(accessible)))
+        starts = tuple(sorted(list(starts)))
+        return accessible, starts
 
     def __repr__(self) -> str:
         ret = (

@@ -13,7 +13,7 @@ import os
 import typing as t
 
 try:
-    import ida_typeinf # type: ignore
+    import ida_typeinf  # type: ignore
 except ImportError:
     print("Could not import ida_typeinf. Cannot parse IDA types.")
 
@@ -204,7 +204,9 @@ class TypeLib:
                 if end_padding == 0:
                     return Union(name=name, members=members)
                 return Union(
-                    name=name, members=members, padding=UDT.Padding(end_padding),
+                    name=name,
+                    members=members,
+                    padding=UDT.Padding(end_padding),
                 )
             else:
                 # UDT is a struct
@@ -269,7 +271,7 @@ class TypeLib:
         else:
             self[size] = entries
 
-    def add_json_file(self, json_file: str) -> None:
+    def add_json_file(self, json_file: str, *, threads: int = 1) -> None:
         """Adds the info in a serialized (gzipped) JSON file to this TypeLib"""
         other: t.Optional[t.Any] = None
         with gzip.open(json_file, "rt") as other_file:
@@ -288,6 +290,81 @@ class TypeLib:
         """Given a list of types, get all possible lists of replacements"""
         raise NotImplementedError
 
+    def get_next_replacements(
+        self, accessible: t.Tuple[int], start_offsets: t.Tuple[int]
+    ) -> t.List[t.Tuple["TypeInfo", t.Tuple[int], t.Tuple[int]]]:
+        """Given a memory layout, get a list of next possible legal types.
+
+        accessible: accessible (i.e., non-padding) addresses in memory
+        start_offsets: legal offsets for the start of a type
+
+        Returns an iterable of (type, accessible, start) tuples, where
+        "type" is a legal type, "accessible" is a tuple of remaining
+        accessible locations if this type is used, and "start" is the
+        remaining start locations if this type is used.
+
+        Notes:
+        - Accessible and start_offsets should both start at offset 0
+        - The returned accessible and start offsets are automatically
+          shifted so that they start at 0.
+        """
+        # The last element of accessible is the last address in memory.
+        length = accessible[-1] + 1
+        replacements = []
+        # Filter out types that are too long or of size zero
+        for size in filter(lambda s: s <= length and s != 0, self.keys()):
+            cur_accessible = tuple(s for s in accessible if s < size)
+            cur_start = tuple(s for s in start_offsets if s < size)
+            # Compute the memory layout of the remainder
+            rest_accessible = tuple(s - size for s in accessible if s >= size)
+            rest_start = tuple(s - size for s in start_offsets if s >= size)
+            # If the remainder of the start offsets is not either an empty tuple
+            # or if the first element of the new tuple is not 0, this is not
+            # a legal replacement
+            if len(rest_start) != 0 and rest_start[0] != 0:
+                continue
+            # If there are no more start offsets, but there are still accessible
+            # offsets, this is not a legal replacement.
+            if len(rest_start) == 0 and len(rest_accessible) != 0:
+                continue
+            for typ in self[size]:
+                # Accessible offsets and start offsets have to match.
+                if (
+                    cur_accessible == typ.typeinfo.accessible_offsets()
+                    and cur_start == typ.typeinfo.start_offsets()
+                ):
+                    replacements.append((typ, rest_accessible, rest_start))
+        return [
+            (typ.typeinfo, a, s)
+            for (typ, a, s) in sorted(
+                replacements, key=lambda x: x[0].frequency, reverse=True
+            )
+        ]
+
+    @staticmethod
+    def accessible_of_types(types: t.Iterable["TypeInfo"]) -> t.List[int]:
+        """Given a list of types, get the list of accessible offsets.
+        This is suitable for use with get_next_replacement.
+        """
+        offset = 0
+        accessible = []
+        for t in types:
+            accessible += [offset + a for a in t.accessible_types()]
+            offset += t.size
+        return accessible
+
+    @staticmethod
+    def start_offsets_of_types(types: t.Iterable["TypeInfo"]) -> t.List[int]:
+        """Given a list of types, get the list of accessible offsets.
+        This is suitable for use with get_next_replacement.
+        """
+        offset = 0
+        start_offsets = []
+        for t in types:
+            start_offsets += [offset + s for s in t.start_offsets()]
+            offset += t.size
+        return start_offsets
+
     def items(self) -> t.ItemsView[int, "TypeLib.EntryList"]:
         return self._data.items()
 
@@ -298,16 +375,19 @@ class TypeLib:
         return self._data.values()
 
     @classmethod
-    def load_dir(cls, path: str) -> t.Optional["TypeLib"]:
+    def load_dir(cls, path: str, *, threads: int = 1) -> t.Optional["TypeLib"]:
         """Loads all the serialized (gzipped) JSON files in a directory"""
-        files = [os.path.join(path, f) for f in os.listdir(path)
-                 if os.path.isfile(os.path.join(path, f))]
+        files = [
+            os.path.join(path, f)
+            for f in os.listdir(path)
+            if os.path.isfile(os.path.join(path, f))
+        ]
         new_lib: t.Optional[t.Any] = None
         with gzip.open(files[0], "rt") as first_serialized:
             new_lib = TypeLibCodec.decode(first_serialized.read())
         if new_lib is not None and isinstance(new_lib, TypeLib):
             for f in files[1:]:
-                new_lib.add_json_file(f)
+                new_lib.add_json_file(f, threads=threads)
         return new_lib
 
     @classmethod
