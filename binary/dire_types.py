@@ -281,34 +281,44 @@ class TypeLib:
         remaining start locations if this type is used.
 
         Notes:
-        - Accessible and start_offsets should both start at offset 0
-        - The returned accessible and start offsets are automatically
-          shifted so that they start at 0.
+        - The first start offset and accessible offset should be the same
+        - The list returned is sorted by decreasing frequency in the library
         """
+        start = accessible[0]
+        if start != start_offset[0]:
+            print("No replacements, start != first accessible")
+            return []
+
         # The last element of accessible is the last address in memory.
-        length = accessible[-1] + 1
+        length = (accessible[-1] - start) + 1
         replacements = []
         # Filter out types that are too long or of size zero
         for size in filter(lambda s: s <= length and s != 0, self.keys()):
-            cur_accessible = tuple(s for s in accessible if s < size)
-            cur_start = tuple(s for s in start_offsets if s < size)
+            cur_accessible = tuple(s for s in accessible if s < (size + start))
+            cur_start = tuple(s for s in start_offsets if s < (size + start))
             # Compute the memory layout of the remainder
-            rest_accessible = tuple(s - size for s in accessible if s >= size)
-            rest_start = tuple(s - size for s in start_offsets if s >= size)
+            rest_accessible = tuple(s for s in accessible if s >= (size + start))
+            rest_start = tuple(s for s in start_offsets if s >= (size + start))
             # If the remainder of the start offsets is not either an empty tuple
-            # or if the first element of the new tuple is not 0, this is not
-            # a legal replacement
-            if len(rest_start) != 0 and rest_start[0] != 0:
+            # or if the first element of the new start offsets is not the same
+            # as the first member of the new accessible, this is not a legal size.
+            if len(rest_start) != 0 and rest_start[0] != rest_accessible[0]:
                 continue
             # If there are no more start offsets, but there are still accessible
             # offsets, this is not a legal replacement.
             if len(rest_start) == 0 and len(rest_accessible) != 0:
                 continue
             for typ in self[size]:
+                shifted_accessible = tuple(
+                    a + start for a in typ.typeinfo.accessible_offsets()
+                )
+                shifted_start = tuple(
+                    s + start for s in typ.typeinfo.start_offsets()
+                )
                 # Accessible offsets and start offsets have to match.
                 if (
-                    cur_accessible == typ.typeinfo.accessible_offsets()
-                    and cur_start == typ.typeinfo.start_offsets()
+                    cur_accessible == shifted_accessible
+                    and cur_start == shifted_start
                 ):
                     replacements.append((typ, rest_accessible, rest_start))
         return [
