@@ -284,6 +284,59 @@ class TypeLib:
         for size, entries in self.items():
             entries.sort()
 
+    @staticmethod
+    def fix_bit(typ):
+        succeed = True
+        for m in typ.layout:
+            if isinstance(m, UDT.Field):
+                succeed &= m.size % 8 == 0
+                if not succeed:
+                    break
+                m.size //= 8
+            elif isinstance(m, Struct):
+                succeed &= TypeLib.fix_bit(m)
+        typ.size = sum(m.size for m in typ.layout)
+        return succeed
+
+    def fix(self):
+        """HACK: workaround to deal with the struct bit/bytes problem in the data."""
+        new_lib = TypeLib()
+        for size in self.keys():
+            for entry in self[size]:
+                succeed = True
+                if isinstance(entry.typeinfo, Struct):
+                    succeed &= TypeLib.fix_bit(entry.typeinfo)
+                    nsize = entry.typeinfo.size
+                else:
+                    nsize = size
+                if succeed:
+                    if nsize not in new_lib:
+                        new_lib.add_entry_list(nsize, TypeLib.EntryList())
+                    new_lib[nsize].add_entry(entry)
+        return new_lib
+
+    def make_cached_replacement_dict(self):
+        self.cached_replacement_dict = defaultdict(set)
+        for size in self.keys():
+            if size > 1024: continue
+            for entry in self[size]:
+                self.cached_replacement_dict[entry.typeinfo.accessible_offsets(), entry.typeinfo.start_offsets()].add(entry.typeinfo)
+
+    def valid_layout_for_types(self, rest_a, rest_s, typs):
+        for typ in typs:
+            if len(rest_a) == 0:
+                return False
+            ret = self.get_next_replacements(rest_a, rest_s)
+            find = False
+            for typ_set, a, s in ret:
+                if typ in typ_set:
+                    rest_a, rest_s = a, s
+                    find = True
+                    break
+            if not find:
+                return False
+        return True
+
     def get_replacements(
         self, types: t.Tuple["TypeInfo", ...]
     ) -> t.Iterable[t.Tuple["TypeInfo", ...]]:
@@ -292,7 +345,7 @@ class TypeLib:
 
     def get_next_replacements(
         self, accessible: t.Tuple[int], start_offsets: t.Tuple[int]
-    ) -> t.List[t.Tuple["TypeInfo", t.Tuple[int], t.Tuple[int]]]:
+    ) -> t.List[t.Tuple[t.Set["TypeInfo"], t.Tuple[int], t.Tuple[int]]]:
         """Given a memory layout, get a list of next possible legal types.
 
         accessible: accessible (i.e., non-padding) addresses in memory
@@ -307,9 +360,11 @@ class TypeLib:
         - The first start offset and accessible offset should be the same
         - The list returned is sorted by decreasing frequency in the library
         """
+        if not hasattr(self, 'cached_replacement_dict'):
+            self.make_cached_replacement_dict()
         start = accessible[0]
-        if start != start_offset[0]:
-            print("No replacements, start != first accessible")
+        if start != start_offsets[0]:
+            # print("No replacements, start != first accessible")
             return []
 
         # The last element of accessible is the last address in memory.
@@ -317,39 +372,27 @@ class TypeLib:
         replacements = []
         # Filter out types that are too long or of size zero
         for size in filter(lambda s: s <= length and s != 0, self.keys()):
-            cur_accessible = tuple(s for s in accessible if s < (size + start))
-            cur_start = tuple(s for s in start_offsets if s < (size + start))
             # Compute the memory layout of the remainder
             rest_accessible = tuple(s for s in accessible if s >= (size + start))
             rest_start = tuple(s for s in start_offsets if s >= (size + start))
             # If the remainder of the start offsets is not either an empty tuple
             # or if the first element of the new start offsets is not the same
             # as the first member of the new accessible, this is not a legal size.
-            if len(rest_start) != 0 and rest_start[0] != rest_accessible[0]:
+            if len(rest_start) != 0 and (len(rest_accessible) == 0 or rest_start[0] != rest_accessible[0]):
                 continue
             # If there are no more start offsets, but there are still accessible
             # offsets, this is not a legal replacement.
             if len(rest_start) == 0 and len(rest_accessible) != 0:
                 continue
-            for typ in self[size]:
-                shifted_accessible = tuple(
-                    a + start for a in typ.typeinfo.accessible_offsets()
-                )
-                shifted_start = tuple(
-                    s + start for s in typ.typeinfo.start_offsets()
-                )
-                # Accessible offsets and start offsets have to match.
-                if (
-                    cur_accessible == shifted_accessible
-                    and cur_start == shifted_start
-                ):
-                    replacements.append((typ, rest_accessible, rest_start))
-        return [
-            (typ.typeinfo, a, s)
-            for (typ, a, s) in sorted(
-                replacements, key=lambda x: x[0].frequency, reverse=True
-            )
-        ]
+            shifted_cur_accessible = tuple(s - start for s in accessible if s < (size + start))
+            shifted_cur_start = tuple(s - start for s in start_offsets if s < (size + start))
+            typs = self.cached_replacement_dict[shifted_cur_accessible, shifted_cur_start]
+            replacements.append((typs, rest_accessible, rest_start))
+        return replacements
+        {
+            typ.typeinfo: (a, s)
+            for (typ, a, s) in replacements
+        }
 
     @staticmethod
     def accessible_of_types(types: t.Iterable["TypeInfo"]) -> t.List[int]:

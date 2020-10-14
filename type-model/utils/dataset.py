@@ -1,7 +1,9 @@
 import glob
+import json
 from collections import defaultdict
 from typing import Dict, List, Mapping, Optional, Set, Tuple, Union
 
+import _jsonnet
 import numpy as np
 import torch
 import webdataset as wds
@@ -9,8 +11,9 @@ from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
 from utils.code_processing import tokenize_raw_code
-from utils.function import CollectedFunction
+from utils.function import CollectedFunction, Function
 from utils.variable import Location, Variable, location_from_json_key
+from utils.dire_types import Struct, TypeLibCodec, TypeLib
 
 
 class Example:
@@ -152,13 +155,19 @@ class Dataset(wds.Dataset):
             from utils.vocab import Vocab
 
             self.vocab = Vocab.load(config["vocab_file"])
+            with open(config["typelib_file"]) as type_f:
+                self.typelib = TypeLibCodec.decode(type_f.read())
+                self.typelib = self.typelib.fix()
             self.max_src_tokens_len = config["max_src_tokens_len"]
+            assert not config["args"] # deal with local variables only for now
+            self.locations = ["a", "l"] if config["args"] else ["l"]
             annotate = self._annotate
             sort = Dataset._sort
         else:
             # for creating the vocab
             annotate = identity
             sort = identity
+            self.locations = ["a", "l"]
         self = (
             self.pipe(Dataset._file_iter_to_line_iter)
             .decode()
@@ -172,14 +181,21 @@ class Dataset(wds.Dataset):
     @staticmethod
     def _sort(example_iter):
         sort_pool = []
+        sort_pool_new = []
         for example in example_iter:
-            sort_pool.append(example)
-            if len(sort_pool) == Dataset.SORT_BUFFER:
-                sort_pool.sort(key=get_src_len)
-                yield from sort_pool
-                sort_pool.clear()
+            if not example.valid:
+                continue
+            if sort_pool:
+                yield sort_pool[len(sort_pool_new)]
+            sort_pool_new.append(example)
+            if len(sort_pool_new) == Dataset.SORT_BUFFER:
+                sort_pool_new.sort(key=get_src_len)
+                sort_pool = sort_pool_new
+                sort_pool_new = []
         if sort_pool:
-            sort_pool.sort(key=get_src_len)
+            yield from sort_pool[len(sort_pool_new):]
+        if sort_pool_new:
+            sort_pool_new.sort(key=get_src_len)
             yield from sort_pool
 
     @staticmethod
@@ -212,14 +228,38 @@ class Dataset(wds.Dataset):
         types_model = self.vocab.types
         src_var_names = []
         tgt_var_types = []
-        for loc in ["a", "l"]:
-            for key in example.source[loc]:
+        tgt_var_type_objs = []
+        for loc in self.locations:
+            for key in sorted(example.source[loc], key=lambda x: x.offset):
                 src_var = list(example.source[loc][key])[0]
                 tgt_var = list(example.target[loc][key])[0]
                 src_var_names.append(src_var.name)
                 tgt_var_types.append(types_model[str(tgt_var.typ)])
-        setattr(example, "src_var_names", src_var_names)
-        setattr(example, "tgt_var_types", tgt_var_types)
+                tgt_var_type_objs.append(tgt_var.typ)
+                # HACK: Fix the bit/byte inconsistency bug in data
+                if isinstance(src_var.typ, Struct):
+                    TypeLib.fix_bit(src_var.typ)
+                if isinstance(tgt_var.typ, Struct):
+                    TypeLib.fix_bit(tgt_var.typ)
+
+        valid = all([m.size <= 1024 for m in tgt_var_type_objs])
+        if valid:
+            src_a, src_s = Function.stack_layout(example.source["l"])
+            tgt_a, tgt_s = Function.stack_layout(example.target["l"])
+            if len(example.source["l"]) > 0 and src_a == tgt_a and src_s == tgt_s and tgt_a and tgt_a[-1] <= 1024:
+                for typ in tgt_var_type_objs:
+                    if not str(typ) in types_model:
+                        valid = False
+                        break
+                valid &= self.typelib.valid_layout_for_types(tgt_a, tgt_s, tgt_var_type_objs)
+            else:
+                valid = False
+        if valid:
+            setattr(example, "valid", True)
+            setattr(example, "src_var_names", src_var_names)
+            setattr(example, "tgt_var_types", tgt_var_types)
+        else:
+            setattr(example, "valid", False)
 
         return example
 
@@ -271,12 +311,10 @@ class Dataset(wds.Dataset):
 
 
 if __name__ == "__main__":
-    dataset = Dataset(
-        "data/train-shard-*.tar",
-        {"vocab_fname": "data/vocab.bpe10000", "max_src_tokens_len": 510},
-    )
+    config = json.loads(_jsonnet.evaluate_file('config.xfmr.jsonnet'))
+    dataset = Dataset("data1/train-shard-*.tar", config["data"])
     dataloader = torch.utils.data.DataLoader(
-        dataset, num_workers=4, batch_size=16, collate_fn=Dataset.collate_fn
+        dataset, num_workers=16, batch_size=64, collate_fn=Dataset.collate_fn
     )
     for x in tqdm(dataloader):
-        print(x)
+        pass

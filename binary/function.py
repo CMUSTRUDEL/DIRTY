@@ -112,7 +112,8 @@ class Function:
     def raw_code(self) -> str:
         return self._raw_code
 
-    def stack_layout(self) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    @staticmethod
+    def stack_layout(vars) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
         """Returns the layout of the stack as a pair of tuples. The first
         tuple is the accessible offsets on the stack, while the second
         are the start offsets of data in the stack.
@@ -128,9 +129,9 @@ class Function:
         # List of tuples of (offset, TypeInfo)
         accessible = set()
         starts = set()
-        for loc in self.local_vars:
+        for loc in vars:
             if isinstance(loc, Stack):
-                for v in self.local_vars[loc]:
+                for v in vars[loc]:
                     accessible |= set(
                         loc.offset + acc for acc in v.typ.accessible_offsets()
                     )
