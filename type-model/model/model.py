@@ -79,6 +79,7 @@ class TypeReconstructionModel(pl.LightningModule):
             loss=loss.detach().cpu(),
             preds=preds.detach().cpu(),
             targets=targets.detach().cpu(),
+            targets_nums=target_dict["target_mask"].sum(dim=1).detach().cpu()
         )
 
     def validation_epoch_end(self, outputs):
@@ -94,13 +95,24 @@ class TypeReconstructionModel(pl.LightningModule):
         self.log(f"{prefix}_loss", loss)
         self.log(f"{prefix}_acc", accuracy(preds, targets))
         self.log(f"{prefix}_f1_macro", f1_score(preds, targets, class_reduction='macro'))
+        # func acc
+        num_correct, num_funcs, pos = 0, 0, 0
+        for target_num in map(lambda x: x["targets_nums"], outputs):
+            for num in target_num.tolist():
+                num_correct += all(preds[pos:pos + num] == targets[pos:pos + num])
+                pos += num
+            num_funcs += len(target_num)
+        assert pos == sum(x["targets_nums"].sum() for x in outputs), (pos, sum(x["targets_nums"].sum() for x in outputs))
+        self.log(f"{prefix}_func_acc", num_correct / num_funcs)
+
         struc_mask = torch.zeros(len(targets), dtype=torch.bool)
         for idx, target in enumerate(targets):
             if target.item() in self.vocab.types.struct_set:
                 struc_mask[idx] = 1
         if struc_mask.sum() > 0:
             self.log(f"{prefix}_struc_acc", accuracy(preds[struc_mask], targets[struc_mask]))
-            self.log(f"{prefix}_struc_f1_macro", f1_score(preds[struc_mask], targets[struc_mask], class_reduction='macro'))
+            # adjust for the number of classes
+            self.log(f"{prefix}_struc_f1_macro", f1_score(preds[struc_mask], targets[struc_mask], class_reduction='macro') * len(self.vocab.types) / len(self.vocab.types.struct_set))
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.config["train"]["lr"])

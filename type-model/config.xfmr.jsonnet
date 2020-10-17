@@ -4,7 +4,9 @@
     "dev_file": "data1/dev-*.tar",
     "test_file": "data1/test.tar",
     "vocab_file": "data1/vocab.bpe10000",
+    "typelib_file": "data1/typelib.json",
     "max_src_tokens_len": 510,
+    "args": false,
   },
   "encoder":{
     "type": "XfmrSequentialEncoder",
@@ -17,6 +19,7 @@
   "decoder": {
     "type": 'XfmrDecoder',
     "vocab_file": $['data'].vocab_file,
+    "typelib_file": "data1/typelib.json",
     "target_embedding_size": $['encoder'].source_embedding_size,
     "hidden_size": $['encoder'].hidden_size,
     "dropout": 0.1,

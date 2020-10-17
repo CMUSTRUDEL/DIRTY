@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -6,6 +6,7 @@ from torch.nn import TransformerDecoder, TransformerDecoderLayer, LayerNorm
 from torch.nn.modules import activation
 from utils import util
 from utils.vocab import Vocab
+from utils.dire_types import TypeLibCodec
 
 
 class XfmrDecoder(nn.Module):
@@ -13,6 +14,9 @@ class XfmrDecoder(nn.Module):
         super(XfmrDecoder, self).__init__()
 
         self.vocab = Vocab.load(config["vocab_file"])
+        with open(config["typelib_file"]) as type_f:
+            self.typelib = TypeLibCodec.decode(type_f.read())
+            self.typelib = self.typelib.fix()
         self.target_embedding = nn.Embedding(
             len(self.vocab.types), config["target_embedding_size"]
         )
@@ -20,6 +24,8 @@ class XfmrDecoder(nn.Module):
             config["target_embedding_size"] + config["hidden_size"],
             config["hidden_size"],
         )
+        self.cached_decode_mask: Dict[int, torch.Tensor] = {}
+        self.size = torch.zeros(len(self.vocab.types), dtype=torch.long)
 
         # concat variable encoding and previous target token embedding as input
         decoder_layer = TransformerDecoderLayer(
@@ -77,6 +83,38 @@ class XfmrDecoder(nn.Module):
         logits = self.output(hidden)
         return logits
 
+    def pred_with_mem(self, scores: torch.Tensor, mems: Tuple[Tuple[int], Tuple[int]]) -> Tuple[torch.Tensor, Tuple[Tuple[int], Tuple[int]]]:
+        rest_a, rest_s = mems
+        device = scores.device
+        scores = scores.cpu()
+        if not rest_a or not rest_s:
+            # An incorrect prediction must have been made. Ignore the mask
+            mask = torch.ones(scores.shape, dtype=torch.bool)
+        else:
+            mask = torch.zeros(scores.shape, dtype=torch.bool)
+            ret = self.typelib.get_next_replacements(rest_a, rest_s)
+            for typ_set, _, _ in ret:
+                if not id(typ_set) in self.cached_decode_mask:
+                    t_mask = torch.zeros(scores.shape, dtype=torch.bool)
+                    for typ in typ_set:
+                        if str(typ) in self.vocab.types:
+                            typ_id = self.vocab.types[str(typ)]
+                            t_mask[typ_id] = 1
+                            self.size[typ_id] = typ.size
+                    self.cached_decode_mask[id(typ_set)] = t_mask
+                mask |= self.cached_decode_mask[id(typ_set)]
+            # also incorrect prediction 
+            if mask.sum() == 0:
+                mask = torch.ones(scores.shape, dtype=torch.bool)
+        scores[~mask] = float('-inf')
+        pred = scores.argmax(dim=0, keepdim=True)
+        if rest_a:
+            start = rest_a[0]
+            size = self.size[pred].item()
+            rest_a = tuple(s for s in rest_a if s >= (size + start))
+            rest_s = tuple(s for s in rest_s if s >= (size + start))
+        return pred.to(device), (rest_a, rest_s)
+
     def predict(
         self,
         context_encoding: Dict[str, torch.Tensor],
@@ -93,7 +131,8 @@ class XfmrDecoder(nn.Module):
             torch.cat([context_encoding["variable_encoding"][:, :1], tgt], dim=-1)
         )
         tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step, tgt.device)
-        logits_list = []
+        preds_list = []
+        tgt_mems = target_dict["target_mems"]
         for idx in range(max_time_step):
             hidden = self.decoder(
                 tgt.transpose(0, 1),
@@ -104,18 +143,28 @@ class XfmrDecoder(nn.Module):
             ).transpose(0, 1)
             # Save logits for the current step
             logits = self.output(hidden[:, -1:])
-            logits_list.append(logits)
+            # Make prediction for this step
+            preds_step = []
+            for b in range(batch_size):
+                if not target_dict["target_mask"][b, idx]:
+                    preds_step.append(torch.zeros(1, dtype=torch.long, device=logits.device))
+                    continue
+                scores = logits[b, 0]
+                # pred, tgt_mems[b] = self.pred_with_mem(scores, tgt_mems[b])
+                pred = scores.argmax(dim=0, keepdim=True)
+                preds_step.append(pred)
+            pred_step = torch.cat(preds_step)
+            preds_list.append(pred_step)
             # Update tgt for next step with prediction at the current step
             if idx < max_time_step - 1:
-                tgt_step = self.target_embedding(logits.argmax(dim=2))
                 tgt_step = torch.cat(
-                    [context_encoding["variable_encoding"][:, idx + 1 : idx + 2], tgt_step],
+                    [context_encoding["variable_encoding"][:, idx + 1 : idx + 2], self.target_embedding(pred_step.unsqueeze(dim=1))],
                     dim=-1,
                 )
                 tgt_step = self.target_transform(tgt_step)
                 tgt = torch.cat([tgt, tgt_step], dim=1)
-        logits = torch.cat(logits_list, dim=1)
-        return logits[target_dict["target_mask"]].argmax(dim=1)
+        preds = torch.stack(preds_list).transpose(0, 1)
+        return preds[target_dict["target_mask"]]
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int, device: torch.device) -> torch.Tensor:

@@ -10,10 +10,10 @@ Options:
     --cuda                                      Use GPU
     --debug                                     Debug mode
     --seed=<int>                                Seed [default: 0]
-    --expname=<str>                            work dir [default: type]
+    --expname=<str>                             work dir [default: type]
+    --eval-ckpt=<str>                           load checkpoint for eval [default: ]
+    --resume=<str>                              load checkpoint for resume training [default: ]
     --extra-config=<str>                        extra config [default: {}]
-    --ensemble                                  Use ensemble
-    --save-to=<str>                             Save decode results to path
 """
 import json
 import os
@@ -52,7 +52,7 @@ def train(args):
         train_set,
         batch_size=batch_size,
         collate_fn=Dataset.collate_fn,
-        num_workers=8,
+        num_workers=16,
         pin_memory=True,
     )
     val_loader = DataLoader(
@@ -68,16 +68,23 @@ def train(args):
 
     wandb_logger = WandbLogger(name=args["--expname"], project="dire")
     wandb_logger.log_hyperparams(config)
+    resume_from_checkpoint = args["--eval-ckpt"] if args["--eval-ckpt"] else args["--resume"]
+    if resume_from_checkpoint == "":
+        resume_from_checkpoint = None
     trainer = pl.Trainer(
         max_epochs=config["train"]["max_epoch"],
         logger=wandb_logger,
         gpus=1 if args["--cuda"] else None,
         auto_select_gpus=True,
-        val_check_interval=15000,
         gradient_clip_val=1,
-        callbacks=[EarlyStopping(monitor='val_loss')]
+        callbacks=[EarlyStopping(monitor='val_loss')],
+        progress_bar_refresh_rate=20,
+        resume_from_checkpoint=resume_from_checkpoint
     )
-    trainer.fit(model, train_loader, val_loader)
+    if args["--eval-ckpt"]:
+        trainer.test(model, test_dataloaders=val_loader, ckpt_path=args["--eval-ckpt"])
+    else:
+        trainer.fit(model, train_loader, val_loader)
 
 
 if __name__ == "__main__":

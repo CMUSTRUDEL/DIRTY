@@ -258,13 +258,14 @@ class Dataset(wds.Dataset):
             setattr(example, "valid", True)
             setattr(example, "src_var_names", src_var_names)
             setattr(example, "tgt_var_types", tgt_var_types)
+            setattr(example, "mems", (tgt_a, tgt_s))
         else:
             setattr(example, "valid", False)
 
         return example
 
     @staticmethod
-    def collate_fn(examples: List[Example]) -> Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, torch.Tensor]]:
+    def collate_fn(examples: List[Example]) -> Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, Union[torch.Tensor, List]]]:
         token_ids = [torch.tensor(e.sub_token_ids) for e in examples]
         input = pad_sequence(token_ids, batch_first=True)
         max_time_step = input.shape[1]
@@ -290,7 +291,7 @@ class Dataset(wds.Dataset):
         # if mentioned for each var_id
         variable_encoding_mask = (variable_mention_num > 0).float()
 
-        type_ids = [torch.tensor(e.tgt_var_types) for e in examples]
+        type_ids = [torch.tensor(e.tgt_var_types, dtype=torch.long) for e in examples]
         target_type_id = pad_sequence(type_ids, batch_first=True)
         assert target_type_id.shape == variable_mention_num.shape
 
@@ -305,16 +306,21 @@ class Dataset(wds.Dataset):
             ),
             dict(
                 target_type_id=target_type_id,
-                target_mask=target_type_id > 0
+                target_mask=target_type_id > 0,
+                target_mems=[e.mems for e in examples]
             ),
         )
+    
+    def __len__(self):
+        """HACK: fake length for testing in pl"""
+        return 10 ** 4
 
 
 if __name__ == "__main__":
     config = json.loads(_jsonnet.evaluate_file('config.xfmr.jsonnet'))
-    dataset = Dataset("data1/train-shard-*.tar", config["data"])
+    dataset = Dataset("data1/dev-*.tar", config["data"])
     dataloader = torch.utils.data.DataLoader(
-        dataset, num_workers=16, batch_size=64, collate_fn=Dataset.collate_fn
+        dataset, num_workers=0, batch_size=64, collate_fn=Dataset.collate_fn
     )
     for x in tqdm(dataloader):
         pass
