@@ -133,10 +133,10 @@ class Function:
             if isinstance(loc, Stack):
                 for v in vars[loc]:
                     accessible |= set(
-                        loc.offset + acc for acc in v.typ.accessible_offsets()
+                        loc.offset - v.typ.size + acc for acc in v.typ.accessible_offsets()
                     )
                     starts |= set(
-                        loc.offset + start for start in v.typ.start_offsets()
+                        loc.offset - v.typ.size + start for start in v.typ.start_offsets()
                     )
         accessible = tuple(sorted(list(accessible)))
         starts = tuple(sorted(list(starts)))

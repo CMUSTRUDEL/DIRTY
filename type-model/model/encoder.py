@@ -12,7 +12,9 @@ class Encoder(nn.Module):
     @staticmethod
     def build(config):
         from .xfmr_sequential_encoder import XfmrSequentialEncoder
+        from .xfmr_mem_encoder import XfmrMemEncoder
 
-        return {"XfmrSequentialEncoder": XfmrSequentialEncoder,}[
-            config["type"]
-        ](config)
+        return {
+            "XfmrSequentialEncoder": XfmrSequentialEncoder,
+            "XfmrMemEncoder": XfmrMemEncoder,
+        }[config["type"]](config)
