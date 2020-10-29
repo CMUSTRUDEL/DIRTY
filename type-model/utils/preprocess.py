@@ -94,7 +94,7 @@ def main(args):
 
     os.system(f"mkdir -p {tgt_folder}")
     os.system(f"mkdir -p {tgt_folder}/files")
-    num_workers = 16
+    num_workers = 32
 
     valid_example_count = 0
 

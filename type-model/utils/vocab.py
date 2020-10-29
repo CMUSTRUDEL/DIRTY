@@ -210,7 +210,9 @@ if __name__ == '__main__':
             for loc in ["a", "l"]:
                 for key, var_set in example.source[loc].items():
                     varname = list(var_set)[0].name
-                    preserved_tokens.add(varname)
+            for token in code_tokens:
+                if token.startswith("@@") and token.endswith("@@"):
+                    preserved_tokens.add(token)
             f_src_token.write(' '.join(code_tokens) + '\n')
 
     assert args['--use-bpe']

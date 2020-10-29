@@ -32,6 +32,7 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from torch.utils.data import DataLoader
 
 from model.model import TypeReconstructionModel
+from model.mem_model import MemReconstructionModel
 from utils import util
 from utils.dataset import Dataset
 

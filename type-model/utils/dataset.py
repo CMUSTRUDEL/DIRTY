@@ -86,6 +86,14 @@ class Example:
             cf.debug.local_vars, None, set(source_locals.keys())
         )
         target_args = Example.filter(cf.debug.arguments, None, set(source_args.keys()))
+        varnames = set()
+        for _, vars in {**source_locals, **source_args}.items():
+            for var in list(vars):
+                varname = var.name
+                varnames.add(varname)
+        for idx in range(len(code_tokens)):
+            if code_tokens[idx] in varnames:
+                code_tokens[idx] = "@@" + code_tokens[idx] + "@@"
 
         valid = (
             name == cf.debug.name
@@ -162,7 +170,12 @@ class Dataset(wds.Dataset):
             assert not config["args"] # deal with local variables only for now
             self.locations = ["a", "l"] if config["args"] else ["l"]
             annotate = self._annotate
-            sort = Dataset._sort
+            # sort = Dataset._sort
+            def _valid(x):
+                for e in x:
+                    if e.valid:
+                        yield e
+            sort = _valid
         else:
             # for creating the vocab
             annotate = identity
@@ -229,6 +242,7 @@ class Dataset(wds.Dataset):
         src_var_names = []
         tgt_var_types = []
         tgt_var_type_objs = []
+        tgt_names = []
         for loc in self.locations:
             for key in sorted(example.source[loc], key=lambda x: x.offset):
                 src_var = list(example.source[loc][key])[0]
@@ -236,17 +250,13 @@ class Dataset(wds.Dataset):
                 src_var_names.append(src_var.name)
                 tgt_var_types.append(types_model[str(tgt_var.typ)])
                 tgt_var_type_objs.append(tgt_var.typ)
-                # HACK: Fix the bit/byte inconsistency bug in data
-                if isinstance(src_var.typ, Struct):
-                    TypeLib.fix_bit(src_var.typ)
-                if isinstance(tgt_var.typ, Struct):
-                    TypeLib.fix_bit(tgt_var.typ)
+                tgt_names.append(tgt_var.name)
 
         valid = all([m.size <= 1024 for m in tgt_var_type_objs])
         if valid:
             src_a, src_s = Function.stack_layout(example.source["l"])
             tgt_a, tgt_s = Function.stack_layout(example.target["l"])
-            if len(example.source["l"]) > 0 and src_a == tgt_a and src_s == tgt_s and tgt_a and tgt_a[-1] <= 1024:
+            if len(example.source["l"]) > 0 and tgt_a and tgt_a[-1] <= 1024 and src_a and src_a[-1] <= 1024 and tgt_s and tgt_s[-1] <= 1024 and tgt_s[0] >= 0 and src_s and src_s[-1] <= 1024 and src_s[0] >= 0 and len(src_s) <= 510 and len(tgt_s) <= 510:
                 for typ in tgt_var_type_objs:
                     if not str(typ) in types_model:
                         valid = False
@@ -258,6 +268,8 @@ class Dataset(wds.Dataset):
             setattr(example, "valid", True)
             setattr(example, "src_var_names", src_var_names)
             setattr(example, "tgt_var_types", tgt_var_types)
+            setattr(example, "src_starts", src_s)
+            setattr(example, "tgt_starts", tgt_s)
             setattr(example, "mems", (tgt_a, tgt_s))
         else:
             setattr(example, "valid", False)
@@ -266,6 +278,11 @@ class Dataset(wds.Dataset):
 
     @staticmethod
     def collate_fn(examples: List[Example]) -> Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, Union[torch.Tensor, List]]]:
+        # add offset to avoid 0 == padding and end token
+        src_starts = [4 + torch.tensor(e.src_starts + (1025,)) for e in examples]
+        src_starts = pad_sequence(src_starts, batch_first=True)
+        tgt_starts = [4 + torch.tensor(e.tgt_starts + (1025,)) for e in examples]
+        tgt_starts  = pad_sequence(tgt_starts, batch_first=True)
         token_ids = [torch.tensor(e.sub_token_ids) for e in examples]
         input = pad_sequence(token_ids, batch_first=True)
         max_time_step = input.shape[1]
@@ -302,12 +319,15 @@ class Dataset(wds.Dataset):
                 variable_mention_mask=variable_mention_mask,
                 variable_mention_num=variable_mention_num,
                 variable_encoding_mask=variable_encoding_mask,
+                src_starts=src_starts,
                 batch_size=len(examples),
             ),
             dict(
                 target_type_id=target_type_id,
                 target_mask=target_type_id > 0,
-                target_mems=[e.mems for e in examples]
+                target_mems=[e.mems for e in examples],
+                tgt_starts=tgt_starts,
+                tgt_starts_mask = tgt_starts > 0,
             ),
         )
     
