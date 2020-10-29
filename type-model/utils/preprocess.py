@@ -166,6 +166,7 @@ def main(args):
         typelib.add_json_file(os.path.join(input_folder, "types", fname))
     typelib.prune(5)
     typelib.sort()
+    typelib = typelib.fix()
 
     print("dumping typelib")
     with open(os.path.join(tgt_folder, "typelib.json"), "w") as type_lib_file:
