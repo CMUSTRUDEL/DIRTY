@@ -87,7 +87,7 @@ class TypeLib:
             else:
                 # Don't need to sort if we're just appending with freq 1
                 self._typeinfo_to_idx[item] = len(self._data)
-                self._data.append(TypeLib.Entry(frequency=1, typeinfo=item))
+                self._data.append(TypeLib.Entry(frequency=n, typeinfo=item))
                 return False
 
         def add(self, item: "TypeInfo") -> bool:
