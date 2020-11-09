@@ -13,7 +13,7 @@ from tqdm import tqdm
 from utils.code_processing import tokenize_raw_code
 from utils.function import CollectedFunction, Function
 from utils.variable import Location, Variable, location_from_json_key
-from utils.dire_types import Struct, TypeLibCodec, TypeLib
+from utils.dire_types import Struct, TypeLibCodec, TypeLib, UDT
 
 
 class Example:
@@ -79,6 +79,7 @@ class Example:
         code_tokens = tokenize_raw_code(raw_code)
         name = cf.decompiler.name
 
+        # Remove variables that overlaps on a memory location or don't appear in the code tokens
         code_tokens_set = set(code_tokens)
         source_locals = Example.filter(cf.decompiler.local_vars, code_tokens_set)
         source_args = Example.filter(cf.decompiler.arguments, code_tokens_set)
@@ -86,6 +87,8 @@ class Example:
             cf.debug.local_vars, None, set(source_locals.keys())
         )
         target_args = Example.filter(cf.debug.arguments, None, set(source_args.keys()))
+
+        # Add special tokens to variables in tokens to prevent being sub-tokenized in BPE
         varnames = set()
         for _, vars in {**source_locals, **source_args}.items():
             for var in list(vars):
@@ -97,11 +100,20 @@ class Example:
 
         valid = (
             name == cf.debug.name
-            and set(source_args.keys()) == set(target_args.keys())
+            # and set(source_args.keys()) == set(target_args.keys())
             and set(source_locals.keys()) == set(target_locals.keys())
-            and len(source_args) + len(source_locals) > 0
+            # and len(source_args) + len(source_locals) > 0
+            and len(source_locals) > 0
             and len(code_tokens) < 500
         )
+        # Remove functions that are too large
+        tgt_var_type_objs = [list(target_locals[key])[0].typ for key in target_locals]
+        valid &= all([m.size <= kwargs["max_type_size"] for m in tgt_var_type_objs])
+        if valid:
+            src_a, src_s, _ = Function.stack_layout(source_locals)
+            tgt_a, tgt_s, t_overlap = Function.stack_layout(target_locals)
+            valid &= bool(len(source_locals) > 0 and tgt_a and tgt_a[-1] <= kwargs["max_stack_length"] and src_a and src_a[-1] <= kwargs["max_stack_length"] and tgt_s and tgt_s[-1] <= kwargs["max_stack_length"] and tgt_s[0] >= 0 and src_s and src_s[-1] <= kwargs["max_stack_length"] and src_s[0] >= 0)
+            valid &= not t_overlap
 
         return cls(
             name,
@@ -131,6 +143,9 @@ class Example:
             if len(variable_set) > 1:
                 continue
             if code_tokens and not list(variable_set)[0].name in code_tokens:
+                continue
+            # HACK: discard padding for now
+            if isinstance(list(variable_set)[0].typ, UDT.Padding):
                 continue
             if locations and not location in locations:
                 continue
@@ -173,8 +188,7 @@ class Dataset(wds.Dataset):
             # sort = Dataset._sort
             def _valid(x):
                 for e in x:
-                    if e.valid:
-                        yield e
+                    yield e
             sort = _valid
         else:
             # for creating the vocab
@@ -251,28 +265,14 @@ class Dataset(wds.Dataset):
                 tgt_var_types.append(types_model[str(tgt_var.typ)])
                 tgt_var_type_objs.append(tgt_var.typ)
                 tgt_names.append(tgt_var.name)
-
-        valid = all([m.size <= 1024 for m in tgt_var_type_objs])
-        if valid:
-            src_a, src_s = Function.stack_layout(example.source["l"])
-            tgt_a, tgt_s = Function.stack_layout(example.target["l"])
-            if len(example.source["l"]) > 0 and tgt_a and tgt_a[-1] <= 1024 and src_a and src_a[-1] <= 1024 and tgt_s and tgt_s[-1] <= 1024 and tgt_s[0] >= 0 and src_s and src_s[-1] <= 1024 and src_s[0] >= 0 and len(src_s) <= 510 and len(tgt_s) <= 510:
-                for typ in tgt_var_type_objs:
-                    if not str(typ) in types_model:
-                        valid = False
-                        break
-                valid &= self.typelib.valid_layout_for_types(tgt_a, tgt_s, tgt_var_type_objs)
-            else:
-                valid = False
-        if valid:
-            setattr(example, "valid", True)
-            setattr(example, "src_var_names", src_var_names)
-            setattr(example, "tgt_var_types", tgt_var_types)
-            setattr(example, "src_starts", src_s)
-            setattr(example, "tgt_starts", tgt_s)
-            setattr(example, "mems", (tgt_a, tgt_s))
-        else:
-            setattr(example, "valid", False)
+        
+        src_a, src_s, _ = Function.stack_layout(example.source["l"])
+        tgt_a, tgt_s, t_overlap = Function.stack_layout(example.target["l"])
+        setattr(example, "src_var_names", src_var_names)
+        setattr(example, "tgt_var_types", tgt_var_types)
+        setattr(example, "src_starts", src_s)
+        setattr(example, "tgt_starts", tgt_s)
+        setattr(example, "mems", (tgt_a, tgt_s))
 
         return example
 

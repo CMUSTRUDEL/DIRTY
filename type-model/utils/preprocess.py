@@ -39,9 +39,12 @@ all_functions = dict()  # indexed by binaries
 def example_generator(json_str_list):
     examples = []
     for json_str, meta in json_str_list:
-        json_dict = json.loads(json_str)
+        try:
+            json_dict = json.loads(json_str)
+        except ValueError:
+            continue
         cf = CollectedFunction.from_json(json_dict)
-        example = Example.from_cf(cf, binary_file=meta)
+        example = Example.from_cf(cf, binary_file=meta, max_stack_length=1024, max_type_size=1024)
 
         if example.is_valid_example:
             canonical_code = canonicalize_code(example.raw_code)
@@ -65,6 +68,8 @@ def json_line_reader(args):
                     )
     except (gzip.BadGzipFile, EOFError) as e:
         print(f"Bad Gzip file {bin_file_name}")
+    except Exception:
+        print(f"Bad Gzip file {bin_file_name} unknown error")
 
     return func_json_list
 
@@ -166,7 +171,6 @@ def main(args):
         typelib.add_json_file(os.path.join(input_folder, "types", fname))
     typelib.prune(5)
     typelib.sort()
-    typelib = typelib.fix()
 
     print("dumping typelib")
     with open(os.path.join(tgt_folder, "typelib.json"), "w") as type_lib_file:

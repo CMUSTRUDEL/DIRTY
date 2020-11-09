@@ -113,7 +113,7 @@ class Function:
         return self._raw_code
 
     @staticmethod
-    def stack_layout(vars) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    def stack_layout(vars) -> Tuple[Tuple[int, ...], Tuple[int, ...], bool]:
         """Returns the layout of the stack as a pair of tuples. The first
         tuple is the accessible offsets on the stack, while the second
         are the start offsets of data in the stack.
@@ -127,20 +127,20 @@ class Function:
         lib.get_next_replacements(accessible, starts)
         """
         # List of tuples of (offset, TypeInfo)
-        accessible = set()
-        starts = set()
+        accessible = []
+        starts = []
         for loc in vars:
             if isinstance(loc, Stack):
                 for v in vars[loc]:
-                    accessible |= set(
+                    accessible += [
                         loc.offset - v.typ.size + acc for acc in v.typ.accessible_offsets()
-                    )
-                    starts |= set(
-                        loc.offset - v.typ.size + start for start in v.typ.start_offsets()
-                    )
-        accessible = tuple(sorted(list(accessible)))
-        starts = tuple(sorted(list(starts)))
-        return accessible, starts
+                    ]
+                    starts += [loc.offset - v.typ.size + start for start in v.typ.start_offsets()]
+        return (
+            tuple(sorted(set(accessible))),
+            tuple(sorted(set(starts))),
+            len(accessible) != len(set(accessible)) or len(starts) != len(set(starts)),
+        )
 
     def __repr__(self) -> str:
         ret = (

@@ -7,7 +7,7 @@ Options:
     -h --help                  Show this screen.
     --use-bpe                  Use bpe
     --size=<int>               vocab size [default: 10000]
-    --freq-cutoff=<int>        frequency cutoff [default: 2]
+    --freq-cutoff=<int>        frequency cutoff [default: 5]
 """
 
 from collections import Counter
