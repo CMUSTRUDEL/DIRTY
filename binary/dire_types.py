@@ -270,11 +270,16 @@ class TypeLib:
             self[size].add_all(entries)
         else:
             self[size] = entries
+    
+    def add(self, typ):
+        entry = TypeLib.EntryList()
+        entry.add(typ)
+        self.add_entry_list(typ.size, entry)
 
     def add_json_file(self, json_file: str, *, threads: int = 1) -> None:
         """Adds the info in a serialized (gzipped) JSON file to this TypeLib"""
         other: t.Optional[t.Any] = None
-        with gzip.open(json_file, "rt") as other_file:
+        with open(json_file, "r") as other_file:
             other = TypeLibCodec.decode(other_file.read())
         if other is not None and isinstance(other, TypeLib):
             for size, entries in other.items():

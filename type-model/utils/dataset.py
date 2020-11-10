@@ -96,7 +96,7 @@ class Example:
                 varnames.add(varname)
         for idx in range(len(code_tokens)):
             if code_tokens[idx] in varnames:
-                code_tokens[idx] = "@@" + code_tokens[idx] + "@@"
+                code_tokens[idx] = f"@@{code_tokens[idx]}@@"
 
         valid = (
             name == cf.debug.name
@@ -180,16 +180,12 @@ class Dataset(wds.Dataset):
             self.vocab = Vocab.load(config["vocab_file"])
             with open(config["typelib_file"]) as type_f:
                 self.typelib = TypeLibCodec.decode(type_f.read())
-                self.typelib = self.typelib.fix()
             self.max_src_tokens_len = config["max_src_tokens_len"]
             assert not config["args"] # deal with local variables only for now
             self.locations = ["a", "l"] if config["args"] else ["l"]
             annotate = self._annotate
             # sort = Dataset._sort
-            def _valid(x):
-                for e in x:
-                    yield e
-            sort = _valid
+            sort = identity
         else:
             # for creating the vocab
             annotate = identity
@@ -210,8 +206,6 @@ class Dataset(wds.Dataset):
         sort_pool = []
         sort_pool_new = []
         for example in example_iter:
-            if not example.valid:
-                continue
             if sort_pool:
                 yield sort_pool[len(sort_pool_new)]
             sort_pool_new.append(example)
@@ -261,13 +255,13 @@ class Dataset(wds.Dataset):
             for key in sorted(example.source[loc], key=lambda x: x.offset):
                 src_var = list(example.source[loc][key])[0]
                 tgt_var = list(example.target[loc][key])[0]
-                src_var_names.append(src_var.name)
+                src_var_names.append(f"@@{src_var.name}@@")
                 tgt_var_types.append(types_model[str(tgt_var.typ)])
                 tgt_var_type_objs.append(tgt_var.typ)
                 tgt_names.append(tgt_var.name)
         
         src_a, src_s, _ = Function.stack_layout(example.source["l"])
-        tgt_a, tgt_s, t_overlap = Function.stack_layout(example.target["l"])
+        tgt_a, tgt_s, _ = Function.stack_layout(example.target["l"])
         setattr(example, "src_var_names", src_var_names)
         setattr(example, "tgt_var_types", tgt_var_types)
         setattr(example, "src_starts", src_s)

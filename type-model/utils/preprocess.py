@@ -66,13 +66,25 @@ def json_line_reader(args):
                     func_json_list.append(
                         (json_str, dict(file_name=fname[:-3], line_num=line_no))
                     )
-    except (gzip.BadGzipFile, EOFError) as e:
+    except (gzip.BadGzipFile, EOFError):
         print(f"Bad Gzip file {bin_file_name}")
     except Exception:
         print(f"Bad Gzip file {bin_file_name} unknown error")
 
     return func_json_list
 
+def type_dumper(args):
+    tgt_folder, fname = args
+    typelib = TypeLib()
+    with open(fname, "r") as f:
+        for line in f:
+            e = Example.from_json(json.loads(line))
+            for _, vars in e.target["l"].items():
+                typelib.add(list(vars)[0].typ)
+    typelib.sort()
+    with open(os.path.join(tgt_folder, "types", fname.split("/")[-1]), "w") as type_lib_file:
+        encoded = TypeLibCodec.encode(typelib)
+        type_lib_file.write(encoded)
 
 def main(args):
     np.random.seed(1234)
@@ -99,6 +111,7 @@ def main(args):
 
     os.system(f"mkdir -p {tgt_folder}")
     os.system(f"mkdir -p {tgt_folder}/files")
+    os.system(f"mkdir -p {tgt_folder}/types")
     num_workers = 32
 
     valid_example_count = 0
@@ -163,12 +176,19 @@ def main(args):
     dev_files = train_files[-dev_file_num:]
     train_files = train_files[:-dev_file_num]
 
+    # Create types from filtered training set
+    with multiprocessing.Pool(num_workers) as pool:
+        pool.map(
+            type_dumper,
+            ((tgt_folder, fname) for fname in train_files),
+            chunksize=64,
+        )
     print("reading typelib")
     typelib = TypeLib()
     for fname in tqdm(train_files):
         fname = os.path.basename(fname)
-        fname = fname[:fname.index(".")] + ".json.gz"
-        typelib.add_json_file(os.path.join(input_folder, "types", fname))
+        fname = fname[:fname.index(".")] + ".jsonl"
+        typelib.add_json_file(os.path.join(tgt_folder, "types", fname))
     typelib.prune(5)
     typelib.sort()
 
