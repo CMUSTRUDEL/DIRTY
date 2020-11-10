@@ -582,6 +582,9 @@ class TypeInfo:
     def __str__(self) -> str:
         return f"{self.name}"
 
+    def tokenize(self) -> t.List[str]:
+        return [str(self)]
+
 
 class Array(TypeInfo):
     """Stores information about an array"""
@@ -628,6 +631,9 @@ class Array(TypeInfo):
             return f"{self.element_type}[]"
         return f"{self.element_type}[{self.nelements}]"
 
+    def tokenize(self) -> t.List[str]:
+        return ["<array>", f"{self.element_type}", f"[{self.nelements}]"]
+
 
 class Pointer(TypeInfo):
     """Stores information about a pointer.
@@ -659,6 +665,8 @@ class Pointer(TypeInfo):
     def __str__(self) -> str:
         return f"{self.target_type_name} *"
 
+    def tokenize(self) -> t.List[str]:
+        return ["<ptr>", self.target_type_name]
 
 class UDT(TypeInfo):
     """An object representing struct or union types"""
@@ -822,6 +830,9 @@ class Struct(UDT):
         ret += "}"
         return ret
 
+    def tokenize(self) -> t.List[str]:
+        return ["<struct>", self.name if self.name is not None else ""] + [str(l) for l in self.layout]
+
 
 class Union(UDT):
     """Stores information about a union"""
@@ -898,6 +909,9 @@ class Union(UDT):
         ret += "}"
         return ret
 
+    def tokenize(self) -> t.List[str]:
+        raise NotImplementedError
+        
 
 class Void(TypeInfo):
     size = 0

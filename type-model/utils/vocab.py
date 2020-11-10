@@ -189,16 +189,23 @@ if __name__ == '__main__':
     type_file = args['TYPE_FILE']
     train_set = Dataset(args['TRAIN_FILE'])
 
-    # Treat types as discrete tokens
     with open(type_file) as type_f:
         typelib = TypeLibCodec.decode(type_f.read())
         type_counter = Counter()
+        subtype_counter = Counter()
         for size in typelib:
             for freq, tp in typelib[size]:
-                type_counter[str(tp)] = freq
+                # Treat types as discrete tokens
+                type_counter[str(tp)] += freq
+                # Tokenize compositonal types, mainly structs
+                for subtype in tp.tokenize():
+                    subtype_counter[subtype] += freq
     print(f"{len(type_counter)} types in typelib")
+    print(f"{len(subtype_counter)} subtypes in typelib")
 
-    type_vocab_entry = VocabEntry.from_counter(type_counter, size=vocab_size,
+    type_vocab_entry = VocabEntry.from_counter(type_counter, size=len(type_counter),
+                                                 freq_cutoff=int(args['--freq-cutoff']))
+    subtype_vocab_entry = VocabEntry.from_counter(subtype_counter, size=len(subtype_counter),
                                                  freq_cutoff=int(args['--freq-cutoff']))
 
     src_code_tokens_file = vocab_file + '.src_code_tokens.txt'
@@ -231,7 +238,8 @@ if __name__ == '__main__':
 
     vocab = Vocab(
         source_tokens=src_code_tokens_vocab_entry,
-        types=type_vocab_entry
+        types=type_vocab_entry,
+        subtypes=subtype_vocab_entry
     )
 
     vocab.save(args['VOCAB_FILE'])
