@@ -583,7 +583,45 @@ class TypeInfo:
         return f"{self.name}"
 
     def tokenize(self) -> t.List[str]:
-        return [str(self)]
+        return [str(self), '<eot>']
+
+    @classmethod
+    def detokenize(cls, subtypes: t.List[str]) -> t.List[str]:
+        """A list of concatenated subtypes separated by <eot>"""
+        ret = []
+        current = []
+        for subtype in subtypes:
+            if subtype == "<eot>":
+                ret.append(cls.parse_subtype(current))
+                current = []
+            else:
+                current.append(subtype)
+        return ret
+    
+    @classmethod
+    def parse_subtype(cls, subtypes: t.List[str]) -> str:
+        if len(subtypes) == 0:
+            return ""
+        if subtypes[0] == "<struct>":
+            ret = f"struct"
+            if len(subtypes) == 1:
+                return ret
+            ret += f" {subtypes[1]} {{ "
+            for subtype in subtypes[2:]:
+                ret += f"{subtype}; "
+            return ret + "}"
+        elif subtypes[0] == "<ptr>":
+            if len(subtypes) == 1:
+                return " *"
+            else:
+                return f"{subtypes[1]} *"
+        elif subtypes[0] == "<array>":
+            if len(subtypes) < 3:
+                return "[]"
+            else:
+                return f"{subtypes[1]}{subtypes[2]}"
+        else:
+            return subtypes[0]
 
 
 class Array(TypeInfo):
@@ -632,7 +670,7 @@ class Array(TypeInfo):
         return f"{self.element_type}[{self.nelements}]"
 
     def tokenize(self) -> t.List[str]:
-        return ["<array>", f"{self.element_type}", f"[{self.nelements}]"]
+        return ["<array>", f"{self.element_type}", f"[{self.nelements}]", "<eot>"]
 
 
 class Pointer(TypeInfo):
@@ -666,7 +704,7 @@ class Pointer(TypeInfo):
         return f"{self.target_type_name} *"
 
     def tokenize(self) -> t.List[str]:
-        return ["<ptr>", self.target_type_name]
+        return ["<ptr>", self.target_type_name, "<eot>"]
 
 class UDT(TypeInfo):
     """An object representing struct or union types"""
@@ -831,7 +869,7 @@ class Struct(UDT):
         return ret
 
     def tokenize(self) -> t.List[str]:
-        return ["<struct>", self.name if self.name is not None else ""] + [str(l) for l in self.layout]
+        return ["<struct>", self.name if self.name is not None else ""] + [str(l) for l in self.layout] + ["<eot>"]
 
 
 class Union(UDT):

@@ -13,7 +13,7 @@ from tqdm import tqdm
 from utils.code_processing import tokenize_raw_code
 from utils.function import CollectedFunction, Function
 from utils.variable import Location, Variable, location_from_json_key
-from utils.dire_types import Struct, TypeLibCodec, TypeLib, UDT
+from utils.dire_types import Struct, TypeLibCodec, TypeLib, UDT, TypeInfo
 
 
 class Example:
@@ -247,8 +247,11 @@ class Dataset(wds.Dataset):
         setattr(example, "source_seq_length", len(sub_tokens))
 
         types_model = self.vocab.types
+        subtypes_model = self.vocab.subtypes
         src_var_names = []
         tgt_var_types = []
+        tgt_var_subtypes = []
+        tgt_var_type_sizes = []
         tgt_var_type_objs = []
         tgt_names = []
         for loc in self.locations:
@@ -257,6 +260,9 @@ class Dataset(wds.Dataset):
                 tgt_var = list(example.target[loc][key])[0]
                 src_var_names.append(f"@@{src_var.name}@@")
                 tgt_var_types.append(types_model[str(tgt_var.typ)])
+                subtypes = [subtypes_model[subtyp] for subtyp in tgt_var.typ.tokenize()]
+                tgt_var_type_sizes.append(len(subtypes))
+                tgt_var_subtypes += subtypes
                 tgt_var_type_objs.append(tgt_var.typ)
                 tgt_names.append(tgt_var.name)
         
@@ -264,6 +270,8 @@ class Dataset(wds.Dataset):
         tgt_a, tgt_s, _ = Function.stack_layout(example.target["l"])
         setattr(example, "src_var_names", src_var_names)
         setattr(example, "tgt_var_types", tgt_var_types)
+        setattr(example, "tgt_var_subtypes", tgt_var_subtypes)
+        setattr(example, "tgt_var_type_sizes", tgt_var_type_sizes)
         setattr(example, "src_starts", src_s)
         setattr(example, "tgt_starts", tgt_s)
         setattr(example, "mems", (tgt_a, tgt_s))
@@ -306,6 +314,11 @@ class Dataset(wds.Dataset):
         target_type_id = pad_sequence(type_ids, batch_first=True)
         assert target_type_id.shape == variable_mention_num.shape
 
+        subtype_ids = [torch.tensor(e.tgt_var_subtypes, dtype=torch.long) for e in examples]
+        target_subtype_id = pad_sequence(subtype_ids, batch_first=True)
+        type_sizes = [torch.tensor(e.tgt_var_type_sizes, dtype=torch.long) for e in examples]
+        target_type_sizes= pad_sequence(type_sizes, batch_first=True)
+
         return (
             dict(
                 src_code_tokens=input,
@@ -318,7 +331,10 @@ class Dataset(wds.Dataset):
             ),
             dict(
                 target_type_id=target_type_id,
+                target_subtype_id=target_subtype_id,
+                target_type_sizes=target_type_sizes,
                 target_mask=target_type_id > 0,
+                target_submask = target_subtype_id > 0,
                 target_mems=[e.mems for e in examples],
                 tgt_starts=tgt_starts,
                 tgt_starts_mask = tgt_starts > 0,
@@ -331,7 +347,7 @@ class Dataset(wds.Dataset):
 
 
 if __name__ == "__main__":
-    config = json.loads(_jsonnet.evaluate_file('config.xfmr.jsonnet'))
+    config = json.loads(_jsonnet.evaluate_file('config.xfmr_sub.jsonnet'))
     dataset = Dataset("data1/dev-*.tar", config["data"])
     dataloader = torch.utils.data.DataLoader(
         dataset, num_workers=0, batch_size=64, collate_fn=Dataset.collate_fn
