@@ -260,7 +260,10 @@ class Dataset(wds.Dataset):
                 tgt_var = list(example.target[loc][key])[0]
                 src_var_names.append(f"@@{src_var.name}@@")
                 tgt_var_types.append(types_model[str(tgt_var.typ)])
-                subtypes = [subtypes_model[subtyp] for subtyp in tgt_var.typ.tokenize()]
+                if types_model[str(tgt_var.typ)] == types_model.unk_id:
+                    subtypes = [subtypes_model.unk_id, subtypes_model["<eot>"]]
+                else:
+                    subtypes = [subtypes_model[subtyp] for subtyp in tgt_var.typ.tokenize()]
                 tgt_var_type_sizes.append(len(subtypes))
                 tgt_var_subtypes += subtypes
                 tgt_var_type_objs.append(tgt_var.typ)

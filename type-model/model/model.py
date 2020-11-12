@@ -8,6 +8,7 @@ from pytorch_lightning.metrics.functional.classification import accuracy, f1_sco
 from torch import nn
 from torchvision import transforms
 from utils.vocab import Vocab
+from utils.dire_types import TypeInfo, TypeLibCodec
 
 from model.encoder import Encoder
 from model.decoder import Decoder
@@ -22,13 +23,21 @@ class TypeReconstructionModel(pl.LightningModule):
         self.decoder = Decoder.build(config["decoder"])
         self.config = config
         self.vocab = Vocab.load(config["data"]["vocab_file"])
-        self._preprocess_udt_idxs()
+        self.subtype = config["decoder"]["type"] in ['XfmrSubtypeDecoder']
+        self._preprocess()
 
-    def _preprocess_udt_idxs(self):
+    def _preprocess(self):
         self.vocab.types.struct_set = set()
         for idx, type_str in self.vocab.types.id2word.items():
             if type_str.startswith("struct"):
                 self.vocab.types.struct_set.add(idx)
+        with open(self.config["data"]["typelib_file"]) as type_f:
+            typelib = TypeLibCodec.decode(type_f.read())
+            self.typstr_to_piece = {}
+            for size in typelib:
+                for _, tp in typelib[size]:
+                    self.typstr_to_piece[str(tp)] = tp.tokenize()[:-1]
+        self.typstr_to_piece["<unk>"] = ["<unk>"]
 
     def forward(self, x_dict):
         embedding = self.encoder(x_dict)
@@ -45,10 +54,10 @@ class TypeReconstructionModel(pl.LightningModule):
         loss = F.cross_entropy(
             # cross_entropy requires num_classes at the second dimension
             variable_type_logits.transpose(1, 2),
-            target_dict["target_type_id"],
+            target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
             reduction='none',
         )
-        loss = loss[target_dict["target_mask"]]
+        loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
         loss = loss.mean()
         self.log('train_loss', loss)
         return loss
@@ -69,16 +78,59 @@ class TypeReconstructionModel(pl.LightningModule):
         variable_type_logits = self.decoder(context_encoding, target_dict)
         loss = F.cross_entropy(
             variable_type_logits.transpose(1, 2),
-            target_dict["target_type_id"],
+            target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
             reduction='none',
         )
-        loss = loss[target_dict["target_mask"]]
+        loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
+        targets = target_dict["target_type_id"].detach().cpu()
         preds = self.decoder.predict(context_encoding, target_dict, variable_type_logits)
-        targets = target_dict["target_type_id"][target_dict["target_mask"]]
+        if self.subtype:
+            preds_out = []
+            f1 = []
+            for pred, target in zip(preds, targets):
+                target = target[target > 0]
+                # Compute piece-wise f1
+                pred_pieces = [self.vocab.subtypes.id2word[pred_id] for pred_id in pred[pred > 0].tolist()]
+                target_strs = [self.vocab.types.id2word[tp] for tp in target.tolist()]
+                pred_piece_list = []
+                # Group pieces separated by <eot>
+                current = []
+                for piece in pred_pieces:
+                    if piece == "<eot>":
+                        pred_piece_list.append(current)
+                        current = []
+                    else:
+                        current.append(piece)
+                pred_piece_list += ["<unk>"] * (len(target_strs) - len(pred_piece_list))
+                for pred_piece, target_str in zip(pred_piece_list, target_strs):
+                    target_pieces = self.typstr_to_piece[target_str]
+                    f1.append(2 * len(set(pred_piece) & set(target_pieces)) / (1e-12 + len(pred_piece) + len(target_pieces)))
+                pred_detok = TypeInfo.detokenize(pred_pieces)
+                if len(pred_detok) < target.shape[0]:
+                    pred_detok += ["<unk>"] * (target.shape[0] - len(pred_detok))
+                elif len(pred_detok) > target.shape[0]:
+                    import pdb
+                    pdb.set_trace()
+                preds_out.append(torch.tensor([self.vocab.types[pred_id] for pred_id in pred_detok]))
+            targets = targets[target_dict["target_mask"]]
+            assert len(f1) == targets.shape[0]
+            preds = torch.cat(preds_out)
+        else:
+            targets = targets[target_dict["target_mask"]]
+            preds = preds.detach().cpu()
+            f1 = torch.zeros(targets.shape)
+            for i, (pred_id, target_id) in enumerate(zip(preds.tolist(), targets.tolist())):
+                pred_str = self.vocab.types.id2word[pred_id]
+                target_str = self.vocab.types.id2word[target_id]
+                pred_pieces = self.typstr_to_piece[pred_str]
+                target_pieces = self.typstr_to_piece[target_str]
+                f1[i] = (2 * len(set(pred_pieces) & set(target_pieces)) / (1e-12 + len(pred_pieces) + len(target_pieces)))
+
         return dict(
             loss=loss.detach().cpu(),
-            preds=preds.detach().cpu(),
-            targets=targets.detach().cpu(),
+            preds=preds,
+            f1=torch.tensor(f1),
+            targets=targets,
             targets_nums=target_dict["target_mask"].sum(dim=1).detach().cpu()
         )
 
@@ -91,10 +143,14 @@ class TypeReconstructionModel(pl.LightningModule):
     def _shared_epoch_end(self, outputs, prefix):
         preds = torch.cat([x["preds"] for x in outputs])
         targets = torch.cat([x["targets"] for x in outputs])
+        f1 = torch.cat([x["f1"] for x in outputs])
+        print(preds.shape, f1.shape)
+        assert f1.shape == preds.shape
         loss = torch.cat([x["loss"] for x in outputs]).mean()
         self.log(f"{prefix}_loss", loss)
         self.log(f"{prefix}_acc", accuracy(preds, targets))
         self.log(f"{prefix}_f1_macro", f1_score(preds, targets, class_reduction='macro'))
+        self.log(f"{prefix}_F1", f1.mean())
         # func acc
         num_correct, num_funcs, pos = 0, 0, 0
         for target_num in map(lambda x: x["targets_nums"], outputs):
