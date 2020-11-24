@@ -144,6 +144,26 @@ class VocabEntry:
 
         return vocab_entry
 
+    MAX_MEM_LENGTH = 512
+    MAX_STACK_SIZE = 1024
+    @staticmethod
+    def encode_memory(mems):
+        """Encode memory to ids
+
+        <pad>: 0
+        <SEP>: 1
+        <unk>: 2
+        mem_id: mem_offset + 3
+        """
+        ret = []
+        for mem in mems[:VocabEntry.MAX_MEM_LENGTH]:
+            if mem == "<SEP>":
+                ret.append(1)
+            elif mem > VocabEntry.MAX_STACK_SIZE:
+                ret.append(2)
+            else:
+                ret.append(3 + mem)
+        return ret
 
 class Vocab(object):
     def __init__(self, **kwargs):

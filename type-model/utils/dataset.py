@@ -253,6 +253,7 @@ class Dataset(wds.Dataset):
         tgt_var_subtypes = []
         tgt_var_type_sizes = []
         tgt_var_type_objs = []
+        tgt_var_src_mems = []
         tgt_names = []
         for loc in self.locations:
             for key in sorted(example.source[loc], key=lambda x: x.offset):
@@ -267,6 +268,7 @@ class Dataset(wds.Dataset):
                 tgt_var_type_sizes.append(len(subtypes))
                 tgt_var_subtypes += subtypes
                 tgt_var_type_objs.append(tgt_var.typ)
+                tgt_var_src_mems.append(types_model.encode_memory(src_var.typ.start_offsets() + (src_var.typ.size,)))
                 tgt_names.append(tgt_var.name)
         
         src_a, src_s, _ = Function.stack_layout(example.source["l"])
@@ -275,19 +277,13 @@ class Dataset(wds.Dataset):
         setattr(example, "tgt_var_types", tgt_var_types)
         setattr(example, "tgt_var_subtypes", tgt_var_subtypes)
         setattr(example, "tgt_var_type_sizes", tgt_var_type_sizes)
-        setattr(example, "src_starts", src_s)
-        setattr(example, "tgt_starts", tgt_s)
-        setattr(example, "mems", (tgt_a, tgt_s))
+        setattr(example, "mems", (src_a, src_s))
+        setattr(example, "tgt_var_src_mems", tgt_var_src_mems)
 
         return example
 
     @staticmethod
     def collate_fn(examples: List[Example]) -> Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, Union[torch.Tensor, List]]]:
-        # add offset to avoid 0 == padding and end token
-        src_starts = [4 + torch.tensor(e.src_starts + (1025,)) for e in examples]
-        src_starts = pad_sequence(src_starts, batch_first=True)
-        tgt_starts = [4 + torch.tensor(e.tgt_starts + (1025,)) for e in examples]
-        tgt_starts  = pad_sequence(tgt_starts, batch_first=True)
         token_ids = [torch.tensor(e.sub_token_ids) for e in examples]
         input = pad_sequence(token_ids, batch_first=True)
         max_time_step = input.shape[1]
@@ -322,6 +318,9 @@ class Dataset(wds.Dataset):
         type_sizes = [torch.tensor(e.tgt_var_type_sizes, dtype=torch.long) for e in examples]
         target_type_sizes= pad_sequence(type_sizes, batch_first=True)
 
+        target_type_src_mems = [torch.tensor(mems, dtype=torch.long) for e in examples for mems in e.tgt_var_src_mems]
+        target_type_src_mems = pad_sequence(target_type_src_mems, batch_first=True)
+
         return (
             dict(
                 src_code_tokens=input,
@@ -329,7 +328,7 @@ class Dataset(wds.Dataset):
                 variable_mention_mask=variable_mention_mask,
                 variable_mention_num=variable_mention_num,
                 variable_encoding_mask=variable_encoding_mask,
-                src_starts=src_starts,
+                target_type_src_mems=target_type_src_mems,
                 batch_size=len(examples),
             ),
             dict(
@@ -339,8 +338,7 @@ class Dataset(wds.Dataset):
                 target_mask=target_type_id > 0,
                 target_submask = target_subtype_id > 0,
                 target_mems=[e.mems for e in examples],
-                tgt_starts=tgt_starts,
-                tgt_starts_mask = tgt_starts > 0,
+                target_type_src_mems=target_type_src_mems,
             ),
         )
     

@@ -16,7 +16,6 @@ class XfmrDecoder(nn.Module):
         self.vocab = Vocab.load(config["vocab_file"])
         with open(config["typelib_file"]) as type_f:
             self.typelib = TypeLibCodec.decode(type_f.read())
-            self.typelib = self.typelib.fix()
         self.target_embedding = nn.Embedding(
             len(self.vocab.types), config["target_embedding_size"]
         )
@@ -40,6 +39,7 @@ class XfmrDecoder(nn.Module):
             decoder_layer, config["num_layers"], decoder_norm
         )
         self.output = nn.Linear(config["hidden_size"], len(self.vocab.types))
+        self.mem_mask = config["mem_mask"]
 
         self.config: Dict = config
 
@@ -50,6 +50,7 @@ class XfmrDecoder(nn.Module):
             "target_embedding_size": 256,
             "hidden_size": 256,
             "num_layers": 2,
+            "mem_mask": "none",
         }
 
     @classmethod
@@ -133,6 +134,17 @@ class XfmrDecoder(nn.Module):
         tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step, tgt.device)
         preds_list = []
         tgt_mems = target_dict["target_mems"]
+        if self.mem_mask == "soft":
+            mem_encoding = self.mem_encoder(target_dict)
+            mem_logits = self.mem_decoder(mem_encoding, target_dict)
+            mem_logits_list = []
+            idx = 0
+            for b in range(batch_size):
+                nvar = target_dict["target_mask"][b].sum().item()
+                mem_logits_list.append(mem_logits[idx: idx + nvar])
+                idx += nvar
+            assert idx == mem_logits.shape[0]
+        
         for idx in range(max_time_step):
             hidden = self.decoder(
                 tgt.transpose(0, 1),
@@ -150,8 +162,16 @@ class XfmrDecoder(nn.Module):
                     preds_step.append(torch.zeros(1, dtype=torch.long, device=logits.device))
                     continue
                 scores = logits[b, 0]
-                # pred, tgt_mems[b] = self.pred_with_mem(scores, tgt_mems[b])
-                pred = scores.argmax(dim=0, keepdim=True)
+                if self.mem_mask == "hard":
+                    pred, tgt_mems[b] = self.pred_with_mem(scores, tgt_mems[b])
+                elif self.mem_mask == "none":
+                    pred = scores.argmax(dim=0, keepdim=True)
+                elif self.mem_mask == "soft":
+                    scores += mem_logits_list[b][idx]
+                    pred = scores.argmax(dim=0, keepdim=True)
+                    pass
+                else:
+                    raise NotImplementedError
                 preds_step.append(pred)
             pred_step = torch.cat(preds_step)
             preds_list.append(pred_step)

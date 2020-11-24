@@ -24,6 +24,20 @@
     "hidden_size": $['encoder'].hidden_size,
     "dropout": 0.1,
     "num_layers": 2,
+    "mem_mask": "soft",
+  },
+  "mem_encoder":{
+    "type": "XfmrMemEncoder",
+    "source_embedding_size": 128,
+    "hidden_size": 128,
+    "vocab_file": $['data'].vocab_file,
+    "dropout": 0.1,
+    "num_layers": 2,
+  },
+  "mem_decoder": {
+    "type": 'SimpleDecoder',
+    "vocab_file": $['data'].vocab_file,
+    "hidden_size": $['mem_encoder'].hidden_size,
   },
   "train": {
     "batch_size": 64,

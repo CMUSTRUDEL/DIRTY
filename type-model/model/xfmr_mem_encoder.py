@@ -48,25 +48,14 @@ class TransformerModel(nn.Module):
         src = self.pos_encoder(src)
         output = self.transformer_encoder(src, src_key_padding_mask=src_padding)
         # set state and cell to the average of output
-        masked_sum = (
-            output.transpose(0, 1)
-            * ((~src_padding).unsqueeze(-1).expand(-1, -1, self.nhid))
-        ).sum(dim=1)
-        lengths = (~src_padding).sum(dim=1, keepdim=True)
-        avg = masked_sum / lengths
-        state = torch.stack(
-            [avg[:, : self.nhid // 2], avg[:, self.nhid // 2 :]]
-        ).unsqueeze(0)
-        return output, (state, state)
+        return output
 
 
 class XfmrMemEncoder(Encoder):
     def __init__(self, config):
         super().__init__()
 
-        self.src_word_embed = nn.Embedding(
-            1030, config["source_embedding_size"]
-        )
+        self.src_word_embed = nn.Embedding(1030, config["source_embedding_size"])
 
         dropout = config["dropout"]
         self.encoder = TransformerModel(
@@ -105,22 +94,17 @@ class XfmrMemEncoder(Encoder):
 
         :param tensor_dict: [description]
         :type tensor_dict: Dict[str, Union[torch.Tensor, int]]
-        :return: variable_encoding: (batch_size, variable_num, hidden)
-                 code_token_encoding: (batch_size, src_len, hidden)
-                 code_token_mask: (batch_size, src_len), 1 for valid tokens, 0 for pad
+        :return: variable_encoding: (mem_batch_size, hidden)
         :rtype: Dict[str, torch.Tensor]
         """
-        (
-            code_token_encoding,
-            code_token_mask,
-            (last_states, last_cells),
-        ) = self.encode_sequence(tensor_dict["src_starts"])
+        mem_encoding, mem_mask = self.encode_sequence(
+            tensor_dict["target_type_src_mems"]
+        )
 
+        # TODO: ignore the padding when averaging
+        mem_encoding = mem_encoding.mean(dim=1)
         context_encoding = dict(
-            code_token_encoding=code_token_encoding,
-            code_token_mask=code_token_mask,
-            last_states=last_states,
-            last_cells=last_cells,
+            variable_encoding=mem_encoding,
         )
 
         # context_encoding.update(tensor_dict)
@@ -135,7 +119,7 @@ class XfmrMemEncoder(Encoder):
         # (batch_size, max_code_length)
         code_token_mask = torch.ne(code_sequence, PAD_ID)
 
-        sorted_encodings, (last_states, last_cells) = self.encoder(
+        sorted_encodings = self.encoder(
             code_token_embedding.transpose(0, 1), ~code_token_mask
         )
         sorted_encodings = sorted_encodings.transpose(0, 1)
@@ -144,4 +128,4 @@ class XfmrMemEncoder(Encoder):
         # (batch_size, seq_len, hidden_size * 2)
         sorted_encodings = self.dropout(sorted_encodings)
 
-        return sorted_encodings, code_token_mask, (last_states, last_cells)
+        return sorted_encodings, code_token_mask

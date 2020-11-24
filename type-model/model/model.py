@@ -25,6 +25,13 @@ class TypeReconstructionModel(pl.LightningModule):
         self.vocab = Vocab.load(config["data"]["vocab_file"])
         self.subtype = config["decoder"]["type"] in ['XfmrSubtypeDecoder']
         self._preprocess()
+        self.soft_mem_mask = config["decoder"]["mem_mask"] == "soft"
+        if self.soft_mem_mask:
+            self.mem_encoder = Encoder.build(config["mem_encoder"])
+            self.mem_decoder = Decoder.build(config["mem_decoder"])
+            # Used for decoding
+            self.decoder.mem_encoder = self.mem_encoder
+            self.decoder.mem_decoder = self.mem_decoder
 
     def _preprocess(self):
         self.vocab.types.struct_set = set()
@@ -51,13 +58,25 @@ class TypeReconstructionModel(pl.LightningModule):
         input_dict, target_dict = batch
         context_encoding = self.encoder(input_dict)
         variable_type_logits = self.decoder(context_encoding, target_dict)
-        loss = F.cross_entropy(
-            # cross_entropy requires num_classes at the second dimension
-            variable_type_logits.transpose(1, 2),
-            target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
-            reduction='none',
-        )
-        loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
+        if self.soft_mem_mask:
+            variable_type_logits = variable_type_logits[target_dict["target_mask"]]
+            mem_encoding = self.mem_encoder(input_dict)
+            mem_type_logits = self.mem_decoder(mem_encoding, target_dict)
+            loss = F.cross_entropy(
+                # cross_entropy requires num_classes at the second dimension
+                variable_type_logits + mem_type_logits,
+                target_dict["target_type_id"][target_dict["target_mask"]],
+                reduction='none',
+            )
+        else:
+            loss = F.cross_entropy(
+                # cross_entropy requires num_classes at the second dimension
+                variable_type_logits.transpose(1, 2),
+                target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
+                reduction='none',
+            )
+            loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
+
         loss = loss.mean()
         self.log('train_loss', loss)
         return loss
@@ -76,12 +95,24 @@ class TypeReconstructionModel(pl.LightningModule):
         input_dict, target_dict = batch
         context_encoding = self.encoder(input_dict)
         variable_type_logits = self.decoder(context_encoding, target_dict)
-        loss = F.cross_entropy(
-            variable_type_logits.transpose(1, 2),
-            target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
-            reduction='none',
-        )
-        loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
+        if self.soft_mem_mask:
+            variable_type_logits = variable_type_logits[target_dict["target_mask"]]
+            mem_encoding = self.mem_encoder(input_dict)
+            mem_type_logits = self.mem_decoder(mem_encoding, target_dict)
+            loss = F.cross_entropy(
+                # cross_entropy requires num_classes at the second dimension
+                variable_type_logits + mem_type_logits,
+                target_dict["target_type_id"][target_dict["target_mask"]],
+                reduction='none',
+            )
+        else:
+            loss = F.cross_entropy(
+                # cross_entropy requires num_classes at the second dimension
+                variable_type_logits.transpose(1, 2),
+                target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
+                reduction='none',
+            )
+            loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
         targets = target_dict["target_type_id"].detach().cpu()
         preds = self.decoder.predict(context_encoding, target_dict, variable_type_logits)
         if self.subtype:
