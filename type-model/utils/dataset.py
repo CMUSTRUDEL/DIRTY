@@ -26,6 +26,7 @@ class Example:
         binary_file: str = "",
         valid: bool = True,
         raw_code: str = "",
+        test_meta: Dict[str, Dict[str, bool]] = None,
     ):
         self.name = name
         self.code_tokens = code_tokens
@@ -34,6 +35,7 @@ class Example:
         self.binary_file = binary_file
         self._is_valid = valid
         self.raw_code = raw_code
+        self.test_meta = test_meta
 
     @classmethod
     def from_json(cls, d: Dict):
@@ -53,7 +55,8 @@ class Example:
                 target[loc][location_from_json_key(key)] = {
                     Variable.from_json(arg) for arg in args
                 }
-        return cls(d["name"], d["code_tokens"], source, target)
+        test_meta = d["test_meta"] if "test_meta" in d else None
+        return cls(d["name"], d["code_tokens"], source, target, test_meta=test_meta)
 
     def to_json(self):
         assert self._is_valid
@@ -339,6 +342,7 @@ class Dataset(wds.Dataset):
                 target_submask = target_subtype_id > 0,
                 target_mems=[e.mems for e in examples],
                 target_type_src_mems=target_type_src_mems,
+                test_meta=[e.test_meta for e in examples]
             ),
         )
     

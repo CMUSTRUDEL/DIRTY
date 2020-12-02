@@ -162,7 +162,8 @@ class TypeReconstructionModel(pl.LightningModule):
             preds=preds,
             f1=torch.tensor(f1),
             targets=targets,
-            targets_nums=target_dict["target_mask"].sum(dim=1).detach().cpu()
+            targets_nums=target_dict["target_mask"].sum(dim=1).detach().cpu(),
+            test_meta=target_dict["test_meta"]
         )
 
     def validation_epoch_end(self, outputs):
@@ -184,11 +185,23 @@ class TypeReconstructionModel(pl.LightningModule):
         self.log(f"{prefix}_F1", f1.mean())
         # func acc
         num_correct, num_funcs, pos = 0, 0, 0
-        for target_num in map(lambda x: x["targets_nums"], outputs):
-            for num in target_num.tolist():
+        body_in_train_mask = []
+        name_in_train_mask = []
+        for target_num, test_metas in map(lambda x: (x["targets_nums"], x["test_meta"]), outputs):
+            for num, test_meta in zip(target_num.tolist(), test_metas):
                 num_correct += all(preds[pos:pos + num] == targets[pos:pos + num])
                 pos += num
+                body_in_train_mask += [test_meta["function_body_in_train"]] * num
+                name_in_train_mask += [test_meta["function_name_in_train"]] * num
             num_funcs += len(target_num)
+        body_in_train_mask = torch.tensor(body_in_train_mask)
+        name_in_train_mask = torch.tensor(name_in_train_mask)
+        self.log(f"{prefix}_body_in_train_acc", accuracy(preds[body_in_train_mask], targets[body_in_train_mask]))
+        self.log(f"{prefix}_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
+        # self.log(f"{prefix}_name_in_train_acc", accuracy(preds[name_in_train_mask], targets[name_in_train_mask]))
+        self.log(f"{prefix}_body_in_train_f1_macro", f1_score(preds[body_in_train_mask], targets[body_in_train_mask], class_reduction='macro'))
+        self.log(f"{prefix}_body_not_in_train_f1_macro", f1_score(preds[~body_in_train_mask], targets[~body_in_train_mask], class_reduction='macro'))
+        # self.log(f"{prefix}_name_in_train_f1_macro", f1_score(preds[name_in_train_mask], targets[name_in_train_mask], class_reduction='macro'))
         assert pos == sum(x["targets_nums"].sum() for x in outputs), (pos, sum(x["targets_nums"].sum() for x in outputs))
         self.log(f"{prefix}_func_acc", num_correct / num_funcs)
 
@@ -198,6 +211,8 @@ class TypeReconstructionModel(pl.LightningModule):
                 struc_mask[idx] = 1
         if struc_mask.sum() > 0:
             self.log(f"{prefix}_struc_acc", accuracy(preds[struc_mask], targets[struc_mask]))
+            self.log(f"{prefix}_body_in_train_struc_acc", accuracy(preds[struc_mask & body_in_train_mask], targets[struc_mask & body_in_train_mask]))
+            self.log(f"{prefix}_body_not_in_train_struc_acc", accuracy(preds[~body_in_train_mask & struc_mask], targets[~body_in_train_mask & struc_mask]))
             # adjust for the number of classes
             self.log(f"{prefix}_struc_f1_macro", f1_score(preds[struc_mask], targets[struc_mask], class_reduction='macro') * len(self.vocab.types) / len(self.vocab.types.struct_set))
 
