@@ -230,17 +230,21 @@ if __name__ == '__main__':
 
     src_code_tokens_file = vocab_file + '.src_code_tokens.txt'
     preserved_tokens = set()
+    name_counter = Counter()
     with open(src_code_tokens_file, 'w') as f_src_token:
         tgt_words = []
         for example in tqdm(train_set):
             code_tokens = example.code_tokens
             for loc in ["a", "l"]:
-                for key, var_set in example.source[loc].items():
+                for key, var_set in example.target[loc].items():
                     varname = list(var_set)[0].name
+                    name_counter[varname] += 1
             for token in code_tokens:
                 if token.startswith("@@") and token.endswith("@@"):
                     preserved_tokens.add(token)
             f_src_token.write(' '.join(code_tokens) + '\n')
+    name_vocab_entry = VocabEntry.from_counter(name_counter, size=len(name_counter),
+                                                 freq_cutoff=int(args['--freq-cutoff']))
 
     assert args['--use-bpe']
     print('use bpe')
@@ -259,7 +263,8 @@ if __name__ == '__main__':
     vocab = Vocab(
         source_tokens=src_code_tokens_vocab_entry,
         types=type_vocab_entry,
-        subtypes=subtype_vocab_entry
+        subtypes=subtype_vocab_entry,
+        names=name_vocab_entry
     )
 
     vocab.save(args['VOCAB_FILE'])
