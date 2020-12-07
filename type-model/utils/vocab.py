@@ -235,12 +235,15 @@ if __name__ == '__main__':
         tgt_words = []
         for example in tqdm(train_set):
             code_tokens = example.code_tokens
+            varnames = set()
             for loc in ["a", "l"]:
                 for key, var_set in example.target[loc].items():
                     varname = list(var_set)[0].name
+                    varnames.add(varname)
                     name_counter[varname] += 1
+            code_tokens = list(map(lambda x: f"@{x}@" if x in varnames else x, code_tokens))
             for token in code_tokens:
-                if token.startswith("@@") and token.endswith("@@"):
+                if token.startswith("@") and token.endswith("@"):
                     preserved_tokens.add(token)
             f_src_token.write(' '.join(code_tokens) + '\n')
     name_vocab_entry = VocabEntry.from_counter(name_counter, size=len(name_counter),
