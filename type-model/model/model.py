@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Dict, Tuple, Union
 
@@ -163,16 +164,29 @@ class TypeReconstructionModel(pl.LightningModule):
             f1=torch.tensor(f1),
             targets=targets,
             targets_nums=target_dict["target_mask"].sum(dim=1).detach().cpu(),
-            test_meta=target_dict["test_meta"]
+            test_meta=target_dict["test_meta"],
+            index=input_dict["index"],
+            tgt_var_names=target_dict["tgt_var_names"]
         )
 
     def validation_epoch_end(self, outputs):
-        return self._shared_epoch_end(outputs, "val")
+        self._shared_epoch_end(outputs, "val")
 
     def test_epoch_end(self, outputs):
-        return self._shared_epoch_end(outputs, "test")
+        indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_epoch_end(outputs, "test")
+        if "pred_file" in self.config["test"]:
+            results, refs = {}, {}
+            for (binary, func_name, decom_var_name), target_var_name, pred, target, body_in_train in zip(indexes, tgt_var_names, preds.tolist(), targets.tolist(), body_in_train_mask.tolist()):
+                results.setdefault(binary, {}).setdefault(func_name, []).append((decom_var_name, self.vocab.types.id2word[pred]))
+                refs.setdefault(binary, {}).setdefault(func_name, []).append((target_var_name, self.vocab.types.id2word[target], body_in_train))
+            pred_file = self.config["test"]["pred_file"]
+            ref_file = os.path.splitext(pred_file)[0] + "_ref.json"
+            json.dump(results, open(pred_file, "w"))
+            json.dump(refs, open(ref_file, "w"))
 
     def _shared_epoch_end(self, outputs, prefix):
+        indexes = sum([x["index"] for x in outputs], [])
+        tgt_var_names = sum([x["tgt_var_names"] for x in outputs], [])
         preds = torch.cat([x["preds"] for x in outputs])
         targets = torch.cat([x["targets"] for x in outputs])
         f1 = torch.cat([x["f1"] for x in outputs])
@@ -215,6 +229,7 @@ class TypeReconstructionModel(pl.LightningModule):
             self.log(f"{prefix}_body_not_in_train_struc_acc", accuracy(preds[~body_in_train_mask & struc_mask], targets[~body_in_train_mask & struc_mask]))
             # adjust for the number of classes
             self.log(f"{prefix}_struc_f1_macro", f1_score(preds[struc_mask], targets[struc_mask], class_reduction='macro') * len(self.vocab.types) / len(self.vocab.types.struct_set))
+        return indexes, tgt_var_names, preds, targets, body_in_train_mask
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.config["train"]["lr"])

@@ -44,5 +44,8 @@
     "eval_batch_size": 64,
     "max_epoch": 60,
     "lr": 1e-3,
+  },
+  "test": {
+    "pred_file": "pred_xfmr.json",
   }
 }

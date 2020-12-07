@@ -27,6 +27,7 @@ class Example:
         valid: bool = True,
         raw_code: str = "",
         test_meta: Dict[str, Dict[str, bool]] = None,
+        binary: str = None,
     ):
         self.name = name
         self.code_tokens = code_tokens
@@ -36,6 +37,7 @@ class Example:
         self._is_valid = valid
         self.raw_code = raw_code
         self.test_meta = test_meta
+        self.binary = binary
 
     @classmethod
     def from_json(cls, d: Dict):
@@ -55,8 +57,7 @@ class Example:
                 target[loc][location_from_json_key(key)] = {
                     Variable.from_json(arg) for arg in args
                 }
-        test_meta = d["test_meta"] if "test_meta" in d else None
-        return cls(d["name"], d["code_tokens"], source, target, test_meta=test_meta)
+        return cls(d["name"], d["code_tokens"], source, target, test_meta=d.get("test_meta", None), binary=d.get("binary", None))
 
     def to_json(self):
         assert self._is_valid
@@ -159,11 +160,9 @@ class Example:
     def is_valid_example(self):
         return self._is_valid
 
-# HACK: Stupid global lambda functions to get distributed training working
+# HACK: Stupid global lambda functions required for distributed data loading
 def identity(x):
     return x
-def get_key_json(x):
-    return x['json']
 def get_src_len(e):
     return e.source_seq_length
 
@@ -196,8 +195,6 @@ class Dataset(wds.Dataset):
             self.locations = ["a", "l"]
         self = (
             self.pipe(Dataset._file_iter_to_line_iter)
-            .decode()
-            .map(get_key_json)
             .map(Example.from_json)
             .map(annotate)
             .shuffle(Dataset.SHUFFLE_BUFFER)
@@ -229,7 +226,9 @@ class Dataset(wds.Dataset):
             for line in lines:
                 if not line:
                     continue
-                yield {"json": line}
+                json_line = json.loads(line)
+                json_line["binary"] = jsonl["__key__"][:jsonl["__key__"].index("_")]
+                yield json_line
 
     def _annotate(self, example: Example):
         src_bpe_model = self.vocab.source_tokens.subtoken_model
@@ -252,6 +251,7 @@ class Dataset(wds.Dataset):
         types_model = self.vocab.types
         subtypes_model = self.vocab.subtypes
         src_var_names = []
+        tgt_var_names = []
         tgt_var_types = []
         tgt_var_subtypes = []
         tgt_var_type_sizes = []
@@ -263,6 +263,7 @@ class Dataset(wds.Dataset):
                 src_var = list(example.source[loc][key])[0]
                 tgt_var = list(example.target[loc][key])[0]
                 src_var_names.append(f"@@{src_var.name}@@")
+                tgt_var_names.append(f"@@{tgt_var.name}@@")
                 tgt_var_types.append(types_model[str(tgt_var.typ)])
                 if types_model[str(tgt_var.typ)] == types_model.unk_id:
                     subtypes = [subtypes_model.unk_id, subtypes_model["<eot>"]]
@@ -277,6 +278,7 @@ class Dataset(wds.Dataset):
         src_a, src_s, _ = Function.stack_layout(example.source["l"])
         tgt_a, tgt_s, _ = Function.stack_layout(example.target["l"])
         setattr(example, "src_var_names", src_var_names)
+        setattr(example, "tgt_var_names", tgt_var_names)
         setattr(example, "tgt_var_types", tgt_var_types)
         setattr(example, "tgt_var_subtypes", tgt_var_subtypes)
         setattr(example, "tgt_var_type_sizes", tgt_var_type_sizes)
@@ -326,6 +328,7 @@ class Dataset(wds.Dataset):
 
         return (
             dict(
+                index=sum([[(e.binary, e.name, name) for name in e.src_var_names] for e in examples], []),
                 src_code_tokens=input,
                 variable_mention_to_variable_id=variable_mention_to_variable_id,
                 variable_mention_mask=variable_mention_mask,
@@ -335,6 +338,7 @@ class Dataset(wds.Dataset):
                 batch_size=len(examples),
             ),
             dict(
+                tgt_var_names=sum([e.tgt_var_names for e in examples], []),
                 target_type_id=target_type_id,
                 target_subtype_id=target_subtype_id,
                 target_type_sizes=target_type_sizes,

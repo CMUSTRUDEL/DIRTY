@@ -2,6 +2,9 @@
 *.pyc
 *.mypy_cache*
 
+*.json
+*.c
+
 data*/
 exp_runs/
 dire/
