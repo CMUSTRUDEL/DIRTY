@@ -4,7 +4,7 @@ from typing import Dict, Tuple, Union
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-from pytorch_lightning.metrics.functional.classification import accuracy, f1_score
+from pytorch_lightning.metrics.functional import accuracy
 from torch import nn
 from torchvision import transforms
 from utils.vocab import Vocab
@@ -90,7 +90,7 @@ class MemReconstructionModel(pl.LightningModule):
         loss = torch.cat([x["loss"] for x in outputs]).mean()
         self.log(f"{prefix}_loss", loss)
         self.log(f"{prefix}_acc", accuracy(preds, targets))
-        self.log(f"{prefix}_f1_macro", f1_score(preds, targets, class_reduction='macro'))
+        self.log(f"{prefix}_acc_macro", accuracy(preds, targets, class_reduction='macro'))
         # func acc
         num_correct, num_funcs, pos = 0, 0, 0
         for target_num in map(lambda x: x["targets_nums"], outputs):

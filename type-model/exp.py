@@ -14,6 +14,7 @@ Options:
     --eval-ckpt=<str>                           load checkpoint for eval [default: ]
     --resume=<str>                              load checkpoint for resume training [default: ]
     --extra-config=<str>                        extra config [default: {}]
+    --percent=<float>                           percent of training data used [default: 1.0]
 """
 import json
 import os
@@ -47,7 +48,7 @@ def train(args):
 
     # dataloaders
     batch_size = config["train"]["batch_size"]
-    train_set = Dataset(config["data"]["train_file"], config["data"])
+    train_set = Dataset(config["data"]["train_file"], config["data"], percent=float(args["--percent"]))
     dev_set = Dataset(config["data"]["dev_file"], config["data"])
     train_loader = DataLoader(
         train_set,
@@ -78,7 +79,7 @@ def train(args):
         gpus=1 if args["--cuda"] else None,
         auto_select_gpus=True,
         gradient_clip_val=1,
-        callbacks=[EarlyStopping(monitor='val_loss')],
+        callbacks=[EarlyStopping(monitor='val_loss', patience=config["train"]["patience"])],
         progress_bar_refresh_rate=20,
         resume_from_checkpoint=resume_from_checkpoint
     )

@@ -171,9 +171,10 @@ class Dataset(wds.Dataset):
     SHUFFLE_BUFFER = 5000
     SORT_BUFFER = 512
 
-    def __init__(self, url: str, config: Optional[Dict] = None):
+    def __init__(self, url: str, config: Optional[Dict] = None, percent: float = 1.0):
         # support wildcards
-        urls = glob.glob(url)
+        urls = sorted(glob.glob(url))
+        urls = urls[:int(percent * len(urls))]
         super().__init__(urls)
         if config:
             # annotate example for training
@@ -350,10 +351,6 @@ class Dataset(wds.Dataset):
             ),
         )
     
-    def __len__(self):
-        """HACK: fake length for testing in pl"""
-        return 10 ** 4
-
 
 if __name__ == "__main__":
     config = json.loads(_jsonnet.evaluate_file('config.xfmr.jsonnet'))

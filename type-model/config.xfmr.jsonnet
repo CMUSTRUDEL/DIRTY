@@ -42,8 +42,9 @@
   "train": {
     "batch_size": 64,
     "eval_batch_size": 64,
-    "max_epoch": 60,
+    "max_epoch": 100,
     "lr": 1e-3,
+    "patience": 10,
   },
   "test": {
     "pred_file": "pred_xfmr.json",

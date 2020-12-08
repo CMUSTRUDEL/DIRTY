@@ -5,7 +5,7 @@ from typing import Dict, Tuple, Union
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-from pytorch_lightning.metrics.functional.classification import accuracy, f1_score
+from pytorch_lightning.metrics.functional import accuracy
 from torch import nn
 from torchvision import transforms
 from utils.vocab import Vocab
@@ -118,7 +118,7 @@ class TypeReconstructionModel(pl.LightningModule):
         preds = self.decoder.predict(context_encoding, target_dict, variable_type_logits)
         if self.subtype:
             preds_out = []
-            f1 = []
+            f1s = []
             for pred, target in zip(preds, targets):
                 target = target[target > 0]
                 # Compute piece-wise f1
@@ -136,7 +136,7 @@ class TypeReconstructionModel(pl.LightningModule):
                 pred_piece_list += ["<unk>"] * (len(target_strs) - len(pred_piece_list))
                 for pred_piece, target_str in zip(pred_piece_list, target_strs):
                     target_pieces = self.typstr_to_piece[target_str]
-                    f1.append(2 * len(set(pred_piece) & set(target_pieces)) / (1e-12 + len(pred_piece) + len(target_pieces)))
+                    f1s.append(2 * len(set(pred_piece) & set(target_pieces)) / (1e-12 + len(pred_piece) + len(target_pieces)))
                 pred_detok = TypeInfo.detokenize(pred_pieces)
                 if len(pred_detok) < target.shape[0]:
                     pred_detok += ["<unk>"] * (target.shape[0] - len(pred_detok))
@@ -145,23 +145,23 @@ class TypeReconstructionModel(pl.LightningModule):
                     pdb.set_trace()
                 preds_out.append(torch.tensor([self.vocab.types[pred_id] for pred_id in pred_detok]))
             targets = targets[target_dict["target_mask"]]
-            assert len(f1) == targets.shape[0]
+            assert len(f1s) == targets.shape[0]
             preds = torch.cat(preds_out)
         else:
             targets = targets[target_dict["target_mask"]]
             preds = preds.detach().cpu()
-            f1 = torch.zeros(targets.shape)
+            f1s = torch.zeros(targets.shape)
             for i, (pred_id, target_id) in enumerate(zip(preds.tolist(), targets.tolist())):
                 pred_str = self.vocab.types.id2word[pred_id]
                 target_str = self.vocab.types.id2word[target_id]
-                pred_pieces = self.typstr_to_piece[pred_str]
-                target_pieces = self.typstr_to_piece[target_str]
-                f1[i] = (2 * len(set(pred_pieces) & set(target_pieces)) / (1e-12 + len(pred_pieces) + len(target_pieces)))
+                pred_pieces = self.typstr_to_piece.get(pred_str, [])
+                target_pieces = self.typstr_to_piece.get(target_str, [])
+                f1s[i] = (2 * len(set(pred_pieces) & set(target_pieces)) / (1e-12 + len(pred_pieces) + len(target_pieces)))
 
         return dict(
             loss=loss.detach().cpu(),
             preds=preds,
-            f1=torch.tensor(f1),
+            f1s=torch.tensor(f1s),
             targets=targets,
             targets_nums=target_dict["target_mask"].sum(dim=1).detach().cpu(),
             test_meta=target_dict["test_meta"],
@@ -189,14 +189,14 @@ class TypeReconstructionModel(pl.LightningModule):
         tgt_var_names = sum([x["tgt_var_names"] for x in outputs], [])
         preds = torch.cat([x["preds"] for x in outputs])
         targets = torch.cat([x["targets"] for x in outputs])
-        f1 = torch.cat([x["f1"] for x in outputs])
-        print(preds.shape, f1.shape)
-        assert f1.shape == preds.shape
+        f1s = torch.cat([x["f1s"] for x in outputs])
+        print(preds.shape, f1s.shape)
+        assert f1s.shape == preds.shape
         loss = torch.cat([x["loss"] for x in outputs]).mean()
         self.log(f"{prefix}_loss", loss)
         self.log(f"{prefix}_acc", accuracy(preds, targets))
-        self.log(f"{prefix}_f1_macro", f1_score(preds, targets, class_reduction='macro'))
-        self.log(f"{prefix}_F1", f1.mean())
+        self.log(f"{prefix}_acc_macro", accuracy(preds, targets, num_classes=len(self.vocab.types), class_reduction='macro'))
+        self.log(f"{prefix}_F1", f1s.mean())
         # func acc
         num_correct, num_funcs, pos = 0, 0, 0
         body_in_train_mask = []
@@ -212,10 +212,6 @@ class TypeReconstructionModel(pl.LightningModule):
         name_in_train_mask = torch.tensor(name_in_train_mask)
         self.log(f"{prefix}_body_in_train_acc", accuracy(preds[body_in_train_mask], targets[body_in_train_mask]))
         self.log(f"{prefix}_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
-        # self.log(f"{prefix}_name_in_train_acc", accuracy(preds[name_in_train_mask], targets[name_in_train_mask]))
-        self.log(f"{prefix}_body_in_train_f1_macro", f1_score(preds[body_in_train_mask], targets[body_in_train_mask], class_reduction='macro'))
-        self.log(f"{prefix}_body_not_in_train_f1_macro", f1_score(preds[~body_in_train_mask], targets[~body_in_train_mask], class_reduction='macro'))
-        # self.log(f"{prefix}_name_in_train_f1_macro", f1_score(preds[name_in_train_mask], targets[name_in_train_mask], class_reduction='macro'))
         assert pos == sum(x["targets_nums"].sum() for x in outputs), (pos, sum(x["targets_nums"].sum() for x in outputs))
         self.log(f"{prefix}_func_acc", num_correct / num_funcs)
 
@@ -228,7 +224,7 @@ class TypeReconstructionModel(pl.LightningModule):
             self.log(f"{prefix}_body_in_train_struc_acc", accuracy(preds[struc_mask & body_in_train_mask], targets[struc_mask & body_in_train_mask]))
             self.log(f"{prefix}_body_not_in_train_struc_acc", accuracy(preds[~body_in_train_mask & struc_mask], targets[~body_in_train_mask & struc_mask]))
             # adjust for the number of classes
-            self.log(f"{prefix}_struc_f1_macro", f1_score(preds[struc_mask], targets[struc_mask], class_reduction='macro') * len(self.vocab.types) / len(self.vocab.types.struct_set))
+            self.log(f"{prefix}_struc_acc_macro", accuracy(preds[struc_mask], targets[struc_mask], num_classes=len(self.vocab.types), class_reduction='macro') * len(self.vocab.types) / len(self.vocab.types.struct_set))
         return indexes, tgt_var_names, preds, targets, body_in_train_mask
 
     def configure_optimizers(self):
