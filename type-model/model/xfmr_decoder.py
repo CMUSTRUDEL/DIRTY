@@ -16,15 +16,17 @@ class XfmrDecoder(nn.Module):
         self.vocab = Vocab.load(config["vocab_file"])
         with open(config["typelib_file"]) as type_f:
             self.typelib = TypeLibCodec.decode(type_f.read())
+        vocab_size = len(self.vocab.names) if config.get("rename", False) else len(self.vocab.types)
+        self.target_id_key = "target_name_id" if config.get("rename", False) else "target_type_id"
         self.target_embedding = nn.Embedding(
-            len(self.vocab.types), config["target_embedding_size"]
+            vocab_size, config["target_embedding_size"]
         )
         self.target_transform = nn.Linear(
             config["target_embedding_size"] + config["hidden_size"],
             config["hidden_size"],
         )
         self.cached_decode_mask: Dict[int, torch.Tensor] = {}
-        self.size = torch.zeros(len(self.vocab.types), dtype=torch.long)
+        self.size = torch.zeros(vocab_size, dtype=torch.long)
 
         # concat variable encoding and previous target token embedding as input
         decoder_layer = TransformerDecoderLayer(
@@ -38,8 +40,10 @@ class XfmrDecoder(nn.Module):
         self.decoder = TransformerDecoder(
             decoder_layer, config["num_layers"], decoder_norm
         )
-        self.output = nn.Linear(config["hidden_size"], len(self.vocab.types))
+        self.output = nn.Linear(config["hidden_size"], vocab_size)
         self.mem_mask = config["mem_mask"]
+        if config.get("rename", False):
+            self.mem_mask = "none"
 
         self.config: Dict = config
 
@@ -66,7 +70,7 @@ class XfmrDecoder(nn.Module):
     ):
         context_encoding["variable_encoding"]
         # (B, NUM_VAR) -> (B, NUM_VAR, H)
-        tgt = self.target_embedding(target_dict["target_type_id"])
+        tgt = self.target_embedding(target_dict[self.target_id_key])
         # Shift 1 position to right
         tgt = torch.cat([torch.zeros_like(tgt[:, :1]), tgt[:, :-1]], dim=1)
         tgt = torch.cat([context_encoding["variable_encoding"], tgt], dim=-1)

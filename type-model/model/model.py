@@ -21,7 +21,12 @@ class TypeReconstructionModel(pl.LightningModule):
         if config_load is not None:
             config = config_load
         self.encoder = Encoder.build(config["encoder"])
-        self.decoder = Decoder.build(config["decoder"])
+        self.retype = config["data"].get("retype", True)
+        self.rename = config["data"].get("rename", False)
+        if self.retype:
+            self.decoder = Decoder.build(config["decoder"])
+        if self.rename:
+            self.rename_decoder = Decoder.build({**config["decoder"], "rename": True})
         self.config = config
         self.vocab = Vocab.load(config["data"]["vocab_file"])
         self.subtype = config["decoder"]["type"] in ['XfmrSubtypeDecoder']
@@ -57,30 +62,46 @@ class TypeReconstructionModel(pl.LightningModule):
         batch_idx,
     ):
         input_dict, target_dict = batch
+        total_loss = 0
         context_encoding = self.encoder(input_dict)
-        variable_type_logits = self.decoder(context_encoding, target_dict)
-        if self.soft_mem_mask:
-            variable_type_logits = variable_type_logits[target_dict["target_mask"]]
-            mem_encoding = self.mem_encoder(input_dict)
-            mem_type_logits = self.mem_decoder(mem_encoding, target_dict)
-            loss = F.cross_entropy(
-                # cross_entropy requires num_classes at the second dimension
-                variable_type_logits + mem_type_logits,
-                target_dict["target_type_id"][target_dict["target_mask"]],
-                reduction='none',
-            )
-        else:
+        if self.retype:
+            variable_type_logits = self.decoder(context_encoding, target_dict)
+            if self.soft_mem_mask:
+                variable_type_logits = variable_type_logits[target_dict["target_mask"]]
+                mem_encoding = self.mem_encoder(input_dict)
+                mem_type_logits = self.mem_decoder(mem_encoding, target_dict)
+                loss = F.cross_entropy(
+                    # cross_entropy requires num_classes at the second dimension
+                    variable_type_logits + mem_type_logits,
+                    target_dict["target_type_id"][target_dict["target_mask"]],
+                    reduction='none',
+                )
+            else:
+                loss = F.cross_entropy(
+                    # cross_entropy requires num_classes at the second dimension
+                    variable_type_logits.transpose(1, 2),
+                    target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
+                    reduction='none',
+                )
+                loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
+
+            loss = loss.mean()
+            self.log('train_retype_loss', loss)
+            total_loss += loss
+        if self.rename:
+            variable_type_logits = self.rename_decoder(context_encoding, target_dict)
             loss = F.cross_entropy(
                 # cross_entropy requires num_classes at the second dimension
                 variable_type_logits.transpose(1, 2),
-                target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
+                target_dict["target_name_id"],
                 reduction='none',
             )
-            loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
-
-        loss = loss.mean()
-        self.log('train_loss', loss)
-        return loss
+            loss = loss[target_dict["target_mask"]]
+            loss = loss.mean()
+            self.log('train_rename_loss', loss)
+            total_loss += loss
+        self.log('train_loss', total_loss)
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
         return self._shared_eval_step(batch, batch_idx)
@@ -88,13 +109,7 @@ class TypeReconstructionModel(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         return self._shared_eval_step(batch, batch_idx)
 
-    def _shared_eval_step(
-        self,
-        batch: Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, torch.Tensor]],
-        batch_idx,
-    ):
-        input_dict, target_dict = batch
-        context_encoding = self.encoder(input_dict)
+    def _shared_retype_eval_step(self, context_encoding, input_dict, target_dict):
         variable_type_logits = self.decoder(context_encoding, target_dict)
         if self.soft_mem_mask:
             variable_type_logits = variable_type_logits[target_dict["target_mask"]]
@@ -145,7 +160,6 @@ class TypeReconstructionModel(pl.LightningModule):
                     pdb.set_trace()
                 preds_out.append(torch.tensor([self.vocab.types[pred_id] for pred_id in pred_detok]))
             targets = targets[target_dict["target_mask"]]
-            assert len(f1s) == targets.shape[0]
             preds = torch.cat(preds_out)
         else:
             targets = targets[target_dict["target_mask"]]
@@ -157,12 +171,45 @@ class TypeReconstructionModel(pl.LightningModule):
                 pred_pieces = self.typstr_to_piece.get(pred_str, [])
                 target_pieces = self.typstr_to_piece.get(target_str, [])
                 f1s[i] = (2 * len(set(pred_pieces) & set(target_pieces)) / (1e-12 + len(pred_pieces) + len(target_pieces)))
+        return loss.detach().cpu(), preds, targets, torch.tensor(f1s)
+
+    def _shared_rename_eval_step(self, context_encoding, input_dict, target_dict):
+        variable_type_logits = self.rename_decoder(context_encoding, target_dict)
+        loss = F.cross_entropy(
+            # cross_entropy requires num_classes at the second dimension
+            variable_type_logits.transpose(1, 2),
+            target_dict["target_name_id"],
+            reduction='none',
+        )
+        loss = loss[target_dict["target_mask"]]
+        targets = target_dict["target_name_id"][target_dict["target_mask"]].detach().cpu()
+        preds = self.rename_decoder.predict(context_encoding, target_dict, variable_type_logits).detach().cpu()
+        return loss.detach().cpu(), preds, targets
+
+    def _shared_eval_step(
+        self,
+        batch: Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, torch.Tensor]],
+        batch_idx,
+    ):
+        input_dict, target_dict = batch
+        context_encoding = self.encoder(input_dict)
+        if self.retype:
+            retype_loss, retype_preds, retype_targets, retype_f1s = self._shared_retype_eval_step(context_encoding, input_dict, target_dict)
+        else:
+            retype_loss, retype_preds, retype_targets, retype_f1s = 0, None, None, None
+        if self.rename:
+            rename_loss, rename_preds, rename_targets = self._shared_rename_eval_step(context_encoding, input_dict, target_dict)
+        else:
+            rename_loss, rename_preds, rename_targets = 0, None, None
 
         return dict(
-            loss=loss.detach().cpu(),
-            preds=preds,
-            f1s=torch.tensor(f1s),
-            targets=targets,
+            retype_loss=retype_loss,
+            retype_preds=retype_preds,
+            retype_f1s=retype_f1s,
+            retype_targets=retype_targets,
+            rename_loss=rename_loss,
+            rename_preds=rename_preds,
+            rename_targets=rename_targets,
             targets_nums=target_dict["target_mask"].sum(dim=1).detach().cpu(),
             test_meta=target_dict["test_meta"],
             index=input_dict["index"],
@@ -173,30 +220,35 @@ class TypeReconstructionModel(pl.LightningModule):
         self._shared_epoch_end(outputs, "val")
 
     def test_epoch_end(self, outputs):
+        return 
+        raise NotImplementedError
         indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_epoch_end(outputs, "test")
         if "pred_file" in self.config["test"]:
             results, refs = {}, {}
             for (binary, func_name, decom_var_name), target_var_name, pred, target, body_in_train in zip(indexes, tgt_var_names, preds.tolist(), targets.tolist(), body_in_train_mask.tolist()):
-                results.setdefault(binary, {}).setdefault(func_name, []).append((decom_var_name, self.vocab.types.id2word[pred]))
-                refs.setdefault(binary, {}).setdefault(func_name, []).append((target_var_name, self.vocab.types.id2word[target], body_in_train))
+                results.setdefault(binary, {}).setdefault(func_name, []).append((decom_var_name, self.output_vocab.id2word[pred]))
+                refs.setdefault(binary, {}).setdefault(func_name, []).append((target_var_name, self.output_vocab.id2word[target], body_in_train))
             pred_file = self.config["test"]["pred_file"]
             ref_file = os.path.splitext(pred_file)[0] + "_ref.json"
             json.dump(results, open(pred_file, "w"))
             json.dump(refs, open(ref_file, "w"))
 
     def _shared_epoch_end(self, outputs, prefix):
+        if self.retype:
+            indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_retype_epoch_end(outputs, prefix)
+        if self.rename:
+            indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_rename_epoch_end(outputs, prefix)
+        return indexes, tgt_var_names, preds, targets, body_in_train_mask
+
+    def _shared_rename_epoch_end(self, outputs, prefix):
         indexes = sum([x["index"] for x in outputs], [])
         tgt_var_names = sum([x["tgt_var_names"] for x in outputs], [])
-        preds = torch.cat([x["preds"] for x in outputs])
-        targets = torch.cat([x["targets"] for x in outputs])
-        f1s = torch.cat([x["f1s"] for x in outputs])
-        print(preds.shape, f1s.shape)
-        assert f1s.shape == preds.shape
-        loss = torch.cat([x["loss"] for x in outputs]).mean()
-        self.log(f"{prefix}_loss", loss)
-        self.log(f"{prefix}_acc", accuracy(preds, targets))
-        self.log(f"{prefix}_acc_macro", accuracy(preds, targets, num_classes=len(self.vocab.types), class_reduction='macro'))
-        self.log(f"{prefix}_F1", f1s.mean())
+        preds = torch.cat([x["rename_preds"] for x in outputs])
+        targets = torch.cat([x["rename_targets"] for x in outputs])
+        loss = torch.cat([x["rename_loss"] for x in outputs]).mean()
+        self.log(f"{prefix}_rename_loss", loss)
+        self.log(f"{prefix}_rename_acc", accuracy(preds, targets))
+        self.log(f"{prefix}_rename_acc_macro", accuracy(preds, targets, num_classes=len(self.vocab.types), class_reduction='macro'))
         # func acc
         num_correct, num_funcs, pos = 0, 0, 0
         body_in_train_mask = []
@@ -210,10 +262,42 @@ class TypeReconstructionModel(pl.LightningModule):
             num_funcs += len(target_num)
         body_in_train_mask = torch.tensor(body_in_train_mask)
         name_in_train_mask = torch.tensor(name_in_train_mask)
-        self.log(f"{prefix}_body_in_train_acc", accuracy(preds[body_in_train_mask], targets[body_in_train_mask]))
-        self.log(f"{prefix}_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
+        self.log(f"{prefix}_rename_body_in_train_acc", accuracy(preds[body_in_train_mask], targets[body_in_train_mask]))
+        self.log(f"{prefix}_rename_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
         assert pos == sum(x["targets_nums"].sum() for x in outputs), (pos, sum(x["targets_nums"].sum() for x in outputs))
-        self.log(f"{prefix}_func_acc", num_correct / num_funcs)
+        self.log(f"{prefix}_rename_func_acc", num_correct / num_funcs)
+        return indexes, tgt_var_names, preds, targets, body_in_train_mask
+
+    def _shared_retype_epoch_end(self, outputs, prefix):
+        indexes = sum([x["index"] for x in outputs], [])
+        tgt_var_names = sum([x["tgt_var_names"] for x in outputs], [])
+        preds = torch.cat([x["retype_preds"] for x in outputs])
+        targets = torch.cat([x["retype_targets"] for x in outputs])
+        f1s = torch.cat([x["retype_f1s"] for x in outputs])
+        print(preds.shape, f1s.shape)
+        assert f1s.shape == preds.shape
+        loss = torch.cat([x["retype_loss"] for x in outputs]).mean()
+        self.log(f"{prefix}_retype_loss", loss)
+        self.log(f"{prefix}_retype_acc", accuracy(preds, targets))
+        self.log(f"{prefix}_retype_acc_macro", accuracy(preds, targets, num_classes=len(self.vocab.types), class_reduction='macro'))
+        self.log(f"{prefix}_retype_F1", f1s.mean())
+        # func acc
+        num_correct, num_funcs, pos = 0, 0, 0
+        body_in_train_mask = []
+        name_in_train_mask = []
+        for target_num, test_metas in map(lambda x: (x["targets_nums"], x["test_meta"]), outputs):
+            for num, test_meta in zip(target_num.tolist(), test_metas):
+                num_correct += all(preds[pos:pos + num] == targets[pos:pos + num])
+                pos += num
+                body_in_train_mask += [test_meta["function_body_in_train"]] * num
+                name_in_train_mask += [test_meta["function_name_in_train"]] * num
+            num_funcs += len(target_num)
+        body_in_train_mask = torch.tensor(body_in_train_mask)
+        name_in_train_mask = torch.tensor(name_in_train_mask)
+        self.log(f"{prefix}_retype_body_in_train_acc", accuracy(preds[body_in_train_mask], targets[body_in_train_mask]))
+        self.log(f"{prefix}_retype_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
+        assert pos == sum(x["targets_nums"].sum() for x in outputs), (pos, sum(x["targets_nums"].sum() for x in outputs))
+        self.log(f"{prefix}_retype_func_acc", num_correct / num_funcs)
 
         struc_mask = torch.zeros(len(targets), dtype=torch.bool)
         for idx, target in enumerate(targets):

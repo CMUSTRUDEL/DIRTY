@@ -187,6 +187,7 @@ class Dataset(wds.Dataset):
             assert not config["args"] # deal with local variables only for now
             self.locations = ["a", "l"] if config["args"] else ["l"]
             annotate = self._annotate
+            self.rename = config.get("rename", False)
             # sort = Dataset._sort
             sort = identity
         else:
@@ -280,6 +281,8 @@ class Dataset(wds.Dataset):
         tgt_a, tgt_s, _ = Function.stack_layout(example.target["l"])
         setattr(example, "src_var_names", src_var_names)
         setattr(example, "tgt_var_names", tgt_var_names)
+        if self.rename:
+            setattr(example, "tgt_var_name_ids", [self.vocab.names[n[2:-2]] for n in tgt_var_names])
         setattr(example, "tgt_var_types", tgt_var_types)
         setattr(example, "tgt_var_subtypes", tgt_var_subtypes)
         setattr(example, "tgt_var_type_sizes", tgt_var_type_sizes)
@@ -327,6 +330,13 @@ class Dataset(wds.Dataset):
         target_type_src_mems = [torch.tensor(mems, dtype=torch.long) for e in examples for mems in e.tgt_var_src_mems]
         target_type_src_mems = pad_sequence(target_type_src_mems, batch_first=True)
 
+        # renaming task
+        if hasattr(examples[0], "tgt_var_name_ids"):
+            name_ids = [torch.tensor(e.tgt_var_name_ids, dtype=torch.long) for e in examples]
+            target_name_id = pad_sequence(name_ids, batch_first=True)
+        else:
+            target_name_id = None
+
         return (
             dict(
                 index=sum([[(e.binary, e.name, name) for name in e.src_var_names] for e in examples], []),
@@ -341,6 +351,7 @@ class Dataset(wds.Dataset):
             dict(
                 tgt_var_names=sum([e.tgt_var_names for e in examples], []),
                 target_type_id=target_type_id,
+                target_name_id=target_name_id,
                 target_subtype_id=target_subtype_id,
                 target_type_sizes=target_type_sizes,
                 target_mask=target_type_id > 0,

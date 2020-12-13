@@ -79,11 +79,13 @@ def train(args):
         gpus=1 if args["--cuda"] else None,
         auto_select_gpus=True,
         gradient_clip_val=1,
-        callbacks=[EarlyStopping(monitor='val_loss', patience=config["train"]["patience"])],
+        callbacks=[EarlyStopping(monitor="val_retype_acc", mode="max", patience=config["train"]["patience"])],
         progress_bar_refresh_rate=20,
         resume_from_checkpoint=resume_from_checkpoint
     )
     if args["--eval-ckpt"]:
+        # HACK: necessary to make pl test work for IterableDataset
+        Dataset.__len__ = lambda self: 10000
         trainer.test(model, test_dataloaders=val_loader, ckpt_path=args["--eval-ckpt"])
     else:
         trainer.fit(model, train_loader, val_loader)
