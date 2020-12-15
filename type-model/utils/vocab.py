@@ -165,6 +165,13 @@ class VocabEntry:
                 ret.append(3 + mem)
         return ret
 
+    def lookup_decomp(self, type_str):
+        if type_str in self:
+            return self[type_str]
+        if type_str.startswith("struct "):
+            return self[type_str[7:]]
+        return self[type_str]
+
 class Vocab(object):
     def __init__(self, **kwargs):
         self.entries = []

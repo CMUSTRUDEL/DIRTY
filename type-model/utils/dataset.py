@@ -254,6 +254,7 @@ class Dataset(wds.Dataset):
         subtypes_model = self.vocab.subtypes
         src_var_names = []
         tgt_var_names = []
+        src_var_types = []
         tgt_var_types = []
         tgt_var_subtypes = []
         tgt_var_type_sizes = []
@@ -266,6 +267,7 @@ class Dataset(wds.Dataset):
                 tgt_var = list(example.target[loc][key])[0]
                 src_var_names.append(f"@@{src_var.name}@@")
                 tgt_var_names.append(f"@@{tgt_var.name}@@")
+                src_var_types.append(types_model.lookup_decomp(str(src_var.typ)))
                 tgt_var_types.append(types_model[str(tgt_var.typ)])
                 if types_model[str(tgt_var.typ)] == types_model.unk_id:
                     subtypes = [subtypes_model.unk_id, subtypes_model["<eot>"]]
@@ -283,6 +285,7 @@ class Dataset(wds.Dataset):
         setattr(example, "tgt_var_names", tgt_var_names)
         if self.rename:
             setattr(example, "tgt_var_name_ids", [self.vocab.names[n[2:-2]] for n in tgt_var_names])
+        setattr(example, "src_var_types", src_var_types)
         setattr(example, "tgt_var_types", tgt_var_types)
         setattr(example, "tgt_var_subtypes", tgt_var_subtypes)
         setattr(example, "tgt_var_type_sizes", tgt_var_type_sizes)
@@ -318,6 +321,8 @@ class Dataset(wds.Dataset):
         # if mentioned for each var_id
         variable_encoding_mask = (variable_mention_num > 0).float()
 
+        src_type_ids = [torch.tensor(e.src_var_types, dtype=torch.long) for e in examples]
+        src_type_id = pad_sequence(src_type_ids, batch_first=True)
         type_ids = [torch.tensor(e.tgt_var_types, dtype=torch.long) for e in examples]
         target_type_id = pad_sequence(type_ids, batch_first=True)
         assert target_type_id.shape == variable_mention_num.shape
@@ -346,6 +351,7 @@ class Dataset(wds.Dataset):
                 variable_mention_num=variable_mention_num,
                 variable_encoding_mask=variable_encoding_mask,
                 target_type_src_mems=target_type_src_mems,
+                src_type_id=src_type_id,
                 batch_size=len(examples),
             ),
             dict(
@@ -369,42 +375,5 @@ if __name__ == "__main__":
     dataloader = torch.utils.data.DataLoader(
         dataset, num_workers=8, batch_size=64, collate_fn=Dataset.collate_fn
     )
-    with open(config["data"]["typelib_file"]) as type_f:
-        typelib = TypeLibCodec.decode(type_f.read())
-    most_common_for_size = {}
-    types_model = dataset.vocab.types
-    for size in typelib:
-        freq, tp = typelib[size][0]
-        most_common_for_size[size] = types_model[str(tp)]
-    cnt = 0
-    preds_list = []
-    targets_list = []
-    for batch in tqdm(dataloader):
-        input_dict, target_dict = batch
-        targets = target_dict["target_type_id"][target_dict["target_mask"]]
-        preds = []
-        for mems, target in zip(target_dict["target_type_src_mems"], targets.tolist()):
-            size = mems[mems != 0].tolist()[-1] - 3
-            if size not in most_common_for_size:
-                preds.append(types_model.unk_id)
-                continue
-            preds.append(most_common_for_size[size])
-        preds_list.append(torch.tensor(preds))
-        targets_list.append(targets)
-    preds = torch.cat(preds_list)
-    targets = torch.cat(targets_list)
-    print(preds.shape, targets.shape)
-    from pytorch_lightning.metrics.functional.classification import accuracy, f1_score
-    import wandb
-    wandb.init(name="most_common", project="dire")
-    wandb.log({"test_acc": accuracy(preds, targets)})
-    wandb.log({"test_f1_macro": f1_score(preds, targets, class_reduction='macro')})
-    struct_set = set()
-    for idx, type_str in types_model.id2word.items():
-        if type_str.startswith("struct"):
-            struct_set.add(idx)
-    struc_mask = torch.zeros(len(targets), dtype=torch.bool)
-    for idx, target in enumerate(targets):
-        if target.item() in struct_set:
-            struc_mask[idx] = 1
-    wandb.log({"test_struc_acc": accuracy(preds[struc_mask], targets[struc_mask])})
+    for x in dataloader:
+        pass

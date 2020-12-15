@@ -248,7 +248,7 @@ class TypeReconstructionModel(pl.LightningModule):
         loss = torch.cat([x["rename_loss"] for x in outputs]).mean()
         self.log(f"{prefix}_rename_loss", loss)
         self.log(f"{prefix}_rename_acc", accuracy(preds, targets))
-        self.log(f"{prefix}_rename_acc_macro", accuracy(preds, targets, num_classes=len(self.vocab.types), class_reduction='macro'))
+        self.log(f"{prefix}_rename_acc_macro", accuracy(preds, targets, num_classes=len(self.vocab.names), class_reduction='macro'))
         # func acc
         num_correct, num_funcs, pos = 0, 0, 0
         body_in_train_mask = []
