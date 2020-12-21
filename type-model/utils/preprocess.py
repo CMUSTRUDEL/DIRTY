@@ -79,8 +79,8 @@ def type_dumper(args):
     with open(fname, "r") as f:
         for line in f:
             e = Example.from_json(json.loads(line))
-            for _, vars in e.target["l"].items():
-                typelib.add(list(vars)[0].typ)
+            for var in e.target.values():
+                typelib.add(var.typ)
     typelib.sort()
     with open(os.path.join(tgt_folder, "types", fname.split("/")[-1]), "w") as type_lib_file:
         encoded = TypeLibCodec.encode(typelib)
@@ -112,7 +112,7 @@ def main(args):
     os.system(f"mkdir -p {tgt_folder}")
     os.system(f"mkdir -p {tgt_folder}/files")
     os.system(f"mkdir -p {tgt_folder}/types")
-    num_workers = 32
+    num_workers = 16
 
     valid_example_count = 0
 

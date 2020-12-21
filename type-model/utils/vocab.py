@@ -242,10 +242,8 @@ if __name__ == '__main__':
         tgt_words = []
         for example in tqdm(train_set):
             code_tokens = example.code_tokens
-            for loc in ["a", "l"]:
-                for key, var_set in example.target[loc].items():
-                    varname = list(var_set)[0].name
-                    name_counter[varname] += 1
+            for var in example.target.values():
+                name_counter[var.name] += 1
             for token in code_tokens:
                 if token.startswith("@@") and token.endswith("@@"):
                     preserved_tokens.add(token)

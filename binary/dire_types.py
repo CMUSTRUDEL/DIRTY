@@ -973,6 +973,28 @@ class Void(TypeInfo):
     def __str__(self) -> str:
         return "void"
 
+class Disappear(TypeInfo):
+    """Target type for variables that don't appear in the ground truth function"""
+    size = 0
+
+    def __init__(self) -> None:
+        pass
+
+    @classmethod
+    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Disappear":
+        return cls()
+
+    def _to_json(self) -> t.Dict[str, int]:
+        return {"T": 10}
+
+    def __eq__(self, other: t.Any) -> bool:
+        return isinstance(other, Disappear)
+
+    def __hash__(self) -> int:
+        return 0
+
+    def __str__(self) -> str:
+        return "disappear"
 
 class FunctionPointer(TypeInfo):
     """Stores information about a function pointer."""
@@ -1038,6 +1060,7 @@ class TypeLibCodec:
             7: Union,
             8: Void,
             9: FunctionPointer,
+            10: Disappear,
         }
         return classes[d["T"]]._from_json(d)
 

@@ -13,7 +13,7 @@ from tqdm import tqdm
 from utils.code_processing import tokenize_raw_code
 from utils.function import CollectedFunction, Function
 from utils.variable import Location, Variable, location_from_json_key
-from utils.dire_types import Struct, TypeLibCodec, TypeLib, UDT, TypeInfo
+from utils.dire_types import Struct, TypeLibCodec, TypeLib, UDT, TypeInfo, Disappear
 
 
 class Example:
@@ -21,8 +21,8 @@ class Example:
         self,
         name: str,
         code_tokens: str,
-        source: Dict[str, Mapping[Location, Set[Variable]]],
-        target: Dict[str, Mapping[Location, Set[Variable]]],
+        source: Mapping[Location, Set[Variable]],
+        target: Mapping[Location, Set[Variable]],
         binary_file: str = "",
         valid: bool = True,
         raw_code: str = "",
@@ -41,34 +41,23 @@ class Example:
 
     @classmethod
     def from_json(cls, d: Dict):
-        source = defaultdict(dict)
-        for loc in ["a", "l"]:
-            if not loc in d["source"]:
-                continue
-            for key, args in d["source"][loc].items():
-                source[loc][location_from_json_key(key)] = {
-                    Variable.from_json(arg) for arg in args
-                }
-        target = defaultdict(dict)
-        for loc in ["a", "l"]:
-            if not loc in d["target"]:
-                continue
-            for key, args in d["target"][loc].items():
-                target[loc][location_from_json_key(key)] = {
-                    Variable.from_json(arg) for arg in args
-                }
-        return cls(d["name"], d["code_tokens"], source, target, test_meta=d.get("test_meta", None), binary=d.get("binary", None))
+        source = {location_from_json_key(loc): Variable.from_json(var)
+                  for loc, var in d["source"].items()}
+        target = {location_from_json_key(loc): Variable.from_json(var)
+                  for loc, var in d["target"].items()}
+        return cls(
+            d["name"],
+            d["code_tokens"],
+            source,
+            target,
+            test_meta=d.get("test_meta", None),
+            binary=d.get("binary", None)
+        )
 
     def to_json(self):
         assert self._is_valid
-        source = defaultdict(dict)
-        for loc in ["a", "l"]:
-            for key, args in self.source[loc].items():
-                source[loc][key.json_key()] = [arg.to_json() for arg in args]
-        target = defaultdict(dict)
-        for loc in ["a", "l"]:
-            for key, args in self.target[loc].items():
-                target[loc][key.json_key()] = [arg.to_json() for arg in args]
+        source = {loc.json_key(): var.to_json() for loc, var in self.source.items()}
+        target = {loc.json_key(): var.to_json() for loc, var in self.target.items()}
         return {
             "name": self.name,
             "code_tokens": self.code_tokens,
@@ -79,54 +68,41 @@ class Example:
     @classmethod
     def from_cf(cls, cf: CollectedFunction, **kwargs):
         """Convert from a decoded CollectedFunction"""
+        name = cf.decompiler.name
         raw_code = cf.decompiler.raw_code
         code_tokens = tokenize_raw_code(raw_code)
-        name = cf.decompiler.name
 
-        # Remove variables that overlaps on a memory location or don't appear in the code tokens
-        code_tokens_set = set(code_tokens)
-        source_locals = Example.filter(cf.decompiler.local_vars, code_tokens_set)
-        source_args = Example.filter(cf.decompiler.arguments, code_tokens_set)
-        target_locals = Example.filter(
-            cf.debug.local_vars, None, set(source_locals.keys())
-        )
-        target_args = Example.filter(cf.debug.arguments, None, set(source_args.keys()))
+        source = {**cf.decompiler.local_vars, **cf.decompiler.arguments}
+        target = {**cf.debug.local_vars, **cf.debug.arguments}
 
-        # Add special tokens to variables in tokens to prevent being sub-tokenized in BPE
+        # Remove variables that overlap on memory or don't appear in the code tokens
+        source_code_tokens_set = set(code_tokens)
+        target_code_tokens_set = set(tokenize_raw_code(cf.debug.raw_code))
+
+        source = Example.filter(source, source_code_tokens_set)
+        target = Example.filter(target, target_code_tokens_set, set(source.keys()))
+
+        # Assign type "Disappear" to variables not existing in the ground truth
         varnames = set()
-        for _, vars in {**source_locals, **source_args}.items():
-            for var in list(vars):
-                varname = var.name
-                varnames.add(varname)
+        for loc in source.keys():
+            if loc not in target.keys():
+                target[loc] = Variable(Disappear(), "", False)
+        # Add special tokens to variables  to prevnt being sub-tokenized in BPE
+        for var in source.values():
+            varname = var.name
+            varnames.add(varname)
         for idx in range(len(code_tokens)):
             if code_tokens[idx] in varnames:
                 code_tokens[idx] = f"@@{code_tokens[idx]}@@"
 
-        valid = (
-            name == cf.debug.name
-            # and set(source_args.keys()) == set(target_args.keys())
-            and set(source_locals.keys()) == set(target_locals.keys())
-            # and len(source_args) + len(source_locals) > 0
-            and len(source_locals) > 0
-            and len(code_tokens) < 500
-        )
-        # Remove functions that are too large
-        tgt_var_type_objs = [list(target_locals[key])[0].typ for key in target_locals]
-        valid &= all([m.size <= kwargs["max_type_size"] for m in tgt_var_type_objs])
-        if valid:
-            src_a, src_s, _ = Function.stack_layout(source_locals)
-            tgt_a, tgt_s, t_overlap = Function.stack_layout(target_locals)
-            valid &= bool(len(source_locals) > 0 and tgt_a and tgt_a[-1] <= kwargs["max_stack_length"] and src_a and src_a[-1] <= kwargs["max_stack_length"] and tgt_s and tgt_s[-1] <= kwargs["max_stack_length"] and tgt_s[0] >= 0 and src_s and src_s[-1] <= kwargs["max_stack_length"] and src_s[0] >= 0)
-            valid &= not t_overlap
-
         return cls(
             name,
             code_tokens,
-            {"a": source_args, "l": source_locals},
-            {"a": target_args, "l": target_locals},
+            source,
+            target,
             kwargs["binary_file"],
-            valid,
-            raw_code,
+            valid=name == cf.debug.name and source,
+            raw_code=raw_code,
         )
 
     @staticmethod
@@ -134,26 +110,23 @@ class Example:
         mapping: Mapping[Location, Set[Variable]],
         code_tokens: Optional[Set[str]] = None,
         locations: Optional[Set[Location]] = None,
-    ):
+    ) -> Mapping[Location, Variable]:
         """Discard and leave these for future work:
 
-        Register locations
-        Locations are reused for multiple variables
+        Multiple variables sharing a memory location (no way to determine ground truth);
+        Variables not appearing in code (no way to get representation);
+        Target variables not appearing in source (useless ground truth);
         """
         ret: Mapping[Location, Set[Variable]] = {}
         for location, variable_set in mapping.items():
-            if location.json_key().startswith("r"):
-                continue
             if len(variable_set) > 1:
                 continue
-            if code_tokens and not list(variable_set)[0].name in code_tokens:
+            var = list(variable_set)[0]
+            if code_tokens is not None and not var.name in code_tokens:
                 continue
-            # HACK: discard padding for now
-            if isinstance(list(variable_set)[0].typ, UDT.Padding):
+            if locations is not None and not location in locations:
                 continue
-            if locations and not location in locations:
-                continue
-            ret[location] = variable_set
+            ret[location] = var
         return ret
 
     @property
@@ -185,7 +158,6 @@ class Dataset(wds.Dataset):
                 self.typelib = TypeLibCodec.decode(type_f.read())
             self.max_src_tokens_len = config["max_src_tokens_len"]
             assert not config["args"] # deal with local variables only for now
-            self.locations = ["a", "l"] if config["args"] else ["l"]
             annotate = self._annotate
             self.rename = config.get("rename", False)
             # sort = Dataset._sort
@@ -194,7 +166,6 @@ class Dataset(wds.Dataset):
             # for creating the vocab
             annotate = identity
             sort = identity
-            self.locations = ["a", "l"]
         self = (
             self.pipe(Dataset._file_iter_to_line_iter)
             .map(Example.from_json)
