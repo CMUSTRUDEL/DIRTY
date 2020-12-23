@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from utils.code_processing import tokenize_raw_code
 from utils.function import CollectedFunction, Function
-from utils.variable import Location, Variable, location_from_json_key
+from utils.variable import Location, Variable, location_from_json_key, Register, Stack
 from utils.dire_types import Struct, TypeLibCodec, TypeLib, UDT, TypeInfo, Disappear
 
 
@@ -157,7 +157,7 @@ class Dataset(wds.Dataset):
             with open(config["typelib_file"]) as type_f:
                 self.typelib = TypeLibCodec.decode(type_f.read())
             self.max_src_tokens_len = config["max_src_tokens_len"]
-            assert not config["args"] # deal with local variables only for now
+            self.max_num_var = config["max_num_var"]
             annotate = self._annotate
             self.rename = config.get("rename", False)
             # sort = Dataset._sort
@@ -232,26 +232,28 @@ class Dataset(wds.Dataset):
         tgt_var_type_objs = []
         tgt_var_src_mems = []
         tgt_names = []
-        for loc in self.locations:
-            for key in sorted(example.source[loc], key=lambda x: x.offset):
-                src_var = list(example.source[loc][key])[0]
-                tgt_var = list(example.target[loc][key])[0]
-                src_var_names.append(f"@@{src_var.name}@@")
-                tgt_var_names.append(f"@@{tgt_var.name}@@")
-                src_var_types.append(types_model.lookup_decomp(str(src_var.typ)))
-                tgt_var_types.append(types_model[str(tgt_var.typ)])
-                if types_model[str(tgt_var.typ)] == types_model.unk_id:
-                    subtypes = [subtypes_model.unk_id, subtypes_model["<eot>"]]
-                else:
-                    subtypes = [subtypes_model[subtyp] for subtyp in tgt_var.typ.tokenize()]
-                tgt_var_type_sizes.append(len(subtypes))
-                tgt_var_subtypes += subtypes
-                tgt_var_type_objs.append(tgt_var.typ)
-                tgt_var_src_mems.append(types_model.encode_memory(src_var.typ.start_offsets() + (src_var.typ.size,)))
-                tgt_names.append(tgt_var.name)
-        
-        src_a, src_s, _ = Function.stack_layout(example.source["l"])
-        tgt_a, tgt_s, _ = Function.stack_layout(example.target["l"])
+        # variables on registers first, followed by those on stack
+        locs = sorted(filter(lambda x: isinstance(x, Register), example.source),
+                      key=lambda x: x.name) + \
+               sorted(filter(lambda x: isinstance(x, Stack), example.source),
+                      key=lambda x: x.offset)
+        for loc in locs[:self.max_num_var]:
+            src_var = example.source[loc]
+            tgt_var = example.target[loc]
+            src_var_names.append(f"@@{src_var.name}@@")
+            tgt_var_names.append(f"@@{tgt_var.name}@@")
+            src_var_types.append(types_model.lookup_decomp(str(src_var.typ)))
+            tgt_var_types.append(types_model[str(tgt_var.typ)])
+            if types_model[str(tgt_var.typ)] == types_model.unk_id:
+                subtypes = [subtypes_model.unk_id, subtypes_model["<eot>"]]
+            else:
+                subtypes = [subtypes_model[subtyp] for subtyp in tgt_var.typ.tokenize()]
+            tgt_var_type_sizes.append(len(subtypes))
+            tgt_var_subtypes += subtypes
+            tgt_var_type_objs.append(tgt_var.typ)
+            tgt_var_src_mems.append(types_model.encode_memory((src_var.typ.size,) + src_var.typ.start_offsets()))
+            tgt_names.append(tgt_var.name)
+
         setattr(example, "src_var_names", src_var_names)
         setattr(example, "tgt_var_names", tgt_var_names)
         if self.rename:
@@ -260,7 +262,6 @@ class Dataset(wds.Dataset):
         setattr(example, "tgt_var_types", tgt_var_types)
         setattr(example, "tgt_var_subtypes", tgt_var_subtypes)
         setattr(example, "tgt_var_type_sizes", tgt_var_type_sizes)
-        setattr(example, "mems", (src_a, src_s))
         setattr(example, "tgt_var_src_mems", tgt_var_src_mems)
 
         return example
@@ -333,7 +334,6 @@ class Dataset(wds.Dataset):
                 target_type_sizes=target_type_sizes,
                 target_mask=target_type_id > 0,
                 target_submask = target_subtype_id > 0,
-                target_mems=[e.mems for e in examples],
                 target_type_src_mems=target_type_src_mems,
                 test_meta=[e.test_meta for e in examples]
             ),

@@ -79,7 +79,7 @@ def train(args):
         gpus=1 if args["--cuda"] else None,
         auto_select_gpus=True,
         gradient_clip_val=1,
-        callbacks=[EarlyStopping(monitor="val_retype_acc", mode="max", patience=config["train"]["patience"])],
+        callbacks=[EarlyStopping(monitor="val_retype_acc" if config["data"]["retype"] else "val_rename_acc", mode="max", patience=config["train"]["patience"])],
         progress_bar_refresh_rate=20,
         resume_from_checkpoint=resume_from_checkpoint
     )

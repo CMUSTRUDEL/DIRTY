@@ -21,6 +21,7 @@ import sentencepiece as spm
 from tqdm import tqdm
 
 from utils.dire_types import TypeLibCodec
+from utils.variable import Register
 
 
 SAME_VARIABLE_TOKEN = '<IDENTITY>'
@@ -144,7 +145,7 @@ class VocabEntry:
 
         return vocab_entry
 
-    MAX_MEM_LENGTH = 512
+    MAX_MEM_LENGTH = 128
     MAX_STACK_SIZE = 1024
     @staticmethod
     def encode_memory(mems):
@@ -238,18 +239,21 @@ if __name__ == '__main__':
     src_code_tokens_file = vocab_file + '.src_code_tokens.txt'
     preserved_tokens = set()
     name_counter = Counter()
+    reg_counter = Counter()
     with open(src_code_tokens_file, 'w') as f_src_token:
         tgt_words = []
         for example in tqdm(train_set):
             code_tokens = example.code_tokens
-            for var in example.target.values():
-                name_counter[var.name] += 1
+            reg_counter.update(map(lambda x: x.name, filter(lambda x: isinstance(x, Register), example.target.keys())))
+            name_counter.update(map(lambda x: x.name, example.target.values()))
             for token in code_tokens:
                 if token.startswith("@@") and token.endswith("@@"):
                     preserved_tokens.add(token)
             f_src_token.write(' '.join(code_tokens) + '\n')
     name_vocab_entry = VocabEntry.from_counter(name_counter, size=len(name_counter),
-                                                 freq_cutoff=int(args['--freq-cutoff']))
+                                               freq_cutoff=int(args['--freq-cutoff']))
+    reg_vocab_entry = VocabEntry.from_counter(reg_counter, size=len(reg_counter),
+                                        freq_cutoff=int(args['--freq-cutoff']))
 
     assert args['--use-bpe']
     print('use bpe')
@@ -269,7 +273,8 @@ if __name__ == '__main__':
         source_tokens=src_code_tokens_vocab_entry,
         types=type_vocab_entry,
         subtypes=subtype_vocab_entry,
-        names=name_vocab_entry
+        names=name_vocab_entry,
+        regs=reg_vocab_entry,
     )
 
     vocab.save(args['VOCAB_FILE'])

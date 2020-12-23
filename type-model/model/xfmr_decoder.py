@@ -137,7 +137,8 @@ class XfmrDecoder(nn.Module):
         )
         tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step, tgt.device)
         preds_list = []
-        tgt_mems = target_dict["target_mems"]
+        if self.mem_mask == "hard":
+            tgt_mems = target_dict["target_mems"]
         if self.mem_mask == "soft":
             mem_encoding = self.mem_encoder(target_dict)
             mem_logits = self.mem_decoder(mem_encoding, target_dict)

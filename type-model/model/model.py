@@ -220,9 +220,9 @@ class TypeReconstructionModel(pl.LightningModule):
         self._shared_epoch_end(outputs, "val")
 
     def test_epoch_end(self, outputs):
+        indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_epoch_end(outputs, "test")
         return 
         raise NotImplementedError
-        indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_epoch_end(outputs, "test")
         if "pred_file" in self.config["test"]:
             results, refs = {}, {}
             for (binary, func_name, decom_var_name), target_var_name, pred, target, body_in_train in zip(indexes, tgt_var_names, preds.tolist(), targets.tolist(), body_in_train_mask.tolist()):
@@ -266,6 +266,18 @@ class TypeReconstructionModel(pl.LightningModule):
         self.log(f"{prefix}_rename_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
         assert pos == sum(x["targets_nums"].sum() for x in outputs), (pos, sum(x["targets_nums"].sum() for x in outputs))
         self.log(f"{prefix}_rename_func_acc", num_correct / num_funcs)
+        struc_mask = torch.zeros(len(targets), dtype=torch.bool)
+        for idx, target in enumerate(targets):
+            if target.item() in self.vocab.types.struct_set:
+                struc_mask[idx] = 1
+        if struc_mask.sum() > 0:
+            self.log(f"{prefix}_rename_struc_acc", accuracy(preds[struc_mask], targets[struc_mask]))
+            # adjust for the number of classes
+            self.log(f"{prefix}_rename_struc_acc_macro", accuracy(preds[struc_mask], targets[struc_mask], num_classes=len(self.vocab.types), class_reduction='macro') * len(self.vocab.types) / len(self.vocab.types.struct_set))
+        if (struc_mask & body_in_train_mask).sum() > 0:
+            self.log(f"{prefix}_rename_body_in_train_struc_acc", accuracy(preds[struc_mask & body_in_train_mask], targets[struc_mask & body_in_train_mask]))
+        if (~body_in_train_mask & struc_mask).sum() > 0:
+            self.log(f"{prefix}_rename_body_not_in_train_struc_acc", accuracy(preds[~body_in_train_mask & struc_mask], targets[~body_in_train_mask & struc_mask]))
         return indexes, tgt_var_names, preds, targets, body_in_train_mask
 
     def _shared_retype_epoch_end(self, outputs, prefix):
@@ -305,10 +317,12 @@ class TypeReconstructionModel(pl.LightningModule):
                 struc_mask[idx] = 1
         if struc_mask.sum() > 0:
             self.log(f"{prefix}_struc_acc", accuracy(preds[struc_mask], targets[struc_mask]))
-            self.log(f"{prefix}_body_in_train_struc_acc", accuracy(preds[struc_mask & body_in_train_mask], targets[struc_mask & body_in_train_mask]))
-            self.log(f"{prefix}_body_not_in_train_struc_acc", accuracy(preds[~body_in_train_mask & struc_mask], targets[~body_in_train_mask & struc_mask]))
             # adjust for the number of classes
             self.log(f"{prefix}_struc_acc_macro", accuracy(preds[struc_mask], targets[struc_mask], num_classes=len(self.vocab.types), class_reduction='macro') * len(self.vocab.types) / len(self.vocab.types.struct_set))
+        if (struc_mask & body_in_train_mask).sum() > 0:
+            self.log(f"{prefix}_body_in_train_struc_acc", accuracy(preds[struc_mask & body_in_train_mask], targets[struc_mask & body_in_train_mask]))
+        if (~body_in_train_mask & struc_mask).sum() > 0:
+            self.log(f"{prefix}_body_not_in_train_struc_acc", accuracy(preds[~body_in_train_mask & struc_mask], targets[~body_in_train_mask & struc_mask]))
         return indexes, tgt_var_names, preds, targets, body_in_train_mask
 
     def configure_optimizers(self):

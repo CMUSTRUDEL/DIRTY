@@ -6,7 +6,7 @@
     "vocab_file": "data1/vocab.bpe10000",
     "typelib_file": "data1/typelib.json",
     "max_src_tokens_len": 510,
-    "args": false,
+    "max_num_var": 32,
   },
   "encoder":{
     "type": "XfmrSequentialEncoder",
