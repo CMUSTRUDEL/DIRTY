@@ -21,26 +21,26 @@ class RenamingDecodeModule(pl.LightningModule):
         self.decoder = Decoder.build({**config["decoder"], "rename": True})
 
     def training_step(self, input_dict, context_encoding, target_dict):
-        variable_type_logits = self.decoder(context_encoding, target_dict)
+        variable_name_logits = self.decoder(context_encoding, target_dict)
         loss = F.cross_entropy(
             # cross_entropy requires num_classes at the second dimension
-            variable_type_logits.transpose(1, 2),
+            variable_name_logits.transpose(1, 2),
             target_dict["target_name_id"],
             reduction='none',
         )
         return loss[target_dict["target_mask"]].mean()
 
     def shared_eval_step(self, context_encoding, input_dict, target_dict):
-        variable_type_logits = self.decoder(context_encoding, target_dict)
+        variable_name_logits = self.decoder(context_encoding, target_dict)
         loss = F.cross_entropy(
             # cross_entropy requires num_classes at the second dimension
-            variable_type_logits.transpose(1, 2),
+            variable_name_logits.transpose(1, 2),
             target_dict["target_name_id"],
             reduction='none',
         )
         loss = loss[input_dict["target_mask"]]
         targets = target_dict["target_name_id"][input_dict["target_mask"]].detach().cpu()
-        preds = self.decoder.predict(context_encoding, input_dict, variable_type_logits).detach().cpu()
+        preds = self.decoder.predict(context_encoding, input_dict, None).detach().cpu()
 
         return dict(
             rename_loss=loss.detach().cpu(),
@@ -102,12 +102,92 @@ class RetypingDecodeModule(pl.LightningModule):
             )
             loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
         targets = target_dict["target_type_id"][input_dict["target_mask"]].detach().cpu()
-        preds = self.decoder.predict(context_encoding, input_dict, variable_type_logits).detach().cpu()
+        preds = self.decoder.predict(context_encoding, input_dict, None).detach().cpu()
 
         return dict(
             retype_loss=loss.detach().cpu(),
             retype_preds=preds,
             retype_targets=targets,
+        )
+
+
+class InterleaveDecodeModule(pl.LightningModule):
+    def __init__(self, config):
+        super().__init__()
+        self.decoder = Decoder.build({**config["decoder"]})
+        self.soft_mem_mask = config["decoder"]["mem_mask"] == "soft"
+        if self.soft_mem_mask:
+            self.mem_encoder = Encoder.build(config["mem_encoder"])
+            self.mem_decoder = Decoder.build(config["mem_decoder"])
+            self.decoder.mem_encoder = self.mem_encoder
+            self.decoder.mem_decoder = self.mem_decoder
+            
+    def training_step(self, input_dict, context_encoding, target_dict):
+        variable_type_logits, variable_name_logits = self.decoder(context_encoding, target_dict)
+        # Retype
+        if self.soft_mem_mask:
+            variable_type_logits = variable_type_logits[target_dict["target_mask"]]
+            mem_encoding = self.mem_encoder(input_dict)
+            mem_type_logits = self.mem_decoder(mem_encoding, target_dict)
+            retype_loss = F.cross_entropy(
+                variable_type_logits + mem_type_logits,
+                target_dict["target_type_id"][target_dict["target_mask"]],
+                reduction='none',
+            )
+        else:
+            retype_loss = F.cross_entropy(
+                variable_type_logits.transpose(1, 2),
+                target_dict["target_type_id"],
+                reduction='none',
+            )
+            retype_loss = retype_loss[target_dict["target_mask"]]
+        retype_loss = retype_loss.mean()
+
+        rename_loss = F.cross_entropy(
+            # cross_entropy requires num_classes at the second dimension
+            variable_name_logits.transpose(1, 2),
+            target_dict["target_name_id"],
+            reduction='none',
+        )
+        rename_loss = rename_loss[target_dict["target_mask"]].mean()
+
+        return retype_loss, rename_loss
+
+    def shared_eval_step(self, context_encoding, input_dict, target_dict):
+        variable_type_logits, variable_name_logits = self.decoder(context_encoding, target_dict)
+        if self.soft_mem_mask:
+            variable_type_logits = variable_type_logits[input_dict["target_mask"]]
+            mem_encoding = self.mem_encoder(input_dict)
+            mem_type_logits = self.mem_decoder(mem_encoding, target_dict)
+            retype_loss = F.cross_entropy(
+                variable_type_logits + mem_type_logits,
+                target_dict["target_type_id"][input_dict["target_mask"]],
+                reduction='none',
+            )
+        else:
+            retype_loss = F.cross_entropy(
+                variable_type_logits.transpose(1, 2),
+                target_dict["target_type_id"],
+                reduction='none',
+            )
+            retype_loss = retype_loss[target_dict["target_mask"]]
+
+        rename_loss = F.cross_entropy(
+            variable_name_logits.transpose(1, 2),
+            target_dict["target_name_id"],
+            reduction='none',
+        )
+        rename_loss = rename_loss[input_dict["target_mask"]]
+        ret = self.decoder.predict(context_encoding, input_dict, None)
+        retype_preds, rename_preds = ret[0].detach().cpu(), ret[1].detach().cpu()
+
+        return dict(
+            retype_loss=retype_loss.detach().cpu(),
+            retype_targets=target_dict["target_type_id"][input_dict["target_mask"]].detach().cpu(),
+            retype_preds=retype_preds,
+            rename_loss=rename_loss.detach().cpu(),
+            rename_targets=target_dict["target_name_id"][input_dict["target_mask"]].detach().cpu(),
+            rename_preds=rename_preds,
         )
 
 class TypeReconstructionModel(pl.LightningModule):
@@ -118,10 +198,14 @@ class TypeReconstructionModel(pl.LightningModule):
         self.encoder = Encoder.build(config["encoder"])
         self.retype = config["data"].get("retype", False)
         self.rename = config["data"].get("rename", False)
-        if self.retype:
-            self.retyping_module = RetypingDecodeModule(config)
-        if self.rename:
-            self.renaming_module = RenamingDecodeModule(config)
+        self.interleave = config["data"].get("interleave", False)
+        if self.interleave:
+            self.interleave_module = InterleaveDecodeModule(config)
+        else:
+            if self.retype:
+                self.retyping_module = RetypingDecodeModule(config)
+            if self.rename:
+                self.renaming_module = RenamingDecodeModule(config)
         self.config = config
         self.vocab = Vocab.load(config["data"]["vocab_file"])
         self._preprocess()
@@ -148,14 +232,20 @@ class TypeReconstructionModel(pl.LightningModule):
         input_dict, target_dict = batch
         total_loss = 0
         context_encoding = self.encoder(input_dict)
-        if self.retype:
-            loss = self.retyping_module.training_step(input_dict, context_encoding, target_dict)
-            self.log('train_retype_loss', loss)
-            total_loss += loss
-        if self.rename:
-            loss = self.renaming_module.training_step(input_dict, context_encoding, target_dict)
-            self.log('train_rename_loss', loss)
-            total_loss += loss
+        if self.interleave:
+            retype_loss, rename_loss = self.interleave_module.training_step(input_dict, context_encoding, target_dict)
+            self.log('train_retype_loss', retype_loss)
+            self.log('train_rename_loss', rename_loss)
+            total_loss = retype_loss + rename_loss
+        else:
+            if self.retype:
+                loss = self.retyping_module.training_step(input_dict, context_encoding, target_dict)
+                self.log('train_retype_loss', loss)
+                total_loss += loss
+            if self.rename:
+                loss = self.renaming_module.training_step(input_dict, context_encoding, target_dict)
+                self.log('train_rename_loss', loss)
+                total_loss += loss
         self.log('train_loss', total_loss)
         return total_loss
 
@@ -173,12 +263,15 @@ class TypeReconstructionModel(pl.LightningModule):
         input_dict, target_dict = batch
         context_encoding = self.encoder(input_dict)
         ret_dict = {}
-        if self.retype:
-            ret = self.retyping_module.shared_eval_step(context_encoding, input_dict, target_dict)
-            ret_dict = {**ret, **ret_dict}
-        if self.rename:
-            ret = self.renaming_module.shared_eval_step(context_encoding, input_dict, target_dict)
-            ret_dict = {**ret, **ret_dict}
+        if self.interleave:
+            ret_dict = self.interleave_module.shared_eval_step(context_encoding, input_dict, target_dict)
+        else:
+            if self.retype:
+                ret = self.retyping_module.shared_eval_step(context_encoding, input_dict, target_dict)
+                ret_dict = {**ret, **ret_dict}
+            if self.rename:
+                ret = self.renaming_module.shared_eval_step(context_encoding, input_dict, target_dict)
+                ret_dict = {**ret, **ret_dict}
 
         return dict(
             **ret_dict,

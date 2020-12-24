@@ -9,6 +9,7 @@
     "max_num_var": 32,
     "retype": true,
     "rename": true,
+    "interleave": true,
   },
   "encoder":{
     "type": "XfmrSequentialEncoder",
@@ -19,7 +20,7 @@
     "num_layers": 2,
   },
   "decoder": {
-    "type": 'XfmrDecoder',
+    "type": if $['data'].interleave then 'XfmrInterleaveDecoder' else 'XfmrDecoder',
     "vocab_file": $['data'].vocab_file,
     "typelib_file": "data1/typelib.json",
     "target_embedding_size": $['encoder'].source_embedding_size,
