@@ -7,7 +7,6 @@
     "typelib_file": "data1/typelib.json",
     "max_src_tokens_len": 510,
     "max_num_var": 32,
-    "retype": false,
     "rename": true,
   },
   "encoder":{
