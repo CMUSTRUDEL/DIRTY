@@ -123,7 +123,7 @@ class XfmrDecoder(nn.Module):
     def predict(
         self,
         context_encoding: Dict[str, torch.Tensor],
-        target_dict: Dict[str, torch.Tensor],
+        input_dict: Dict[str, torch.Tensor],
         variable_type_logits: torch.Tensor,
     ):
         """Greedy decoding"""
@@ -138,14 +138,15 @@ class XfmrDecoder(nn.Module):
         tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step, tgt.device)
         preds_list = []
         if self.mem_mask == "hard":
-            tgt_mems = target_dict["target_mems"]
+            raise NotImplementedError
+            # tgt_mems = target_dict["target_mems"]
         if self.mem_mask == "soft":
-            mem_encoding = self.mem_encoder(target_dict)
-            mem_logits = self.mem_decoder(mem_encoding, target_dict)
+            mem_encoding = self.mem_encoder(input_dict)
+            mem_logits = self.mem_decoder(mem_encoding, target_dict=None)
             mem_logits_list = []
             idx = 0
             for b in range(batch_size):
-                nvar = target_dict["target_mask"][b].sum().item()
+                nvar = input_dict["target_mask"][b].sum().item()
                 mem_logits_list.append(mem_logits[idx: idx + nvar])
                 idx += nvar
             assert idx == mem_logits.shape[0]
@@ -155,7 +156,7 @@ class XfmrDecoder(nn.Module):
                 tgt.transpose(0, 1),
                 memory=context_encoding["code_token_encoding"].transpose(0, 1),
                 tgt_mask=tgt_mask[: idx + 1, : idx + 1],
-                tgt_key_padding_mask=~target_dict["target_mask"][:, : idx + 1],
+                tgt_key_padding_mask=~input_dict["target_mask"][:, : idx + 1],
                 memory_key_padding_mask=~context_encoding["code_token_mask"],
             ).transpose(0, 1)
             # Save logits for the current step
@@ -163,7 +164,7 @@ class XfmrDecoder(nn.Module):
             # Make prediction for this step
             preds_step = []
             for b in range(batch_size):
-                if not target_dict["target_mask"][b, idx]:
+                if not input_dict["target_mask"][b, idx]:
                     preds_step.append(torch.zeros(1, dtype=torch.long, device=logits.device))
                     continue
                 scores = logits[b, 0]
@@ -189,7 +190,7 @@ class XfmrDecoder(nn.Module):
                 tgt_step = self.target_transform(tgt_step)
                 tgt = torch.cat([tgt, tgt_step], dim=1)
         preds = torch.stack(preds_list).transpose(0, 1)
-        return preds[target_dict["target_mask"]]
+        return preds[input_dict["target_mask"]]
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int, device: torch.device) -> torch.Tensor:

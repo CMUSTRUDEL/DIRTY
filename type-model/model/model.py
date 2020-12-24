@@ -112,13 +112,13 @@ class TypeReconstructionModel(pl.LightningModule):
     def _shared_retype_eval_step(self, context_encoding, input_dict, target_dict):
         variable_type_logits = self.decoder(context_encoding, target_dict)
         if self.soft_mem_mask:
-            variable_type_logits = variable_type_logits[target_dict["target_mask"]]
+            variable_type_logits = variable_type_logits[input_dict["target_mask"]]
             mem_encoding = self.mem_encoder(input_dict)
             mem_type_logits = self.mem_decoder(mem_encoding, target_dict)
             loss = F.cross_entropy(
                 # cross_entropy requires num_classes at the second dimension
                 variable_type_logits + mem_type_logits,
-                target_dict["target_type_id"][target_dict["target_mask"]],
+                target_dict["target_type_id"][input_dict["target_mask"]],
                 reduction='none',
             )
         else:
@@ -130,7 +130,7 @@ class TypeReconstructionModel(pl.LightningModule):
             )
             loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
         targets = target_dict["target_type_id"].detach().cpu()
-        preds = self.decoder.predict(context_encoding, target_dict, variable_type_logits)
+        preds = self.decoder.predict(context_encoding, input_dict, variable_type_logits)
         if self.subtype:
             preds_out = []
             f1s = []
@@ -159,10 +159,10 @@ class TypeReconstructionModel(pl.LightningModule):
                     import pdb
                     pdb.set_trace()
                 preds_out.append(torch.tensor([self.vocab.types[pred_id] for pred_id in pred_detok]))
-            targets = targets[target_dict["target_mask"]]
+            targets = targets[input_dict["target_mask"]]
             preds = torch.cat(preds_out)
         else:
-            targets = targets[target_dict["target_mask"]]
+            targets = targets[input_dict["target_mask"]]
             preds = preds.detach().cpu()
             f1s = torch.zeros(targets.shape)
             for i, (pred_id, target_id) in enumerate(zip(preds.tolist(), targets.tolist())):
@@ -181,9 +181,9 @@ class TypeReconstructionModel(pl.LightningModule):
             target_dict["target_name_id"],
             reduction='none',
         )
-        loss = loss[target_dict["target_mask"]]
-        targets = target_dict["target_name_id"][target_dict["target_mask"]].detach().cpu()
-        preds = self.rename_decoder.predict(context_encoding, target_dict, variable_type_logits).detach().cpu()
+        loss = loss[input_dict["target_mask"]]
+        targets = target_dict["target_name_id"][input_dict["target_mask"]].detach().cpu()
+        preds = self.rename_decoder.predict(context_encoding, input_dict, variable_type_logits).detach().cpu()
         return loss.detach().cpu(), preds, targets
 
     def _shared_eval_step(
@@ -210,7 +210,7 @@ class TypeReconstructionModel(pl.LightningModule):
             rename_loss=rename_loss,
             rename_preds=rename_preds,
             rename_targets=rename_targets,
-            targets_nums=target_dict["target_mask"].sum(dim=1).detach().cpu(),
+            targets_nums=input_dict["target_mask"].sum(dim=1).detach().cpu(),
             test_meta=target_dict["test_meta"],
             index=input_dict["index"],
             tgt_var_names=target_dict["tgt_var_names"]

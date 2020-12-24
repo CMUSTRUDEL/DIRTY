@@ -324,6 +324,9 @@ class Dataset(wds.Dataset):
                 variable_encoding_mask=variable_encoding_mask,
                 target_type_src_mems=target_type_src_mems,
                 src_type_id=src_type_id,
+                target_mask=src_type_id > 0,
+                target_submask = target_subtype_id > 0,
+                target_type_sizes=target_type_sizes,
                 batch_size=len(examples),
             ),
             dict(
@@ -331,10 +334,7 @@ class Dataset(wds.Dataset):
                 target_type_id=target_type_id,
                 target_name_id=target_name_id,
                 target_subtype_id=target_subtype_id,
-                target_type_sizes=target_type_sizes,
-                target_mask=target_type_id > 0,
-                target_submask = target_subtype_id > 0,
-                target_type_src_mems=target_type_src_mems,
+                target_mask=src_type_id > 0,
                 test_meta=[e.test_meta for e in examples]
             ),
         )

@@ -14,7 +14,7 @@ class Decoder(nn.Module):
     def predict(
         self,
         context_encoding: Dict[str, torch.Tensor],
-        target_dict: Dict[str, torch.Tensor],
+        input_dict: Dict[str, torch.Tensor],
         variable_type_logits: torch.Tensor,
     ):
         raise NotImplementedError
