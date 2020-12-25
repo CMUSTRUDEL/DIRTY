@@ -30,13 +30,13 @@ if __name__ == "__main__":
     targets = torch.cat(targets_list)
 
     wandb.init(name="copy_decompiler", project="dire")
-    wandb.log({"test_acc": accuracy(preds, targets)})
+    wandb.log({"test_retype_acc": accuracy(preds, targets)})
     wandb.log(
         {
-            "test_acc_macro": accuracy(
+            "test_retype_acc_macro": accuracy(
                 preds, targets, num_classes=len(types_model), class_reduction="macro"
             )
         }
     )
     struc_mask = make_struct_mask(types_model, targets)
-    wandb.log({"test_struc_acc": accuracy(preds[struc_mask], targets[struc_mask])})
+    wandb.log({"test_retype_struc_acc": accuracy(preds[struc_mask], targets[struc_mask])})
