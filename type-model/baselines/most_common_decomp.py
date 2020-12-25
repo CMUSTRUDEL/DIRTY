@@ -31,7 +31,7 @@ def evaluate(config, most_common_for_src: Dict[int, int]):
     preds = torch.cat(preds_list)
     targets = torch.cat(targets_list)
 
-    wandb.init(name="copy_decompiler", project="dire")
+    wandb.init(name="most_common_decomp", project="dire")
     wandb.log({"test_acc": accuracy(preds, targets)})
     wandb.log(
         {
