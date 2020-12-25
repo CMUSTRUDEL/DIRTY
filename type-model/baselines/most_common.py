@@ -23,7 +23,7 @@ def make_struct_mask(types_model, targets):
 
 if __name__ == "__main__":
     config = json.loads(_jsonnet.evaluate_file("config.xfmr.jsonnet"))
-    dataset = Dataset("data1/dev-*.tar", config["data"])
+    dataset = Dataset(config["data"]["dev_file"], config["data"])
     dataloader = torch.utils.data.DataLoader(
         dataset, num_workers=8, batch_size=64, collate_fn=Dataset.collate_fn
     )
@@ -41,8 +41,8 @@ if __name__ == "__main__":
         input_dict, target_dict = batch
         targets = target_dict["target_type_id"][target_dict["target_mask"]]
         preds = []
-        for mems, target in zip(target_dict["target_type_src_mems"], targets.tolist()):
-            size = mems[mems != 0].tolist()[-1] - 3
+        for mems, target in zip(input_dict["target_type_src_mems"], targets.tolist()):
+            size = mems[mems != 0].tolist()[0] - 3
             if size not in most_common_for_size:
                 preds.append(types_model.unk_id)
                 continue
