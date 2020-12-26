@@ -47,7 +47,7 @@
     "eval_batch_size": 64,
     "max_epoch": 100,
     "lr": 1e-3,
-    "patience": 10,
+    "patience": 30,
   },
   "test": {
   }
