@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from utils import util
-from utils.vocab import PAD_ID
+from utils.vocab import PAD_ID, Vocab
 
 from .encoder import Encoder
 
@@ -55,7 +55,9 @@ class XfmrMemEncoder(Encoder):
     def __init__(self, config):
         super().__init__()
 
-        self.src_word_embed = nn.Embedding(1030, config["source_embedding_size"])
+        vocab = Vocab.load(config["vocab_file"])
+        reg_pos_size = len(vocab.regs)
+        self.src_word_embed = nn.Embedding(1030 + reg_pos_size, config["source_embedding_size"])
 
         dropout = config["dropout"]
         self.encoder = TransformerModel(

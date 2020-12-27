@@ -233,10 +233,9 @@ class Dataset(wds.Dataset):
         tgt_var_src_mems = []
         tgt_names = []
         # variables on registers first, followed by those on stack
-        locs = sorted(filter(lambda x: isinstance(x, Register), example.source),
-                      key=lambda x: x.name) + \
-               sorted(filter(lambda x: isinstance(x, Stack), example.source),
-                      key=lambda x: x.offset)
+        locs = sorted(example.source, key=lambda x: sub_tokens.index(f"@@{example.source[x].name}@@") if f"@@{example.source[x].name}@@" in sub_tokens else self.max_src_tokens_len)
+        stack_pos = [x.offset for x in example.source if isinstance(x, Stack)]
+        stack_start_pos = max(stack_pos) if stack_pos else None
         for loc in locs[:self.max_num_var]:
             src_var = example.source[loc]
             tgt_var = example.target[loc]
@@ -251,6 +250,19 @@ class Dataset(wds.Dataset):
             tgt_var_type_sizes.append(len(subtypes))
             tgt_var_subtypes += subtypes
             tgt_var_type_objs.append(tgt_var.typ)
+            # Memory
+            # 0: absolute location of the variable in the function, e.g.,
+            #   for registers: Reg 56
+            #   for stack: relative position to the first variable
+            # 1: size of the type
+            # 2, 3, ...: start offset of fields in the type
+            def var_loc_in_func(loc):
+                # TODO: fix the magic number for computing vocabulary idx
+                if isinstance(loc, Register):
+                    return 1030 + self.vocab.regs[loc.name]
+                else:
+                    from utils.vocab import VocabEntry
+                    return 3 + stack_start_pos - loc.offset if stack_start_pos - loc.offset < VocabEntry.MAX_STACK_SIZE else 2
             tgt_var_src_mems.append(types_model.encode_memory((src_var.typ.size,) + src_var.typ.start_offsets()))
             tgt_names.append(tgt_var.name)
 
