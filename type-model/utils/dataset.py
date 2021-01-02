@@ -263,7 +263,7 @@ class Dataset(wds.Dataset):
                 else:
                     from utils.vocab import VocabEntry
                     return 3 + stack_start_pos - loc.offset if stack_start_pos - loc.offset < VocabEntry.MAX_STACK_SIZE else 2
-            tgt_var_src_mems.append(types_model.encode_memory((src_var.typ.size,) + src_var.typ.start_offsets()))
+            tgt_var_src_mems.append([var_loc_in_func(loc)] + types_model.encode_memory((src_var.typ.size,) + src_var.typ.start_offsets()))
             tgt_names.append(tgt_var.name)
 
         setattr(example, "src_var_names", src_var_names)
