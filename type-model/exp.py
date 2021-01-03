@@ -80,13 +80,22 @@ def train(args):
         auto_select_gpus=True,
         gradient_clip_val=1,
         callbacks=[EarlyStopping(monitor="val_retype_acc" if config["data"]["retype"] else "val_rename_acc", mode="max", patience=config["train"]["patience"])],
+        check_val_every_n_epoch=10,
         progress_bar_refresh_rate=20,
         resume_from_checkpoint=resume_from_checkpoint
     )
     if args["--eval-ckpt"]:
         # HACK: necessary to make pl test work for IterableDataset
         Dataset.__len__ = lambda self: 10000
-        trainer.test(model, test_dataloaders=val_loader, ckpt_path=args["--eval-ckpt"])
+        test_set = Dataset(config["data"]["test_file"], config["data"])
+        test_loader = DataLoader(
+            test_set,
+            batch_size=config["test"]["batch_size"],
+            collate_fn=Dataset.collate_fn,
+            num_workers=8,
+            pin_memory=True,
+        )
+        trainer.test(model, test_dataloaders=test_loader, ckpt_path=args["--eval-ckpt"])
     else:
         trainer.fit(model, train_loader, val_loader)
 

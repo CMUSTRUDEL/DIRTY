@@ -7,6 +7,26 @@ from torch.nn.modules import activation
 from utils import util
 from utils.vocab import Vocab
 from utils.dire_types import TypeLibCodec
+from .beam import Beam
+
+
+def tile(x, count, dim=0):
+    """
+    Tiles x on dimension dim count times.
+    """
+    perm = list(range(len(x.size())))
+    if dim != 0:
+        perm[0], perm[dim] = perm[dim], perm[0]
+        x = x.permute(perm).contiguous()
+    out_size = list(x.size())
+    out_size[0] *= count
+    x = x.repeat(count, *(1,) * x.dim()) \
+         .transpose(0, 1) \
+         .contiguous() \
+         .view(*out_size)
+    if dim != 0:
+        x = x.permute(perm).contiguous()
+    return x
 
 
 class XfmrDecoder(nn.Module):
@@ -125,6 +145,18 @@ class XfmrDecoder(nn.Module):
         context_encoding: Dict[str, torch.Tensor],
         input_dict: Dict[str, torch.Tensor],
         variable_type_logits: torch.Tensor,
+        beam_size: int = 0,
+    ):
+        if beam_size == 0:
+            return self.greedy_decode(context_encoding, input_dict, variable_type_logits)
+        else:
+            return self.beam_decode(context_encoding, input_dict, variable_type_logits, beam_size)
+
+    def greedy_decode(
+        self,
+        context_encoding: Dict[str, torch.Tensor],
+        input_dict: Dict[str, torch.Tensor],
+        variable_type_logits: torch.Tensor,
     ):
         """Greedy decoding"""
 
@@ -190,6 +222,99 @@ class XfmrDecoder(nn.Module):
                 tgt = torch.cat([tgt, tgt_step], dim=1)
         preds = torch.stack(preds_list).transpose(0, 1)
         return preds[input_dict["target_mask"]]
+
+    def beam_decode(
+        self,
+        context_encoding: Dict[str, torch.Tensor],
+        input_dict: Dict[str, torch.Tensor],
+        variable_type_logits: torch.Tensor,
+        beam_size: int = 5,
+        length_norm: bool = True
+    ):
+        """Beam search decoding"""
+
+        batch_size, max_time_step, _ = context_encoding["variable_encoding"].shape
+        tgt = torch.zeros(batch_size, 1, self.config["target_embedding_size"]).to(
+            context_encoding["variable_encoding"].device
+        )
+        tgt = self.target_transform(
+            torch.cat([context_encoding["variable_encoding"][:, :1], tgt], dim=-1)
+        )
+        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step, tgt.device)
+        if self.mem_mask == "soft":
+            mem_encoding = self.mem_encoder(input_dict)
+            mem_logits = self.mem_decoder(mem_encoding, target_dict=None)
+            mem_logits_list = []
+            idx = 0
+            for b in range(batch_size):
+                nvar = input_dict["target_mask"][b].sum().item()
+                mem_logits_list.append(mem_logits[idx: idx + nvar])
+                idx += nvar
+            assert idx == mem_logits.shape[0]
+
+        beams = [Beam(beam_size,
+                     n_best=1,
+                     cuda=tgt.device.type == "cuda",
+                     length_norm=length_norm) for _ in range(batch_size)]
+
+        # Tensor shapes
+        # tgt: batch, time, hidden
+        # context_encoding["code_token_encoding"]: batch, len, hidden
+        # input_dict["target_mask"]: batch, max_time
+        # tgt_mask: max_time, max_time
+        # context_encoding["code_token_mask"]: batch, len
+        # context_encoding["variable_encoding"]: batch, max_time, hidden
+
+        tgt = tile(tgt, beam_size, dim=0)
+        target_mask = tile(input_dict["target_mask"], beam_size, dim=0)
+        code_token_encoding = tile(context_encoding["code_token_encoding"], beam_size, dim=0)
+        code_token_mask = tile(context_encoding["code_token_mask"], beam_size, dim=0)
+        variable_encoding = tile(context_encoding["variable_encoding"], beam_size, dim=0)
+        
+        for idx in range(max_time_step):
+            hidden = self.decoder(
+                tgt.transpose(0, 1),
+                memory=code_token_encoding.transpose(0, 1),
+                tgt_mask=tgt_mask[: idx + 1, : idx + 1],
+                tgt_key_padding_mask=~target_mask[:, : idx + 1],
+                memory_key_padding_mask=~code_token_mask,
+            ).transpose(0, 1)
+            # Save logits for the current step
+            logits = self.output(hidden[:, -1:])
+            scores = logits[:, 0].view(batch_size, beam_size, -1)
+            select_indices_array = []
+            for b, bm in enumerate(beams):
+                if not input_dict["target_mask"][b, idx]:
+                    select_indices_array.append(torch.arange(beam_size).to(tgt.device) + b * beam_size)
+                    continue
+                if self.mem_mask == "soft" and input_dict["target_mask"][b, idx]:
+                    scores[b] += mem_logits_list[b][idx]
+                bm.advance(torch.log_softmax(scores[b], dim=1))
+                select_indices_array.append(bm.getCurrentOrigin() + b * beam_size)
+            select_indices = torch.cat(select_indices_array)
+            tgt = tgt[select_indices]
+            pred_step = torch.stack([bm.getCurrentState()
+                                     if input_dict["target_mask"][b, idx] else torch.zeros(beam_size, dtype=torch.long).to(tgt.device)
+                                     for b, bm in enumerate(beams)]).view(-1)
+            # Update tgt for next step with prediction at the current step
+            if idx < max_time_step - 1:
+                tgt_step = torch.cat(
+                    [variable_encoding[:, idx + 1 : idx + 2], self.target_embedding(pred_step.unsqueeze(dim=1))],
+                    dim=-1,
+                )
+                tgt_step = self.target_transform(tgt_step)
+                tgt = torch.cat([tgt, tgt_step], dim=1)
+
+        all_hyps, all_scores = [], []
+        for j in range(batch_size):
+            b = beams[j]
+            scores, ks = b.sortFinished(minimum=beam_size)
+            times, k = ks[0]
+            hyp = b.getHyp(times, k)
+            all_hyps.append(torch.tensor(hyp))
+            all_scores.append(scores[0])
+
+        return torch.cat(all_hyps)
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int, device: torch.device) -> torch.Tensor:
@@ -300,6 +425,18 @@ class XfmrInterleaveDecoder(XfmrDecoder):
         context_encoding: Dict[str, torch.Tensor],
         input_dict: Dict[str, torch.Tensor],
         variable_type_logits: torch.Tensor,
+        beam_size: int = 0,
+    ):
+        if beam_size == 0:
+            return self.greedy_decode(context_encoding, input_dict, variable_type_logits)
+        else:
+            return self.beam_decode(context_encoding, input_dict, variable_type_logits, beam_size)
+
+    def greedy_decode(
+        self,
+        context_encoding: Dict[str, torch.Tensor],
+        input_dict: Dict[str, torch.Tensor],
+        variable_type_logits: torch.Tensor,
     ):
         """Greedy decoding"""
 
@@ -376,3 +513,104 @@ class XfmrInterleaveDecoder(XfmrDecoder):
         type_preds = torch.stack(type_preds_list).transpose(0, 1)
         name_preds = torch.stack(name_preds_list).transpose(0, 1)
         return type_preds[input_dict["target_mask"]], name_preds[input_dict["target_mask"]]
+
+    def beam_decode(
+        self,
+        context_encoding: Dict[str, torch.Tensor],
+        input_dict: Dict[str, torch.Tensor],
+        variable_type_logits: torch.Tensor,
+        beam_size: int = 5,
+        length_norm: bool = True
+    ):
+        """Beam search decoding"""
+
+        variable_encoding = XfmrInterleaveDecoder.interleave_3d(context_encoding["variable_encoding"], context_encoding["variable_encoding"])
+        tgt_padding_mask = XfmrInterleaveDecoder.interleave_2d(input_dict["target_mask"], input_dict["target_mask"])
+        batch_size, max_time_step, _ = variable_encoding.shape
+        tgt = torch.zeros(batch_size, 1, self.config["target_embedding_size"]).to(
+            variable_encoding.device
+        )
+        tgt = self.target_transform(
+            torch.cat([variable_encoding[:, :1], tgt], dim=-1)
+        )
+        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step, tgt.device)
+        if self.mem_mask == "soft":
+            mem_encoding = self.mem_encoder(input_dict)
+            mem_logits = self.mem_decoder(mem_encoding, target_dict=None)
+            mem_logits_list = []
+            idx = 0
+            for b in range(batch_size):
+                nvar = input_dict["target_mask"][b].sum().item()
+                mem_logits_list.append(mem_logits[idx: idx + nvar])
+                idx += nvar
+            assert idx == mem_logits.shape[0]
+
+        beams = [Beam(beam_size,
+                     n_best=1,
+                     cuda=tgt.device.type == "cuda",
+                     length_norm=length_norm) for _ in range(batch_size)]
+
+        # Tensor shapes
+        # tgt: batch, time, hidden
+        # context_encoding["code_token_encoding"]: batch, len, hidden
+        # input_dict["target_mask"]: batch, max_time
+        # tgt_mask: max_time, max_time
+        # context_encoding["code_token_mask"]: batch, len
+        # context_encoding["variable_encoding"]: batch, max_time, hidden
+
+        tgt = tile(tgt, beam_size, dim=0)
+        tiled_target_mask = tile(tgt_padding_mask, beam_size, dim=0)
+        code_token_encoding = tile(context_encoding["code_token_encoding"], beam_size, dim=0)
+        code_token_mask = tile(context_encoding["code_token_mask"], beam_size, dim=0)
+        variable_encoding = tile(variable_encoding, beam_size, dim=0)
+        
+        for idx in range(max_time_step):
+            hidden = self.decoder(
+                tgt.transpose(0, 1),
+                memory=code_token_encoding.transpose(0, 1),
+                tgt_mask=tgt_mask[: idx + 1, : idx + 1],
+                tgt_key_padding_mask=~tiled_target_mask [:, : idx + 1],
+                memory_key_padding_mask=~code_token_mask,
+            ).transpose(0, 1)
+            # Save logits for the current step
+            logits = self.output(hidden[:, -1:])
+            scores = logits[:, 0].view(batch_size, beam_size, -1)
+            select_indices_array = []
+            for b, bm in enumerate(beams):
+                if not tgt_padding_mask[b, idx]:
+                    select_indices_array.append(torch.arange(beam_size).to(tgt.device) + b * beam_size)
+                    continue
+                if idx % 2 == 0:
+                    s = scores[b, :, :self.retype_vocab_size]
+                    if self.mem_mask == "soft" and tgt_padding_mask[b, idx]:
+                        s += mem_logits_list[b][idx // 2]
+                else:
+                    s = scores[b, :, self.retype_vocab_size:]
+                bm.advance(torch.log_softmax(s, dim=1))
+                select_indices_array.append(bm.getCurrentOrigin() + b * beam_size)
+            select_indices = torch.cat(select_indices_array)
+            tgt = tgt[select_indices]
+            pred_step = torch.stack([bm.getCurrentState()
+                                     if tgt_padding_mask[b, idx] else torch.zeros(beam_size, dtype=torch.long).to(tgt.device)
+                                     for b, bm in enumerate(beams)]).view(-1)
+            # Update tgt for next step with prediction at the current step
+            if idx < max_time_step - 1:
+                tgt_step = torch.cat(
+                    [variable_encoding[:, idx + 1 : idx + 2], self.target_embedding((pred_step if idx % 2 == 0 else pred_step + self.retype_vocab_size).unsqueeze(dim=1))],
+                    dim=-1,
+                )
+                tgt_step = self.target_transform(tgt_step)
+                tgt = torch.cat([tgt, tgt_step], dim=1)
+
+        all_type_hyps, all_name_hyps, all_scores = [], [], []
+        for j in range(batch_size):
+            b = beams[j]
+            scores, ks = b.sortFinished(minimum=beam_size)
+            times, k = ks[0]
+            hyp = b.getHyp(times, k)
+            hyp = torch.tensor(hyp).view(-1, 2).t()
+            all_type_hyps.append(hyp[0])
+            all_name_hyps.append(hyp[1])
+            all_scores.append(scores[0])
+
+        return torch.cat(all_type_hyps), torch.cat(all_name_hyps)

@@ -19,6 +19,7 @@ class RenamingDecodeModule(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.decoder = Decoder.build({**config["decoder"], "rename": True})
+        self.beam_size = config["test"]["beam_size"]
 
     def training_step(self, input_dict, context_encoding, target_dict):
         variable_name_logits = self.decoder(context_encoding, target_dict)
@@ -40,7 +41,7 @@ class RenamingDecodeModule(pl.LightningModule):
         )
         loss = loss[input_dict["target_mask"]]
         targets = target_dict["target_name_id"][input_dict["target_mask"]].detach().cpu()
-        preds = self.decoder.predict(context_encoding, input_dict, None).detach().cpu()
+        preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size).detach().cpu()
 
         return dict(
             rename_loss=loss.detach().cpu(),
@@ -59,6 +60,7 @@ class RetypingDecodeModule(pl.LightningModule):
             self.mem_decoder = Decoder.build(config["mem_decoder"])
             self.decoder.mem_encoder = self.mem_encoder
             self.decoder.mem_decoder = self.mem_decoder
+        self.beam_size = config["test"]["beam_size"]
             
     def training_step(self, input_dict, context_encoding, target_dict):
         variable_type_logits = self.decoder(context_encoding, target_dict)
@@ -102,7 +104,7 @@ class RetypingDecodeModule(pl.LightningModule):
             )
             loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
         targets = target_dict["target_type_id"][input_dict["target_mask"]].detach().cpu()
-        preds = self.decoder.predict(context_encoding, input_dict, None).detach().cpu()
+        preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size).detach().cpu()
 
         return dict(
             retype_loss=loss.detach().cpu(),
@@ -116,6 +118,7 @@ class InterleaveDecodeModule(pl.LightningModule):
         super().__init__()
         self.decoder = Decoder.build({**config["decoder"]})
         self.soft_mem_mask = config["decoder"]["mem_mask"] == "soft"
+        self.beam_size = config["test"]["beam_size"]
         if self.soft_mem_mask:
             self.mem_encoder = Encoder.build(config["mem_encoder"])
             self.mem_decoder = Decoder.build(config["mem_decoder"])
@@ -178,7 +181,7 @@ class InterleaveDecodeModule(pl.LightningModule):
             reduction='none',
         )
         rename_loss = rename_loss[input_dict["target_mask"]]
-        ret = self.decoder.predict(context_encoding, input_dict, None)
+        ret = self.decoder.predict(context_encoding, input_dict, None, self.beam_size)
         retype_preds, rename_preds = ret[0].detach().cpu(), ret[1].detach().cpu()
 
         return dict(
