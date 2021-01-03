@@ -306,6 +306,14 @@ class TypeReconstructionModel(pl.LightningModule):
             indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_epoch_end_task(outputs, prefix, "retype")
         if self.rename:
             indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_epoch_end_task(outputs, prefix, "rename")
+        if self.retype and self.rename:
+            # Evaluate rename accuracy on correctedly retyped samples
+            retype_preds = torch.cat([x[f"retype_preds"] for x in outputs])
+            retype_targets = torch.cat([x[f"retype_targets"] for x in outputs])
+            rename_preds = torch.cat([x[f"rename_preds"] for x in outputs])
+            rename_targets = torch.cat([x[f"rename_targets"] for x in outputs])
+            self.log(f"{prefix}_rename_on_correct_retype_acc", accuracy(rename_preds[retype_preds == retype_targets], rename_targets[retype_preds == retype_targets]))
+
         return indexes, tgt_var_names, preds, targets, body_in_train_mask
 
     def _shared_epoch_end_task(self, outputs, prefix, task):
