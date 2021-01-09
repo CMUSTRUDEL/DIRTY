@@ -37,7 +37,7 @@ class TransformerModel(nn.Module):
         self.model_type = "Transformer"
         self.pos_encoder = PositionalEncoding(ninp, dropout)
         encoder_layers = TransformerEncoderLayer(
-            nhid, nhead, nhid, dropout, activation="gelu"
+            nhid, nhead, 4 * nhid, dropout, activation="gelu"
         )
         self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
         self.ninp = ninp
@@ -73,7 +73,7 @@ class XfmrSequentialEncoder(Encoder):
         dropout = config["dropout"]
         self.encoder = TransformerModel(
             self.src_word_embed.embedding_dim,
-            1,
+            config["num_heads"],
             config["hidden_size"],
             config["num_layers"],
             dropout=dropout,
@@ -93,6 +93,7 @@ class XfmrSequentialEncoder(Encoder):
             "source_embedding_size": 256,
             "hidden_size": 256,
             "num_layers": 2,
+            "num_heads": 1,
         }
 
     @classmethod
@@ -136,7 +137,7 @@ class XfmrSequentialEncoder(Encoder):
             code_token_encoding * variable_mention_mask.unsqueeze(-1)
         )
         variable_encoding = torch.zeros(
-            tensor_dict["batch_size"], variable_num, encoding_size, device=self.device
+            tensor_dict["src_code_tokens"].size(0), variable_num, encoding_size, device=self.device
         )
         variable_encoding.scatter_add_(
             1,

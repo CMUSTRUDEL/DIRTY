@@ -62,7 +62,7 @@ class XfmrMemEncoder(Encoder):
         dropout = config["dropout"]
         self.encoder = TransformerModel(
             self.src_word_embed.embedding_dim,
-            1,
+            config["num_heads"],
             config["hidden_size"],
             config["num_layers"],
             dropout=dropout,
@@ -81,6 +81,7 @@ class XfmrMemEncoder(Encoder):
             "source_embedding_size": 256,
             "hidden_size": 256,
             "num_layers": 2,
+            "num_heads": 1,
         }
 
     @classmethod
@@ -100,7 +101,7 @@ class XfmrMemEncoder(Encoder):
         :rtype: Dict[str, torch.Tensor]
         """
         mem_encoding, mem_mask = self.encode_sequence(
-            tensor_dict["target_type_src_mems"]
+            tensor_dict["target_type_src_mems"][tensor_dict["target_mask"]]
         )
 
         # TODO: ignore the padding when averaging

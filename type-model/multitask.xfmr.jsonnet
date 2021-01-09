@@ -13,11 +13,12 @@
   },
   "encoder":{
     "type": "XfmrSequentialEncoder",
-    "source_embedding_size": 256,
-    "hidden_size": 256,
+    "source_embedding_size": 512,
+    "hidden_size": 512,
     "vocab_file": $['data'].vocab_file,
     "dropout": 0.1,
-    "num_layers": 2,
+    "num_layers": 6,
+    "num_heads": 8,
   },
   "decoder": {
     "type": if $['data'].interleave then 'XfmrInterleaveDecoder' else 'XfmrDecoder',
@@ -26,16 +27,18 @@
     "target_embedding_size": $['encoder'].source_embedding_size,
     "hidden_size": $['encoder'].hidden_size,
     "dropout": 0.1,
-    "num_layers": 2,
+    "num_layers": $['encoder'].num_layers,
+    "num_heads": $['encoder'].num_heads,
     "mem_mask": "soft",
   },
   "mem_encoder":{
     "type": "XfmrMemEncoder",
-    "source_embedding_size": 128,
-    "hidden_size": 128,
+    "source_embedding_size": 256,
+    "hidden_size": 256,
     "vocab_file": $['data'].vocab_file,
     "dropout": 0.1,
-    "num_layers": 2,
+    "num_layers": 3,
+    "num_heads": 1,
   },
   "mem_decoder": {
     "type": 'SimpleDecoder',
@@ -43,13 +46,14 @@
     "hidden_size": $['mem_encoder'].hidden_size,
   },
   "train": {
-    "batch_size": 64,
-    "max_epoch": 100,
-    "lr": 1e-3,
-    "patience": 30,
+    "batch_size": 8,
+    "grad_accum_step": 8,
+    "max_epoch": 10,
+    "lr": 1e-4,
+    "patience": 10,
   },
   "test": {
-    "batch_size": 64,
+    "batch_size": 8,
     "beam_size": 5,
   }
 }

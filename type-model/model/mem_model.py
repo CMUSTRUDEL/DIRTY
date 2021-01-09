@@ -1,13 +1,9 @@
-import os
 from typing import Dict, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from pytorch_lightning.metrics.functional import accuracy
-from torch import nn
-from torchvision import transforms
-from utils.vocab import Vocab
 
 from model.encoder import Encoder
 from model.decoder import Decoder

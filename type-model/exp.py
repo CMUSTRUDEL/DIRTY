@@ -80,8 +80,9 @@ def train(args):
         auto_select_gpus=True,
         gradient_clip_val=1,
         callbacks=[EarlyStopping(monitor="val_retype_acc" if config["data"]["retype"] else "val_rename_acc", mode="max", patience=config["train"]["patience"])],
-        check_val_every_n_epoch=10,
-        progress_bar_refresh_rate=20,
+        check_val_every_n_epoch=1,
+        progress_bar_refresh_rate=10,
+        accumulate_grad_batches=config["train"]["grad_accum_step"],
         resume_from_checkpoint=resume_from_checkpoint
     )
     if args["--eval-ckpt"]:

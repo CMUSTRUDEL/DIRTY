@@ -6,8 +6,6 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from pytorch_lightning.metrics.functional import accuracy
-from torch import nn
-from torchvision import transforms
 from utils.vocab import Vocab
 from utils.dire_types import TypeInfo, TypeLibCodec
 
@@ -40,11 +38,11 @@ class RenamingDecodeModule(pl.LightningModule):
             reduction='none',
         )
         loss = loss[input_dict["target_mask"]]
-        targets = target_dict["target_name_id"][input_dict["target_mask"]].detach().cpu()
+        targets = target_dict["target_name_id"][input_dict["target_mask"]]
         preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
 
         return dict(
-            rename_loss=loss.detach().cpu(),
+            rename_loss=loss,
             rename_preds=preds,
             rename_targets=targets
         )
@@ -103,11 +101,11 @@ class RetypingDecodeModule(pl.LightningModule):
                 reduction='none',
             )
             loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
-        targets = target_dict["target_type_id"][input_dict["target_mask"]].detach().cpu()
+        targets = target_dict["target_type_id"][input_dict["target_mask"]]
         preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
 
         return dict(
-            retype_loss=loss.detach().cpu(),
+            retype_loss=loss,
             retype_preds=preds,
             retype_targets=targets,
         )
@@ -182,14 +180,14 @@ class InterleaveDecodeModule(pl.LightningModule):
         )
         rename_loss = rename_loss[input_dict["target_mask"]]
         ret = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
-        retype_preds, rename_preds = ret[0].detach().cpu(), ret[1].detach().cpu()
+        retype_preds, rename_preds = ret[0], ret[1]
 
         return dict(
-            retype_loss=retype_loss.detach().cpu(),
-            retype_targets=target_dict["target_type_id"][input_dict["target_mask"]].detach().cpu(),
+            retype_loss=retype_loss,
+            retype_targets=target_dict["target_type_id"][input_dict["target_mask"]],
             retype_preds=retype_preds,
-            rename_loss=rename_loss.detach().cpu(),
-            rename_targets=target_dict["target_name_id"][input_dict["target_mask"]].detach().cpu(),
+            rename_loss=rename_loss,
+            rename_targets=target_dict["target_name_id"][input_dict["target_mask"]],
             rename_preds=rename_preds,
         )
 
@@ -279,7 +277,7 @@ class TypeReconstructionModel(pl.LightningModule):
 
         return dict(
             **ret_dict,
-            targets_nums=input_dict["target_mask"].sum(dim=1).detach().cpu(),
+            targets_nums=input_dict["target_mask"].sum(dim=1),
             test_meta=target_dict["test_meta"],
             index=input_dict["index"],
             tgt_var_names=target_dict["tgt_var_names"]
@@ -339,6 +337,10 @@ class TypeReconstructionModel(pl.LightningModule):
             num_funcs += len(target_num)
         body_in_train_mask = torch.tensor(body_in_train_mask)
         name_in_train_mask = torch.tensor(name_in_train_mask)
+        if body_in_train_mask.dim() > 1:
+            # HACK for data parallel
+            body_in_train_mask = body_in_train_mask[:, 0]
+            name_in_train_mask = name_in_train_mask[:, 0]
         self.log(f"{prefix}_{task}_body_in_train_acc", accuracy(preds[body_in_train_mask], targets[body_in_train_mask]))
         self.log(f"{prefix}_{task}_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
         assert pos == sum(x["targets_nums"].sum() for x in outputs), (pos, sum(x["targets_nums"].sum() for x in outputs))

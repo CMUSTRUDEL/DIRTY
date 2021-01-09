@@ -51,8 +51,8 @@ class XfmrDecoder(nn.Module):
         # concat variable encoding and previous target token embedding as input
         decoder_layer = TransformerDecoderLayer(
             config["hidden_size"],
-            1,
-            config["hidden_size"],
+            config["num_heads"],
+            4 * config["hidden_size"],
             config["dropout"],
             activation="gelu",
         )
@@ -74,6 +74,7 @@ class XfmrDecoder(nn.Module):
             "target_embedding_size": 256,
             "hidden_size": 256,
             "num_layers": 2,
+            "num_heads": 1,
             "mem_mask": "none",
         }
 
