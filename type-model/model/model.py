@@ -31,7 +31,7 @@ class RenamingDecodeModule(pl.LightningModule):
         )
         return loss[target_dict["target_mask"]].mean()
 
-    def shared_eval_step(self, context_encoding, input_dict, target_dict):
+    def shared_eval_step(self, context_encoding, input_dict, target_dict, test=False):
         variable_name_logits = self.decoder(context_encoding, target_dict)
         loss = F.cross_entropy(
             # cross_entropy requires num_classes at the second dimension
@@ -41,7 +41,7 @@ class RenamingDecodeModule(pl.LightningModule):
         )
         loss = loss[input_dict["target_mask"]]
         targets = target_dict["target_name_id"][input_dict["target_mask"]].detach().cpu()
-        preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size).detach().cpu()
+        preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
 
         return dict(
             rename_loss=loss.detach().cpu(),
@@ -83,7 +83,7 @@ class RetypingDecodeModule(pl.LightningModule):
 
         return loss.mean()
 
-    def shared_eval_step(self, context_encoding, input_dict, target_dict):
+    def shared_eval_step(self, context_encoding, input_dict, target_dict, test=False):
         variable_type_logits = self.decoder(context_encoding, target_dict)
         if self.soft_mem_mask:
             variable_type_logits = variable_type_logits[input_dict["target_mask"]]
@@ -104,7 +104,7 @@ class RetypingDecodeModule(pl.LightningModule):
             )
             loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
         targets = target_dict["target_type_id"][input_dict["target_mask"]].detach().cpu()
-        preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size).detach().cpu()
+        preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
 
         return dict(
             retype_loss=loss.detach().cpu(),
@@ -156,7 +156,7 @@ class InterleaveDecodeModule(pl.LightningModule):
 
         return retype_loss, rename_loss
 
-    def shared_eval_step(self, context_encoding, input_dict, target_dict):
+    def shared_eval_step(self, context_encoding, input_dict, target_dict, test=False):
         variable_type_logits, variable_name_logits = self.decoder(context_encoding, target_dict)
         if self.soft_mem_mask:
             variable_type_logits = variable_type_logits[input_dict["target_mask"]]
@@ -181,7 +181,7 @@ class InterleaveDecodeModule(pl.LightningModule):
             reduction='none',
         )
         rename_loss = rename_loss[input_dict["target_mask"]]
-        ret = self.decoder.predict(context_encoding, input_dict, None, self.beam_size)
+        ret = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
         retype_preds, rename_preds = ret[0].detach().cpu(), ret[1].detach().cpu()
 
         return dict(
@@ -256,24 +256,25 @@ class TypeReconstructionModel(pl.LightningModule):
         return self._shared_eval_step(batch, batch_idx)
 
     def test_step(self, batch, batch_idx):
-        return self._shared_eval_step(batch, batch_idx)
+        return self._shared_eval_step(batch, batch_idx, test=True)
 
     def _shared_eval_step(
         self,
         batch: Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, torch.Tensor]],
         batch_idx,
+        test=False,
     ):
         input_dict, target_dict = batch
         context_encoding = self.encoder(input_dict)
         ret_dict = {}
         if self.interleave:
-            ret_dict = self.interleave_module.shared_eval_step(context_encoding, input_dict, target_dict)
+            ret_dict = self.interleave_module.shared_eval_step(context_encoding, input_dict, target_dict, test)
         else:
             if self.retype:
-                ret = self.retyping_module.shared_eval_step(context_encoding, input_dict, target_dict)
+                ret = self.retyping_module.shared_eval_step(context_encoding, input_dict, target_dict, test)
                 ret_dict = {**ret, **ret_dict}
             if self.rename:
-                ret = self.renaming_module.shared_eval_step(context_encoding, input_dict, target_dict)
+                ret = self.renaming_module.shared_eval_step(context_encoding, input_dict, target_dict, test)
                 ret_dict = {**ret, **ret_dict}
 
         return dict(
