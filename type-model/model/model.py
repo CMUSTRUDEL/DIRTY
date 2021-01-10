@@ -312,7 +312,8 @@ class TypeReconstructionModel(pl.LightningModule):
             retype_targets = torch.cat([x[f"retype_targets"] for x in outputs])
             rename_preds = torch.cat([x[f"rename_preds"] for x in outputs])
             rename_targets = torch.cat([x[f"rename_targets"] for x in outputs])
-            self.log(f"{prefix}_rename_on_correct_retype_acc", accuracy(rename_preds[retype_preds == retype_targets], rename_targets[retype_preds == retype_targets]))
+            if (retype_preds == retype_targets).sum() > 0:
+                self.log(f"{prefix}_rename_on_correct_retype_acc", accuracy(rename_preds[retype_preds == retype_targets], rename_targets[retype_preds == retype_targets]))
 
         return final_ret
 
@@ -343,7 +344,8 @@ class TypeReconstructionModel(pl.LightningModule):
             body_in_train_mask = body_in_train_mask[:, 0]
             name_in_train_mask = name_in_train_mask[:, 0]
         self.log(f"{prefix}_{task}_body_in_train_acc", accuracy(preds[body_in_train_mask], targets[body_in_train_mask]))
-        self.log(f"{prefix}_{task}_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
+        if (~body_in_train_mask).sum() > 0:
+            self.log(f"{prefix}_{task}_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
         assert pos == sum(x["targets_nums"].sum() for x in outputs), (pos, sum(x["targets_nums"].sum() for x in outputs))
         self.log(f"{prefix}_{task}_func_acc", num_correct / num_funcs)
 
