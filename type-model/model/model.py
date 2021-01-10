@@ -287,24 +287,25 @@ class TypeReconstructionModel(pl.LightningModule):
         self._shared_epoch_end(outputs, "val")
 
     def test_epoch_end(self, outputs):
-        indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_epoch_end(outputs, "test")
-        return 
-        raise NotImplementedError
+        final_ret = self._shared_epoch_end(outputs, "test")
         if "pred_file" in self.config["test"]:
             results, refs = {}, {}
-            for (binary, func_name, decom_var_name), target_var_name, pred, target, body_in_train in zip(indexes, tgt_var_names, preds.tolist(), targets.tolist(), body_in_train_mask.tolist()):
-                results.setdefault(binary, {}).setdefault(func_name, []).append((decom_var_name, self.output_vocab.id2word[pred]))
-                refs.setdefault(binary, {}).setdefault(func_name, []).append((target_var_name, self.output_vocab.id2word[target], body_in_train))
+            for (binary, func_name, decom_var_name), target_var_name, retype_pred, retype_target, rename_pred, rename_target, body_in_train in zip(final_ret["indexes"], final_ret["tgt_var_names"], final_ret["retype_preds"].tolist(), final_ret["retype_targets"].tolist(), final_ret["rename_preds"].tolist(), final_ret["rename_targets"].tolist(), final_ret["body_in_train_mask"].tolist()):
+                results.setdefault(binary, {}).setdefault(func_name, []).append((decom_var_name, self.vocab.types.id2word[retype_pred], self.vocab.names.id2word[rename_pred]))
+                refs.setdefault(binary, {}).setdefault(func_name, []).append((target_var_name, self.vocab.types.id2word[retype_target], body_in_train))
             pred_file = self.config["test"]["pred_file"]
             ref_file = os.path.splitext(pred_file)[0] + "_ref.json"
             json.dump(results, open(pred_file, "w"))
             json.dump(refs, open(ref_file, "w"))
 
     def _shared_epoch_end(self, outputs, prefix):
+        final_ret = {}
         if self.retype:
-            indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_epoch_end_task(outputs, prefix, "retype")
+            ret = self._shared_epoch_end_task(outputs, prefix, "retype")
+            final_ret = {**final_ret, **ret}
         if self.rename:
-            indexes, tgt_var_names, preds, targets, body_in_train_mask = self._shared_epoch_end_task(outputs, prefix, "rename")
+            ret = self._shared_epoch_end_task(outputs, prefix, "rename")
+            final_ret = {**final_ret, **ret}
         if self.retype and self.rename:
             # Evaluate rename accuracy on correctedly retyped samples
             retype_preds = torch.cat([x[f"retype_preds"] for x in outputs])
@@ -313,7 +314,7 @@ class TypeReconstructionModel(pl.LightningModule):
             rename_targets = torch.cat([x[f"rename_targets"] for x in outputs])
             self.log(f"{prefix}_rename_on_correct_retype_acc", accuracy(rename_preds[retype_preds == retype_targets], rename_targets[retype_preds == retype_targets]))
 
-        return indexes, tgt_var_names, preds, targets, body_in_train_mask
+        return final_ret
 
     def _shared_epoch_end_task(self, outputs, prefix, task):
         indexes = sum([x["index"] for x in outputs], [])
@@ -359,7 +360,13 @@ class TypeReconstructionModel(pl.LightningModule):
             self.log(f"{prefix}{task_str}_body_in_train_struc_acc", accuracy(preds[struc_mask & body_in_train_mask], targets[struc_mask & body_in_train_mask]))
         if (~body_in_train_mask & struc_mask).sum() > 0:
             self.log(f"{prefix}{task_str}_body_not_in_train_struc_acc", accuracy(preds[~body_in_train_mask & struc_mask], targets[~body_in_train_mask & struc_mask]))
-        return indexes, tgt_var_names, preds, targets, body_in_train_mask
+        return {
+            "indexes": indexes,
+            "tgt_var_names": tgt_var_names,
+            f"{task}_preds": preds,
+            f"{task}_targets": preds,
+            "body_in_train_mask": body_in_train_mask,
+        }
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.config["train"]["lr"])

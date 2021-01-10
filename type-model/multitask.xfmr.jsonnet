@@ -53,6 +53,7 @@
     "patience": 10,
   },
   "test": {
+    "pred_file": "pred_mt.json",
     "batch_size": 8,
     "beam_size": 5,
   }
