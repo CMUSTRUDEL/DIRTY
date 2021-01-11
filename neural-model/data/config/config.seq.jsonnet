@@ -1,8 +1,8 @@
 {
   "data": {
-    "train_file": "data/preprocessed_data/train-shard-*.tar",
-    "dev_file": "data/preprocessed_data/dev.tar",
-    "vocab_file": "data/vocab.bpe10000/vocab",
+    "train_file": "data1/train-shard-*.tar",
+    "dev_file": "data1/dev-*.tar",
+    "vocab_file": "data/vocab.bpe10000",
   },
   "encoder":{
     "type": "SequentialEncoder",
@@ -19,7 +19,9 @@
     "context_encoding_size": $['encoder'].source_encoding_size,
     "vocab_file": $['data'].vocab_file,
     "hidden_size": 256,
-    "attention_target": "terminal_nodes"
+    "attention_target": "terminal_nodes",
+    "input_feed": false,
+    "tie_embedding": true
   },
   "train": {
     "batch_size": 70000,
@@ -29,6 +31,7 @@
     "unchanged_variable_weight": 0.1,
     "evaluate_every_nepoch": 5,
     "num_readers": 5,
-    "num_batchers": 5
+    "num_batchers": 5,
+    "max_epoch": 200
   }
 }

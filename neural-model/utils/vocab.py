@@ -261,13 +261,13 @@ if __name__ == '__main__':
         for name in identifier_names:
             f.write(name + '\n')
 
-    print('train subtoken model for obj names')
-    # train subtoken models
-    spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id={PAD_ID} --bos_id=1 --eos_id=2 --unk_id=3 '
-                                   f'--control_symbols=<IDENTITY> --vocab_size={vocab_size} '
-                                   f'--model_prefix={vocab_file}.obj_name --model_type=bpe '
-                                   f'--input={id_names_file}')
-    obj_name_vocab_entry = VocabEntry(vocab_file + '.obj_name.model')
+    # print('train subtoken model for obj names')
+    # # train subtoken models
+    # spm.SentencePieceTrainer.Train(f'--add_dummy_prefix=false --pad_id={PAD_ID} --bos_id=1 --eos_id=2 --unk_id=3 '
+    #                                f'--control_symbols=<IDENTITY> --vocab_size={vocab_size} '
+    #                                f'--model_prefix={vocab_file}.obj_name --model_type=bpe '
+    #                                f'--input={id_names_file}')
+    # obj_name_vocab_entry = VocabEntry(vocab_file + '.obj_name.model')
 
     type_vocab = Counter(type_tokens)
     num_types = 100
@@ -286,7 +286,7 @@ if __name__ == '__main__':
     vocab = Vocab(source=src_var_vocab_entry,
                   source_tokens=src_code_tokens_vocab_entry,
                   target=tgt_var_vocab_entry,
-                  obj_name=obj_name_vocab_entry,
+                #   obj_name=obj_name_vocab_entry,
                   grammar=grammar)
 
     vocab.save(args['VOCAB_FILE'])

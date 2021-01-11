@@ -214,9 +214,19 @@ class AbstractSyntaxTree(object):
 
     @classmethod
     def from_json_dict(cls, json_dict: Dict) -> 'AbstractSyntaxTree':
-        root = SyntaxNode.from_json_dict(json_dict['ast'])
-        root.name = json_dict['function']
-        tree = cls(root, compilation_unit=json_dict['function'], code=json_dict['raw_code'] if 'raw_code' in json_dict else None)
+        root = SyntaxNode(node_id=0, node_type="block")
+        root.name = json_dict['name']
+        tree = cls(root, compilation_unit=json_dict['name'], code=json_dict['raw_code'] if 'raw_code' in json_dict else None)
+        tree.id_to_node[0] = root
+        tree.variable_nodes = []
+        tree.variables = OrderedDict()
+        for idx, loc in enumerate(json_dict["source"].keys()):
+            node = SyntaxNode(node_id=idx, node_type="var")
+            node.old_name = json_dict["source"][loc]["n"]
+            node.new_name = json_dict["target"][loc]["n"]
+            tree.id_to_node[idx] = node
+            tree.variable_nodes.append(node)
+            tree.variables.setdefault(node.old_name, []).append(node)
 
         return tree
 

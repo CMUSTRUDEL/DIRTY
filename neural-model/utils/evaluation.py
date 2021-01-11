@@ -1,3 +1,5 @@
+import json
+import time
 from typing import Dict, List, Any
 
 import numpy as np
@@ -14,7 +16,7 @@ class Evaluator(object):
     @staticmethod
     def get_soft_metrics(pred_name: str, gold_name: str) -> Dict:
         edit_distance = float(editdistance.eval(pred_name, gold_name))
-        cer = float(edit_distance / len(gold_name))
+        cer = float(edit_distance / (len(gold_name) + 1e-12))
         acc = float(pred_name == gold_name)
 
         return dict(edit_distance=edit_distance,
@@ -30,7 +32,7 @@ class Evaluator(object):
                 agg_results.setdefault(key, []).append(val)
 
         avg_results = dict()
-        avg_results['corpus_cer'] = sum(agg_results['edit_distance']) / sum(agg_results['ref_len'])
+        avg_results['corpus_cer'] = sum(agg_results['edit_distance']) / (sum(agg_results['ref_len']) + 1e-12)
 
         for key, val in agg_results.items():
             avg_results[key] = np.average(val)
@@ -66,7 +68,7 @@ class Evaluator(object):
                         cum_log_probs += log_prob
                         cum_num_examples += 1
 
-        ppl = np.exp(-cum_log_probs / cum_num_examples)
+        ppl = np.exp(-cum_log_probs / (cum_num_examples + 1e-12))
 
         if was_training:
             model.train()
@@ -97,17 +99,21 @@ class Evaluator(object):
 
         all_examples = dict()
 
+        results = {}
         with torch.no_grad():
             for batch in data_iter:
                 examples = batch.examples
                 rename_results = model.predict(examples)
                 for example, rename_result in zip(examples, rename_results):
                     example_pred_accs = []
+                    binary = example.binary_file['file_name'][:example.binary_file['file_name'].index("_")]
+                    func_name = example.ast.compilation_unit
 
                     top_rename_result = rename_result[0]
                     for old_name, gold_new_name in example.variable_name_map.items():
                         pred = top_rename_result[old_name]
                         pred_new_name = pred['new_name']
+                        results.setdefault(binary, {}).setdefault(func_name, []).append((old_name, "", pred_new_name))
                         var_metric = Evaluator.get_soft_metrics(pred_new_name, gold_new_name)
                         # is_correct = pred_new_name == gold_new_name
                         example_pred_accs.append(var_metric)
@@ -131,6 +137,8 @@ class Evaluator(object):
                     if return_results:
                         all_examples[example.binary_file['file_name'] + '_' + str(example.binary_file['line_num'])] = (rename_result, Evaluator.average(example_pred_accs))
                         # all_examples.append((example, rename_result, example_pred_accs))
+
+        json.dump(results, open(f"pred_dire_{time.strftime('%d%H%M')}.json", "w"))
 
         valid_example_num = len(example_acc_list)
         num_variables = len(variable_acc_list)
