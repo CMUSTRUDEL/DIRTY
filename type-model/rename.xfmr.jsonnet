@@ -28,7 +28,7 @@
     "dropout": 0.1,
     "num_layers": $['encoder'].num_layers,
     "num_heads": $['encoder'].num_heads,
-    "mem_mask": "none",
+    "mem_mask": "soft",
   },
   "mem_encoder":{
     "type": "XfmrMemEncoder",
@@ -43,6 +43,7 @@
     "type": 'SimpleDecoder',
     "vocab_file": $['data'].vocab_file,
     "hidden_size": $['mem_encoder'].hidden_size,
+    "rename": true,
   },
   "train": {
     "batch_size": 8,

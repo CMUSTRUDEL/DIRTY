@@ -17,27 +17,53 @@ class RenamingDecodeModule(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.decoder = Decoder.build({**config["decoder"], "rename": True})
+        self.soft_mem_mask = config["decoder"]["mem_mask"] == "soft"
+        if self.soft_mem_mask:
+            self.mem_encoder = Encoder.build(config["mem_encoder"])
+            self.mem_decoder = Decoder.build(config["mem_decoder"])
+            self.decoder.mem_encoder = self.mem_encoder
+            self.decoder.mem_decoder = self.mem_decoder
         self.beam_size = config["test"]["beam_size"]
 
     def training_step(self, input_dict, context_encoding, target_dict):
         variable_name_logits = self.decoder(context_encoding, target_dict)
-        loss = F.cross_entropy(
-            # cross_entropy requires num_classes at the second dimension
-            variable_name_logits.transpose(1, 2),
-            target_dict["target_name_id"],
-            reduction='none',
-        )
-        return loss[target_dict["target_mask"]].mean()
+        if self.soft_mem_mask:
+            variable_name_logits = variable_name_logits[target_dict["target_mask"]]
+            mem_encoding = self.mem_encoder(input_dict)
+            mem_logits = self.mem_decoder(mem_encoding, target_dict)
+            loss = F.cross_entropy(
+                variable_name_logits + mem_logits,
+                target_dict["target_name_id"][target_dict["target_mask"]],
+                reduction='none',
+            )
+        else:
+            loss = F.cross_entropy(
+                # cross_entropy requires num_classes at the second dimension
+                variable_name_logits.transpose(1, 2),
+                target_dict["target_name_id"],
+                reduction='none',
+            )
+            loss = loss[target_dict["target_mask"]]
+        return loss.mean()
 
     def shared_eval_step(self, context_encoding, input_dict, target_dict, test=False):
         variable_name_logits = self.decoder(context_encoding, target_dict)
-        loss = F.cross_entropy(
-            # cross_entropy requires num_classes at the second dimension
-            variable_name_logits.transpose(1, 2),
-            target_dict["target_name_id"],
-            reduction='none',
-        )
-        loss = loss[input_dict["target_mask"]]
+        if self.soft_mem_mask:
+            variable_name_logits = variable_name_logits[input_dict["target_mask"]]
+            mem_encoding = self.mem_encoder(input_dict)
+            mem_logits = self.mem_decoder(mem_encoding, target_dict)
+            loss = F.cross_entropy(
+                variable_name_logits + mem_logits,
+                target_dict["target_name_id"][input_dict["target_mask"]],
+                reduction='none',
+            )
+        else:
+            loss = F.cross_entropy(
+                variable_name_logits.transpose(1, 2),
+                target_dict["target_name_id"],
+                reduction='none',
+            )
+            loss = loss[input_dict["target_mask"]]
         targets = target_dict["target_name_id"][input_dict["target_mask"]]
         preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
 

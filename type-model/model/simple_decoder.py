@@ -12,7 +12,7 @@ class SimpleDecoder(nn.Module):
 
         self.vocab = vocab = Vocab.load(config["vocab_file"])
         self.output = nn.Linear(
-            config["hidden_size"], len(vocab.types), bias=True
+            config["hidden_size"], len(vocab.names) if config.get("rename", False) else len(vocab.types), bias=True
         )
         self.config: Dict = config
 
