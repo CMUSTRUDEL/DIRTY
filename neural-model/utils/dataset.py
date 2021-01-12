@@ -350,8 +350,8 @@ def is_valid_training_example(example):
         if example.target_prediction_seq_length >= 200: return False
 
     return example.ast.size < 300 and \
-           len(example.variable_name_map) > 0 and \
-           any(k != v for k, v in example.variable_name_map.items())
+           len(example.variable_name_map) > 0 #and \
+        #    any(k != v for k, v in example.variable_name_map.items())
 
 
 def example_generator(json_queue, example_queue, consumer_num=1):

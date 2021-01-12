@@ -113,7 +113,7 @@ class Evaluator(object):
                     for old_name, gold_new_name in example.variable_name_map.items():
                         pred = top_rename_result[old_name]
                         pred_new_name = pred['new_name']
-                        results.setdefault(binary, {}).setdefault(func_name, []).append((old_name, "", pred_new_name))
+                        results.setdefault(binary, {}).setdefault(func_name, {})[old_name] = "", pred_new_name
                         var_metric = Evaluator.get_soft_metrics(pred_new_name, gold_new_name)
                         # is_correct = pred_new_name == gold_new_name
                         example_pred_accs.append(var_metric)
