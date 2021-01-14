@@ -28,7 +28,7 @@
     "dropout": 0.1,
     "num_layers": $['encoder'].num_layers,
     "num_heads": $['encoder'].num_heads,
-    "mem_mask": "soft",
+    "mem_mask": "none",
   },
   "mem_encoder":{
     "type": "XfmrMemEncoder",

@@ -315,14 +315,11 @@ class TypeReconstructionModel(pl.LightningModule):
     def test_epoch_end(self, outputs):
         final_ret = self._shared_epoch_end(outputs, "test")
         if "pred_file" in self.config["test"]:
-            results, refs = {}, {}
-            for (binary, func_name, decom_var_name), target_var_name, retype_pred, retype_target, rename_pred, rename_target, body_in_train in zip(final_ret["indexes"], final_ret["tgt_var_names"], final_ret["retype_preds"].tolist(), final_ret["retype_targets"].tolist(), final_ret["rename_preds"].tolist(), final_ret["rename_targets"].tolist(), final_ret["body_in_train_mask"].tolist()):
-                results.setdefault(binary, {}).setdefault(func_name, []).append((decom_var_name, self.vocab.types.id2word[retype_pred], self.vocab.names.id2word[rename_pred]))
-                refs.setdefault(binary, {}).setdefault(func_name, []).append((target_var_name, self.vocab.types.id2word[retype_target], body_in_train))
+            results = {}
+            for (binary, func_name, decom_var_name), retype_pred, rename_pred in zip(final_ret["indexes"], final_ret["retype_preds"].tolist(), final_ret["rename_preds"].tolist()):
+                results.setdefault(binary, {}).setdefault(func_name, {})[decom_var_name[2:-2]] = self.vocab.types.id2word[retype_pred], self.vocab.names.id2word[rename_pred]
             pred_file = self.config["test"]["pred_file"]
-            ref_file = os.path.splitext(pred_file)[0] + "_ref.json"
             json.dump(results, open(pred_file, "w"))
-            json.dump(refs, open(ref_file, "w"))
 
     def _shared_epoch_end(self, outputs, prefix):
         final_ret = {}
