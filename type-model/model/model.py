@@ -68,9 +68,9 @@ class RenamingDecodeModule(pl.LightningModule):
         preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
 
         return dict(
-            rename_loss=loss,
-            rename_preds=preds,
-            rename_targets=targets
+            rename_loss=loss.detach().cpu(),
+            rename_preds=preds.detach().cpu(),
+            rename_targets=targets.detach().cpu()
         )
 
 class RetypingDecodeModule(pl.LightningModule):
@@ -131,9 +131,9 @@ class RetypingDecodeModule(pl.LightningModule):
         preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
 
         return dict(
-            retype_loss=loss,
-            retype_preds=preds,
-            retype_targets=targets,
+            retype_loss=loss.detach().cpu(),
+            retype_preds=preds.detach().cpu(),
+            retype_targets=targets.detach().cpu(),
         )
 
 
@@ -209,12 +209,12 @@ class InterleaveDecodeModule(pl.LightningModule):
         retype_preds, rename_preds = ret[0], ret[1]
 
         return dict(
-            retype_loss=retype_loss,
-            retype_targets=target_dict["target_type_id"][input_dict["target_mask"]],
-            retype_preds=retype_preds,
-            rename_loss=rename_loss,
-            rename_targets=target_dict["target_name_id"][input_dict["target_mask"]],
-            rename_preds=rename_preds,
+            retype_loss=retype_loss.detach().cpu(),
+            retype_targets=target_dict["target_type_id"][input_dict["target_mask"]].detach().cpu(),
+            retype_preds=retype_preds.detach().cpu(),
+            rename_loss=rename_loss.detach().cpu(),
+            rename_targets=target_dict["target_name_id"][input_dict["target_mask"]].detach().cpu(),
+            rename_preds=rename_preds.detach().cpu(),
         )
 
 class TypeReconstructionModel(pl.LightningModule):
@@ -316,7 +316,7 @@ class TypeReconstructionModel(pl.LightningModule):
         final_ret = self._shared_epoch_end(outputs, "test")
         if "pred_file" in self.config["test"]:
             results = {}
-            for (binary, func_name, decom_var_name), retype_pred, rename_pred in zip(final_ret["indexes"], final_ret["retype_preds"].tolist(), final_ret["rename_preds"].tolist()):
+            for (binary, func_name, decom_var_name), retype_pred, rename_pred in zip(final_ret["indexes"], final_ret["retype_preds"].tolist() if "retype_preds" in final_ret else [""] * len(final_ret["indexes"]), final_ret["rename_preds"].tolist() if "rename_preds" in final_ret else [""] * len(final_ret["indexes"])):
                 results.setdefault(binary, {}).setdefault(func_name, {})[decom_var_name[2:-2]] = self.vocab.types.id2word[retype_pred], self.vocab.names.id2word[rename_pred]
             pred_file = self.config["test"]["pred_file"]
             json.dump(results, open(pred_file, "w"))

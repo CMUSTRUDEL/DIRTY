@@ -589,11 +589,11 @@ class XfmrInterleaveDecoder(XfmrDecoder):
                     s = scores[b, :, self.retype_vocab_size:]
                 bm.advance(torch.log_softmax(s, dim=1))
                 select_indices_array.append(bm.getCurrentOrigin() + b * beam_size)
-            select_indices = torch.cat(select_indices_array)
+            select_indices = torch.cat(select_indices_array).long()
             tgt = tgt[select_indices]
             pred_step = torch.stack([bm.getCurrentState()
                                      if tgt_padding_mask[b, idx] else torch.zeros(beam_size, dtype=torch.long).to(tgt.device)
-                                     for b, bm in enumerate(beams)]).view(-1)
+                                     for b, bm in enumerate(beams)]).view(-1).long()
             # Update tgt for next step with prediction at the current step
             if idx < max_time_step - 1:
                 tgt_step = torch.cat(

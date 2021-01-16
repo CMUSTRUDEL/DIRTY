@@ -52,7 +52,7 @@
   },
   "test": {
     "pred_file": "pred_xfmr.json",
-    "batch_size": 8,
+    "batch_size": 64,
     "beam_size": 5,
   }
 }

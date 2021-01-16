@@ -53,8 +53,8 @@
     "patience": 10,
   },
   "test": {
-    "pred_file": "pred_xfmr.json",
-    "batch_size": 8,
+    "pred_file": "pred_xfmr_rename.json",
+    "batch_size": 64,
     "beam_size": 5,
   }
 }

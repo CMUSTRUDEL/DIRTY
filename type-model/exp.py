@@ -68,7 +68,7 @@ def train(args):
     # model
     model = TypeReconstructionModel(config)
 
-    wandb_logger = WandbLogger(name=args["--expname"], project="dire")
+    wandb_logger = WandbLogger(name=args["--expname"], project="dire", log_model=True)
     wandb_logger.log_hyperparams(config)
     resume_from_checkpoint = args["--eval-ckpt"] if args["--eval-ckpt"] else args["--resume"]
     if resume_from_checkpoint == "":
@@ -87,7 +87,7 @@ def train(args):
     )
     if args["--eval-ckpt"]:
         # HACK: necessary to make pl test work for IterableDataset
-        Dataset.__len__ = lambda self: 10000
+        Dataset.__len__ = lambda self: 1000000
         test_set = Dataset(config["data"]["test_file"], config["data"])
         test_loader = DataLoader(
             test_set,

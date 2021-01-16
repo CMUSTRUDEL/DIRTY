@@ -54,7 +54,7 @@
   },
   "test": {
     "pred_file": "pred_mt.json",
-    "batch_size": 8,
+    "batch_size": 64,
     "beam_size": 5,
   }
 }
