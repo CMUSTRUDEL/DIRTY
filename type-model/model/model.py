@@ -316,8 +316,8 @@ class TypeReconstructionModel(pl.LightningModule):
         final_ret = self._shared_epoch_end(outputs, "test")
         if "pred_file" in self.config["test"]:
             results = {}
-            for (binary, func_name, decom_var_name), retype_pred, rename_pred in zip(final_ret["indexes"], final_ret["retype_preds"].tolist() if "retype_preds" in final_ret else [""] * len(final_ret["indexes"]), final_ret["rename_preds"].tolist() if "rename_preds" in final_ret else [""] * len(final_ret["indexes"])):
-                results.setdefault(binary, {}).setdefault(func_name, {})[decom_var_name[2:-2]] = self.vocab.types.id2word[retype_pred], self.vocab.names.id2word[rename_pred]
+            for (binary, func_name, decom_var_name), retype_pred, rename_pred in zip(final_ret["indexes"], final_ret["retype_preds"].tolist() if "retype_preds" in final_ret else [None] * len(final_ret["indexes"]), final_ret["rename_preds"].tolist() if "rename_preds" in final_ret else [None] * len(final_ret["indexes"])):
+                results.setdefault(binary, {}).setdefault(func_name, {})[decom_var_name[2:-2]] = self.vocab.types.id2word.get(retype_pred, ""), self.vocab.names.id2word.get(rename_pred, "")
             pred_file = self.config["test"]["pred_file"]
             json.dump(results, open(pred_file, "w"))
 
