@@ -155,8 +155,8 @@ def train(args):
                 "func_body_in_train_cer": eval_results['func_body_in_train_acc']['cer'],
                 "func_body_not_in_train_acc": eval_results['func_body_not_in_train_acc']['accuracy'],
                 "func_body_not_in_train_cer": eval_results['func_body_not_in_train_acc']['cer'],
-                "acc": eval_results['corpus_acc']['accuracy'],
-                "cer": eval_results['corpus_acc']['cer'],
+                "acc": eval_results['corpus_need_rename_acc']['accuracy'],
+                "cer": eval_results['corpus_need_rename_acc']['cer'],
                 })
             dev_metric = eval_results['func_body_not_in_train_acc']['accuracy']
             # dev_metric = -ppl

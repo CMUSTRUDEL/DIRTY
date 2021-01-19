@@ -16,7 +16,7 @@ class Evaluator(object):
     @staticmethod
     def get_soft_metrics(pred_name: str, gold_name: str) -> Dict:
         edit_distance = float(editdistance.eval(pred_name, gold_name))
-        cer = float(edit_distance / (len(gold_name) + 1e-12))
+        cer = float(edit_distance / (max(len(gold_name), 1)))
         acc = float(pred_name == gold_name)
 
         return dict(edit_distance=edit_distance,
@@ -32,7 +32,7 @@ class Evaluator(object):
                 agg_results.setdefault(key, []).append(val)
 
         avg_results = dict()
-        avg_results['corpus_cer'] = sum(agg_results['edit_distance']) / (sum(agg_results['ref_len']) + 1e-12)
+        avg_results['corpus_cer'] = sum(agg_results['edit_distance']) / (max(sum(agg_results['ref_len']), 1))
 
         for key, val in agg_results.items():
             avg_results[key] = np.average(val)

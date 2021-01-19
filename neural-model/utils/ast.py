@@ -220,7 +220,7 @@ class AbstractSyntaxTree(object):
         tree.id_to_node[0] = root
         tree.variable_nodes = []
         tree.variables = OrderedDict()
-        for idx, loc in enumerate(json_dict["source"].keys()):
+        for idx, loc in enumerate(sorted(json_dict["source"])):
             node = SyntaxNode(node_id=idx, node_type="var")
             node.old_name = json_dict["source"][loc]["n"]
             node.new_name = json_dict["target"][loc]["n"]

@@ -154,7 +154,7 @@ class SequentialEncoder(Encoder):
                     variable_mention_num[e_id, var_id] = len(var_pos)
                 except KeyError:
                     variable_mention_num[e_id, var_id] = 1
-                    print(example.binary_file, f'variable [{var_name}] not found', file=sys.stderr)
+                    # print(example.binary_file, f'variable [{var_name}] not found', file=sys.stderr)
 
             variable_encoding_mask[e_id, :len(example.ast.variables)] = 1.
 

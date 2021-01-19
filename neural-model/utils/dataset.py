@@ -99,8 +99,8 @@ class Batcher(object):
             snippet = example.code_tokens
             # np.random.shuffle(snippet)
             snippet = ' '.join(snippet)
-            sub_tokens = ['<s>'] + src_bpe_model.encode_as_pieces(snippet) + ['</s>']
-            sub_token_ids = [src_bpe_model.bos_id()] + src_bpe_model.encode_as_ids(snippet) + [src_bpe_model.eos_id()]
+            sub_tokens = ['<s>'] + src_bpe_model.encode_as_pieces(snippet)[:510] + ['</s>']
+            sub_token_ids = [src_bpe_model.bos_id()] + src_bpe_model.encode_as_ids(snippet)[:510] + [src_bpe_model.eos_id()]
             setattr(example, 'sub_tokens', sub_tokens)
             setattr(example, 'sub_token_ids', sub_token_ids)
             setattr(example, 'source_seq_length', len(sub_tokens))
