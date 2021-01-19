@@ -56,7 +56,7 @@ def evaluate(dataset, results, type_metrics, name_metrics):
     test_metas = []
     for example in tqdm(dataset):
         for src_name, tgt_name, tgt_type in zip(example.src_var_names, example.tgt_var_names, example.tgt_var_types_str):
-            pred_type, pred_name = results.get(example.binary, {}).get(example.name, {}).get(src_name, ("", ""))
+            pred_type, pred_name = results.get(example.binary, {}).get(example.name, {}).get(src_name[2:-2], ("", ""))
             pred_types.append(pred_type)
             pred_names.append(pred_name)
             ref_names.append(tgt_name[2:-2])
