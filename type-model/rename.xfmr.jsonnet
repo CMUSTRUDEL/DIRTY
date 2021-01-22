@@ -46,14 +46,15 @@
     "rename": true,
   },
   "train": {
-    "batch_size": 8,
-    "grad_accum_step": 8,
-    "max_epoch": 10,
+    "batch_size": 16,
+    "grad_accum_step": 4,
+    "max_epoch": 15,
     "lr": 1e-4,
     "patience": 10,
+    "check_val_every_n_epoch": 1,
   },
   "test": {
-    "pred_file": "pred_xfmr_rename.json",
+    "pred_file": "pred_mt.json",
     "batch_size": 64,
     "beam_size": 5,
   }

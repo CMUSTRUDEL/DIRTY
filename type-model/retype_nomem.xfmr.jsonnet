@@ -8,8 +8,6 @@
     "max_src_tokens_len": 510,
     "max_num_var": 32,
     "retype": true,
-    "rename": true,
-    "interleave": true,
   },
   "encoder":{
     "type": "XfmrSequentialEncoder",
@@ -21,7 +19,7 @@
     "num_heads": 8,
   },
   "decoder": {
-    "type": if $['data'].interleave then 'XfmrInterleaveDecoder' else 'XfmrDecoder',
+    "type": 'XfmrDecoder',
     "vocab_file": $['data'].vocab_file,
     "typelib_file": "data1/typelib.json",
     "target_embedding_size": $['encoder'].source_embedding_size,
@@ -29,7 +27,7 @@
     "dropout": 0.1,
     "num_layers": $['encoder'].num_layers,
     "num_heads": $['encoder'].num_heads,
-    "mem_mask": "soft",
+    "mem_mask": "none",
   },
   "mem_encoder":{
     "type": "XfmrMemEncoder",
@@ -54,7 +52,7 @@
     "check_val_every_n_epoch": 1,
   },
   "test": {
-    "pred_file": "pred_mt.json",
+    "pred_file": "pred_retype.json",
     "batch_size": 64,
     "beam_size": 5,
   }
