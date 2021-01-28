@@ -23,7 +23,7 @@ def make_struct_mask(types_model, targets):
 
 if __name__ == "__main__":
     config = json.loads(_jsonnet.evaluate_file("config.xfmr.jsonnet"))
-    dataset = Dataset(config["data"]["dev_file"], config["data"])
+    dataset = Dataset(config["data"]["test_file"], config["data"])
     dataloader = torch.utils.data.DataLoader(
         dataset, num_workers=8, batch_size=64, collate_fn=Dataset.collate_fn
     )

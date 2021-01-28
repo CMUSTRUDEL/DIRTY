@@ -13,7 +13,7 @@ from collections import defaultdict, Counter
 from .most_common import make_struct_mask
 
 def evaluate(config, most_common_for_src: Dict[int, int]):
-    dataset = Dataset(config["data"]["dev_file"], config["data"])
+    dataset = Dataset(config["data"]["test_file"], config["data"])
     dataloader = torch.utils.data.DataLoader(
         dataset, num_workers=8, batch_size=64, collate_fn=Dataset.collate_fn
     )
