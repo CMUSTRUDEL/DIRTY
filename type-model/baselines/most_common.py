@@ -25,5 +25,5 @@ if __name__ == "__main__":
     results = {}
     for example in tqdm(dataloader):
         for src_name, src_type, tgt_var_mem in zip(example.src_var_names, example.src_var_types_str, example.tgt_var_src_mems):
-            results.setdefault(example.binary, {}).setdefault(example.name, {})[src_name[2:-2]] = most_common_for_size.get(tgt_var_mem[1], ""), ""
+            results.setdefault(example.binary, {}).setdefault(example.name, {})[src_name[2:-2]] = most_common_for_size.get(tgt_var_mem[1] - 3, ""), ""
     json.dump(results, open("most_common.json", "w"))
