@@ -1,11 +1,9 @@
 import argparse
 import json
-from os import renames
 
 import _jsonnet
 import numpy as np
 import wandb
-from numpy.core.fromnumeric import repeat
 from tqdm import tqdm
 
 from utils.dataset import Dataset
@@ -37,14 +35,17 @@ def body_not_in_train_acc(preds, results, test_metas):
 
 def struct_acc(preds, results, test_metas):
     struct_mask = np.array([test_meta["is_struct"] for test_meta in test_metas])
+    print(struct_mask.sum())
     return mask_acc(preds, results, struct_mask)
 
 def struct_body_in_train_acc(preds, results, test_metas):
     mask = np.array([test_meta["is_struct"] and test_meta["function_body_in_train"] for test_meta in test_metas])
+    print(mask.sum())
     return mask_acc(preds, results, mask)
 
 def struct_body_not_in_train_acc(preds, results, test_metas):
     mask = np.array([test_meta["is_struct"] and not test_meta["function_body_in_train"] for test_meta in test_metas])
+    print(mask.sum())
     return mask_acc(preds, results, mask)
 
 TYPE_METRICS = {
@@ -70,8 +71,8 @@ def evaluate(dataset, results, type_metrics, name_metrics):
             pred_type, _ = results.get(example.binary, {}).get(example.name, {}).get(src_name[2:-2], ("", ""))
             pred_types.append(pred_type)
             ref_types.append(tgt_type)
-            test_meta = example.test_meta
-            test_meta["is_struct"] = tgt_type.startswith("struct ")
+            test_meta = example.test_meta.copy()
+            test_meta["is_struct"] = dataset.dataset.vocab.types.id2word[dataset.dataset.vocab.types[tgt_type]].startswith("struct ")
             test_meta_types.append(test_meta)
             if src_name != tgt_name and tgt_name != "@@@@":
                 # only report need_rename
