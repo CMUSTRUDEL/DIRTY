@@ -225,7 +225,8 @@ class Dataset(wds.Dataset):
         subtypes_model = self.vocab.subtypes
         src_var_names = []
         tgt_var_names = []
-        src_var_types = []
+        src_var_types_id = []
+        src_var_types_str = []
         tgt_var_types_id = []
         tgt_var_types_str = []
         tgt_var_subtypes = []
@@ -242,7 +243,8 @@ class Dataset(wds.Dataset):
             tgt_var = example.target[loc]
             src_var_names.append(f"@@{src_var.name}@@")
             tgt_var_names.append(f"@@{tgt_var.name}@@")
-            src_var_types.append(types_model.lookup_decomp(str(src_var.typ)))
+            src_var_types_id.append(types_model.lookup_decomp(str(src_var.typ)))
+            src_var_types_str.append(str(src_var.typ))
             tgt_var_types_id.append(types_model[str(tgt_var.typ)])
             tgt_var_types_str.append(str(tgt_var.typ))
             if types_model[str(tgt_var.typ)] == types_model.unk_id:
@@ -272,7 +274,8 @@ class Dataset(wds.Dataset):
         setattr(example, "tgt_var_names", tgt_var_names)
         if self.rename:
             setattr(example, "tgt_var_name_ids", [self.vocab.names[n[2:-2]] for n in tgt_var_names])
-        setattr(example, "src_var_types", src_var_types)
+        setattr(example, "src_var_types", src_var_types_id)
+        setattr(example, "src_var_types_str", src_var_types_str)
         setattr(example, "tgt_var_types", tgt_var_types_id)
         setattr(example, "tgt_var_types_str", tgt_var_types_str)
         setattr(example, "tgt_var_subtypes", tgt_var_subtypes)
