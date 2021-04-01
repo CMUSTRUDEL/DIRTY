@@ -19,7 +19,7 @@ def load_data(config_file):
     dataset = Dataset(config["test_file"], config)
     return dataset
 
-def acc(preds, results, test_metas): 
+def acc(preds, results, test_metas=None): 
     return (preds == results).mean()
 
 def mask_acc(preds, results, mask):
@@ -35,17 +35,14 @@ def body_not_in_train_acc(preds, results, test_metas):
 
 def struct_acc(preds, results, test_metas):
     struct_mask = np.array([test_meta["is_struct"] for test_meta in test_metas])
-    print(struct_mask.sum())
     return mask_acc(preds, results, struct_mask)
 
 def struct_body_in_train_acc(preds, results, test_metas):
     mask = np.array([test_meta["is_struct"] and test_meta["function_body_in_train"] for test_meta in test_metas])
-    print(mask.sum())
     return mask_acc(preds, results, mask)
 
 def struct_body_not_in_train_acc(preds, results, test_metas):
     mask = np.array([test_meta["is_struct"] and not test_meta["function_body_in_train"] for test_meta in test_metas])
-    print(mask.sum())
     return mask_acc(preds, results, mask)
 
 TYPE_METRICS = {
@@ -90,6 +87,33 @@ def evaluate(dataset, results, type_metrics, name_metrics):
 
     for metric_name, metric in name_metrics.items():
         wandb.log({f"test_rename_{metric_name}": metric(pred_names, ref_names, test_meta_names)})
+        
+#     mt_evaluate(dataset, results)
+
+# def mt_evaluate(dataset, results):
+#     mt_results = json.load(open("pred_mt.json"))
+#     pred_names, ref_names, pred_types, ref_types = [], [], [], []
+#     for example in tqdm(dataset):
+#         for src_name, tgt_name, tgt_type in zip(example.src_var_names, example.tgt_var_names, example.tgt_var_types_str):
+#             pred_type, _ = results.get(example.binary, {}).get(example.name, {}).get(src_name[2:-2], ("", ""))
+#             _, mt_pred_name = mt_results.get(example.binary, {}).get(example.name, {}).get(src_name[2:-2], ("", ""))
+#             if mt_pred_name == tgt_name[2:-2] and tgt_name != "@@@@":
+#                 pred_types.append(pred_type)
+#                 ref_types.append(tgt_type)
+#             if src_name != tgt_name and tgt_name != "@@@@":
+#                 _, pred_name = results.get(example.binary, {}).get(example.name, {}).get(src_name[2:-2], ("", ""))
+#                 mt_pred_type, _ = mt_results.get(example.binary, {}).get(example.name, {}).get(src_name[2:-2], ("", ""))
+#                 if mt_pred_type == tgt_type:
+#                     pred_names.append(pred_name)
+#                     ref_names.append(tgt_name[2:-2])
+#     pred_types = np.array(pred_types, dtype=object)
+#     ref_types = np.array(ref_types, dtype=object)
+
+#     pred_names = np.array(pred_names, dtype=object)
+#     ref_names = np.array(ref_names, dtype=object)
+
+#     wandb.log({"test_rnonrt_accuracy": acc(pred_names, ref_names)})
+#     wandb.log({"test_rtonrn_accuracy": acc(pred_types, ref_types)})
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
