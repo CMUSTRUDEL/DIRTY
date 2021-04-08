@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="fig.png" width="500">
+  <img src="fig.png" width="800">
   <br />
   <br />
   <a href="https://github.com/CMUSTRUDEL/DIRTY/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/github/license/CMUSTRUDEL/DIRTY" /></a>
