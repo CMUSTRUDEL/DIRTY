@@ -49,7 +49,7 @@ If you wish to obtain the original unpreprocessed dataset, please open an issue.
 
 ```bash
 cd dirty/
-python ../scripts/download.py --url https://drive.google.com/open?id= --path . --fname dirt.tar.gz
+python ../scripts/download.py --url https://drive.google.com/open?id=1JWRkIlzdBPhpeSHe1KsJNuRid7KWmggk --path . --fname dirt.tar.gz
 ```
 
 The command would automatically download and decompress the dataset from Google Drive.
@@ -59,14 +59,13 @@ If your machine does not have access to Google, please manually download from th
 
 We have setup configuration files for different models reported in our paper:
 
-| file                      | model           |
-| ------------------------- | --------------- |
-| multitask.xfmr.jsonnet    | DIRTY-Multitask |
-| rename.xfmr.jsonnet       | DIRTY-Rename    |
-| retype.xfmr.jsonnet       | DIRTY-Retype    |
-| retype.xfmr.jsonnet       | DIRTY-Retype    |
-| retype_base.xfmr.jsonnet  | DIRTY_S         |
-| retype_nomem.xfmr.jsonnet | DIRTY_NDL       |
+| file                      | model           | time (estimated hours) |
+| ------------------------- | --------------- | ---------------------- |
+| multitask.xfmr.jsonnet    | DIRTY-Multitask | 120                    |
+| rename.xfmr.jsonnet       | DIRTY-Rename    | 80                     |
+| retype.xfmr.jsonnet       | DIRTY-Retype    | 80                     |
+| retype_nomem.xfmr.jsonnet | DIRTY_NDL       | 80                     |
+| retype_base.xfmr.jsonnet  | DIRTY_S         | 40                     |
 
 Training a models is as easy as specifying the name of the experimental run and the config file.
 Suppose we want to reproduce the Multi-task model in Table~7 in the paper:
@@ -78,13 +77,15 @@ python exp.py train --cuda --expname=dirty_mt multitask.xfmr.jsonnet
 
 Then, please watch for the line `wandb: Run data is saved locally in ...` in the output.
 This is where the logs and models are to be saved.
-You can also monitor the training status (e.g., losses, accuracy) in real-time with the link after `wandb: 🚀 View run at ...`.
+You can also monitor the automatically uploaded training and validation status (e.g., losses, accuracy) in your browser in real-time with the link printed after `wandb: 🚀 View run at ...`.
+
+Feel free to adjust the hyperparameters in `*.jsonnet` config files to train your own model.
 
 ### Inference
 
 #### Download Trained Model
 
-Alternatively, you can download our trained DIRTY model (coming soon).
+As an alternative to train the model by yourself, you can download our trained DIRTY model (coming soon).
 
 #### Test DIRTY
 
@@ -93,6 +94,9 @@ First, run your trained/downloaded model to produce predictions on the DIRE test
 ```
 python exp.py train --cuda --expname=eval_dirty_mt multitask.xfmr.jsonnet --eval-ckpt wandb/run-YYYYMMDD_HHMMSS-XXXXXXXX/files/dire/XXXXXXXX/checkpoints/epoch=N.ckpt
 ```
+
+The predictions will be saved to `pred_XXX.json`.
+This filename is different for different models and can be modified in config files.
 
 Then, use our standalone benchmark script:
 
