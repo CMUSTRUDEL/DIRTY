@@ -140,6 +140,4 @@ cython_debug/
 *.json
 *.c
 
-data*/
 exp_runs/
-dire/

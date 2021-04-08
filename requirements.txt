@@ -1,0 +1,9 @@
+docopt==0.6.2
+editdistance==0.5.3
+jsonnet==0.16.0
+pygments==2.6.1
+pytorch-lightning==1.0.8
+sentencepiece==0.1.91
+ujson==3.2.0
+wandb==0.10.12
+webdataset==0.1.40
