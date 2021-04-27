@@ -1,1 +1,1 @@
-binary/ida_ast.py
+../../binary/ida_ast.py
