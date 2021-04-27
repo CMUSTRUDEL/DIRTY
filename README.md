@@ -85,20 +85,43 @@ Feel free to adjust the hyperparameters in `*.jsonnet` config files to train you
 
 #### Download Trained Model
 
-As an alternative to train the model by yourself, you can download our trained DIRTY model (coming soon).
+As an alternative to train the model by yourself, you can download our trained DIRTY model.
+
+```bash
+cd dirty/
+mkdir exp_runs/
+python ../scripts/download.py --url https://drive.google.com/open?id=1iDxlF9nsU4fgy2DRDbGg0WLosABspdHg --path . --fname exp_runs/dirty_mt.ckpt
+```
 
 #### Test DIRTY
 
 First, run your trained/downloaded model to produce predictions on the DIRE test set.
 
 ```
-python exp.py train --cuda --expname=eval_dirty_mt multitask.xfmr.jsonnet --eval-ckpt wandb/run-YYYYMMDD_HHMMSS-XXXXXXXX/files/dire/XXXXXXXX/checkpoints/epoch=N.ckpt
+python exp.py train --cuda --expname=eval_dirty_mt multitask.xfmr.jsonnet --eval-ckpt <ckpt_path>
 ```
 
-The predictions will be saved to `pred_XXX.json`.
-This filename is different for different models and can be modified in config files.
+`<ckpt_path>` is either `exp_runs/dirty_mt.ckpt` if you download our trained model,
+or saved during training at `wandb/run-YYYYMMDD_HHMMSS-XXXXXXXX/files/dire/XXXXXXXX/checkpoints/epoch=N.ckpt`.
 
-Then, use our standalone benchmark script:
+We sugguest changing `beam_size` in config files to `0` to switch to greedy decoding, which is significantly faster.
+The default configuration of `beam_size = 5` can take hours.
+
+The predictions will be saved to `pred_XXX.json`.
+This filename depends on models and can be modified in config files.
+You can inspect the prediction results, which is in the following format.
+
+```python
+{
+  binary: {
+    func_name: {
+      var1: [var1_retype, var1_rename], ...
+    }, ...
+  }, ...
+}
+```
+
+Finally, use our standalone benchmark script:
 
 ```
 python -m utils.evaluate --pred-file pred_mt.json --config-file multitask.xfmr.jsonnet
