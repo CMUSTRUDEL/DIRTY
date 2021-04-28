@@ -24,12 +24,10 @@ class Decoder(nn.Module):
         from .simple_decoder import SimpleDecoder
         from .xfmr_decoder import XfmrDecoder, XfmrInterleaveDecoder
         from .xfmr_subtype_decoder import XfmrSubtypeDecoder
-        from .xfmr_mem_decoder import XfmrMemDecoder
 
         return {
             "SimpleDecoder": SimpleDecoder,
             "XfmrDecoder": XfmrDecoder,
             "XfmrInterleaveDecoder": XfmrInterleaveDecoder,
             "XfmrSubtypeDecoder": XfmrSubtypeDecoder,
-            "XfmrMemDecoder": XfmrMemDecoder,
         }[config["type"]](config)

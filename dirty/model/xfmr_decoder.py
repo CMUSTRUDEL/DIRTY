@@ -109,38 +109,6 @@ class XfmrDecoder(nn.Module):
         logits = self.output(hidden)
         return logits
 
-    def pred_with_mem(self, scores: torch.Tensor, mems: Tuple[Tuple[int], Tuple[int]]) -> Tuple[torch.Tensor, Tuple[Tuple[int], Tuple[int]]]:
-        rest_a, rest_s = mems
-        device = scores.device
-        scores = scores.cpu()
-        if not rest_a or not rest_s:
-            # An incorrect prediction must have been made. Ignore the mask
-            mask = torch.ones(scores.shape, dtype=torch.bool)
-        else:
-            mask = torch.zeros(scores.shape, dtype=torch.bool)
-            ret = self.typelib.get_next_replacements(rest_a, rest_s)
-            for typ_set, _, _ in ret:
-                if not id(typ_set) in self.cached_decode_mask:
-                    t_mask = torch.zeros(scores.shape, dtype=torch.bool)
-                    for typ in typ_set:
-                        if str(typ) in self.vocab.types:
-                            typ_id = self.vocab.types[str(typ)]
-                            t_mask[typ_id] = 1
-                            self.size[typ_id] = typ.size
-                    self.cached_decode_mask[id(typ_set)] = t_mask
-                mask |= self.cached_decode_mask[id(typ_set)]
-            # also incorrect prediction 
-            if mask.sum() == 0:
-                mask = torch.ones(scores.shape, dtype=torch.bool)
-        scores[~mask] = float('-inf')
-        pred = scores.argmax(dim=0, keepdim=True)
-        if rest_a:
-            start = rest_a[0]
-            size = self.size[pred].item()
-            rest_a = tuple(s for s in rest_a if s >= (size + start))
-            rest_s = tuple(s for s in rest_s if s >= (size + start))
-        return pred.to(device), (rest_a, rest_s)
-
     def predict(
         self,
         context_encoding: Dict[str, torch.Tensor],
@@ -170,9 +138,6 @@ class XfmrDecoder(nn.Module):
         )
         tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step, tgt.device)
         preds_list = []
-        if self.mem_mask == "hard":
-            raise NotImplementedError
-            # tgt_mems = target_dict["target_mems"]
         if self.mem_mask == "soft":
             mem_encoding = self.mem_encoder(input_dict)
             mem_logits = self.mem_decoder(mem_encoding, target_dict=None)
@@ -201,9 +166,7 @@ class XfmrDecoder(nn.Module):
                     preds_step.append(torch.zeros(1, dtype=torch.long, device=logits.device))
                     continue
                 scores = logits[b, 0]
-                if self.mem_mask == "hard":
-                    pred, tgt_mems[b] = self.pred_with_mem(scores, tgt_mems[b])
-                elif self.mem_mask == "none":
+                if self.mem_mask == "none":
                     pred = scores.argmax(dim=0, keepdim=True)
                 elif self.mem_mask == "soft":
                     scores += mem_logits_list[b][idx]
