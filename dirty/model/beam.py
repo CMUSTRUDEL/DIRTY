@@ -18,8 +18,7 @@ class Beam(object):
         self.prevKs = []
 
         # The outputs at each time-step.
-        self.nextYs = [self.tt.LongTensor(size)
-                       .fill_(PAD)]
+        self.nextYs = [self.tt.LongTensor(size).fill_(PAD)]
         self.nextYs[0][0] = BOS
 
         # Has EOS topped the beam yet.
@@ -32,7 +31,6 @@ class Beam(object):
 
         self.length_norm = length_norm
         self.minimum_length = minimum_length
-
 
     def getCurrentState(self):
         "Get the outputs for the current timestep."
@@ -106,6 +104,6 @@ class Beam(object):
         """
         hyp = []
         for j in range(len(self.prevKs[:timestep]) - 1, -1, -1):
-            hyp.append(self.nextYs[j+1][k].item())
+            hyp.append(self.nextYs[j + 1][k].item())
             k = self.prevKs[j][k].item()
         return hyp[::-1]

@@ -41,17 +41,21 @@ class Example:
 
     @classmethod
     def from_json(cls, d: Dict):
-        source = {location_from_json_key(loc): Variable.from_json(var)
-                  for loc, var in d["source"].items()}
-        target = {location_from_json_key(loc): Variable.from_json(var)
-                  for loc, var in d["target"].items()}
+        source = {
+            location_from_json_key(loc): Variable.from_json(var)
+            for loc, var in d["source"].items()
+        }
+        target = {
+            location_from_json_key(loc): Variable.from_json(var)
+            for loc, var in d["target"].items()
+        }
         return cls(
             d["name"],
             d["code_tokens"],
             source,
             target,
             test_meta=d.get("test_meta", None),
-            binary=d.get("binary", None)
+            binary=d.get("binary", None),
         )
 
     def to_json(self):
@@ -133,11 +137,15 @@ class Example:
     def is_valid_example(self):
         return self._is_valid
 
+
 # HACK: Stupid global lambda functions required for distributed data loading
 def identity(x):
     return x
+
+
 def get_src_len(e):
     return e.source_seq_length
+
 
 class Dataset(wds.Dataset):
 
@@ -147,7 +155,7 @@ class Dataset(wds.Dataset):
     def __init__(self, url: str, config: Optional[Dict] = None, percent: float = 1.0):
         # support wildcards
         urls = sorted(glob.glob(url))
-        urls = urls[:int(percent * len(urls))]
+        urls = urls[: int(percent * len(urls))]
         super().__init__(urls)
         if config:
             # annotate example for training
@@ -187,7 +195,7 @@ class Dataset(wds.Dataset):
                 sort_pool = sort_pool_new
                 sort_pool_new = []
         if sort_pool:
-            yield from sort_pool[len(sort_pool_new):]
+            yield from sort_pool[len(sort_pool_new) :]
         if sort_pool_new:
             sort_pool_new.sort(key=get_src_len)
             yield from sort_pool
@@ -200,7 +208,7 @@ class Dataset(wds.Dataset):
                 if not line:
                     continue
                 json_line = json.loads(line)
-                json_line["binary"] = jsonl["__key__"][:jsonl["__key__"].index("_")]
+                json_line["binary"] = jsonl["__key__"][: jsonl["__key__"].index("_")]
                 yield json_line
 
     def _annotate(self, example: Example):
@@ -235,10 +243,15 @@ class Dataset(wds.Dataset):
         tgt_var_src_mems = []
         tgt_names = []
         # variables on registers first, followed by those on stack
-        locs = sorted(example.source, key=lambda x: sub_tokens.index(f"@@{example.source[x].name}@@") if f"@@{example.source[x].name}@@" in sub_tokens else self.max_src_tokens_len)
+        locs = sorted(
+            example.source,
+            key=lambda x: sub_tokens.index(f"@@{example.source[x].name}@@")
+            if f"@@{example.source[x].name}@@" in sub_tokens
+            else self.max_src_tokens_len,
+        )
         stack_pos = [x.offset for x in example.source if isinstance(x, Stack)]
         stack_start_pos = max(stack_pos) if stack_pos else None
-        for loc in locs[:self.max_num_var]:
+        for loc in locs[: self.max_num_var]:
             src_var = example.source[loc]
             tgt_var = example.target[loc]
             src_var_names.append(f"@@{src_var.name}@@")
@@ -266,14 +279,29 @@ class Dataset(wds.Dataset):
                     return 1030 + self.vocab.regs[loc.name]
                 else:
                     from utils.vocab import VocabEntry
-                    return 3 + stack_start_pos - loc.offset if stack_start_pos - loc.offset < VocabEntry.MAX_STACK_SIZE else 2
-            tgt_var_src_mems.append([var_loc_in_func(loc)] + types_model.encode_memory((src_var.typ.size,) + src_var.typ.start_offsets()))
+
+                    return (
+                        3 + stack_start_pos - loc.offset
+                        if stack_start_pos - loc.offset < VocabEntry.MAX_STACK_SIZE
+                        else 2
+                    )
+
+            tgt_var_src_mems.append(
+                [var_loc_in_func(loc)]
+                + types_model.encode_memory(
+                    (src_var.typ.size,) + src_var.typ.start_offsets()
+                )
+            )
             tgt_names.append(tgt_var.name)
 
         setattr(example, "src_var_names", src_var_names)
         setattr(example, "tgt_var_names", tgt_var_names)
         if self.rename:
-            setattr(example, "tgt_var_name_ids", [self.vocab.names[n[2:-2]] for n in tgt_var_names])
+            setattr(
+                example,
+                "tgt_var_name_ids",
+                [self.vocab.names[n[2:-2]] for n in tgt_var_names],
+            )
         setattr(example, "src_var_types", src_var_types_id)
         setattr(example, "src_var_types_str", src_var_types_str)
         setattr(example, "tgt_var_types", tgt_var_types_id)
@@ -285,7 +313,11 @@ class Dataset(wds.Dataset):
         return example
 
     @staticmethod
-    def collate_fn(examples: List[Example]) -> Tuple[Dict[str, Union[torch.Tensor, int]], Dict[str, Union[torch.Tensor, List]]]:
+    def collate_fn(
+        examples: List[Example],
+    ) -> Tuple[
+        Dict[str, Union[torch.Tensor, int]], Dict[str, Union[torch.Tensor, List]]
+    ]:
         token_ids = [torch.tensor(e.sub_token_ids) for e in examples]
         input = pad_sequence(token_ids, batch_first=True)
         max_time_step = input.shape[1]
@@ -311,34 +343,54 @@ class Dataset(wds.Dataset):
         # if mentioned for each var_id
         variable_encoding_mask = (variable_mention_num > 0).float()
 
-        src_type_ids = [torch.tensor(e.src_var_types, dtype=torch.long) for e in examples]
+        src_type_ids = [
+            torch.tensor(e.src_var_types, dtype=torch.long) for e in examples
+        ]
         src_type_id = pad_sequence(src_type_ids, batch_first=True)
         type_ids = [torch.tensor(e.tgt_var_types, dtype=torch.long) for e in examples]
         target_type_id = pad_sequence(type_ids, batch_first=True)
         assert target_type_id.shape == variable_mention_num.shape
 
-        subtype_ids = [torch.tensor(e.tgt_var_subtypes, dtype=torch.long) for e in examples]
+        subtype_ids = [
+            torch.tensor(e.tgt_var_subtypes, dtype=torch.long) for e in examples
+        ]
         target_subtype_id = pad_sequence(subtype_ids, batch_first=True)
-        type_sizes = [torch.tensor(e.tgt_var_type_sizes, dtype=torch.long) for e in examples]
-        target_type_sizes= pad_sequence(type_sizes, batch_first=True)
+        type_sizes = [
+            torch.tensor(e.tgt_var_type_sizes, dtype=torch.long) for e in examples
+        ]
+        target_type_sizes = pad_sequence(type_sizes, batch_first=True)
 
         target_mask = src_type_id > 0
-        target_type_src_mems = [torch.tensor(mems, dtype=torch.long) for e in examples for mems in e.tgt_var_src_mems]
+        target_type_src_mems = [
+            torch.tensor(mems, dtype=torch.long)
+            for e in examples
+            for mems in e.tgt_var_src_mems
+        ]
         target_type_src_mems = pad_sequence(target_type_src_mems, batch_first=True)
-        target_type_src_mems_unflattened = torch.zeros(*target_mask.shape, target_type_src_mems.size(-1), dtype=torch.long)
+        target_type_src_mems_unflattened = torch.zeros(
+            *target_mask.shape, target_type_src_mems.size(-1), dtype=torch.long
+        )
         target_type_src_mems_unflattened[target_mask] = target_type_src_mems
         target_type_src_mems = target_type_src_mems_unflattened
 
         # renaming task
         if hasattr(examples[0], "tgt_var_name_ids"):
-            name_ids = [torch.tensor(e.tgt_var_name_ids, dtype=torch.long) for e in examples]
+            name_ids = [
+                torch.tensor(e.tgt_var_name_ids, dtype=torch.long) for e in examples
+            ]
             target_name_id = pad_sequence(name_ids, batch_first=True)
         else:
             target_name_id = None
 
         return (
             dict(
-                index=sum([[(e.binary, e.name, name) for name in e.src_var_names] for e in examples], []),
+                index=sum(
+                    [
+                        [(e.binary, e.name, name) for name in e.src_var_names]
+                        for e in examples
+                    ],
+                    [],
+                ),
                 src_code_tokens=input,
                 variable_mention_to_variable_id=variable_mention_to_variable_id,
                 variable_mention_mask=variable_mention_mask,
@@ -347,7 +399,7 @@ class Dataset(wds.Dataset):
                 target_type_src_mems=target_type_src_mems,
                 src_type_id=src_type_id,
                 target_mask=target_mask,
-                target_submask = target_subtype_id > 0,
+                target_submask=target_subtype_id > 0,
                 target_type_sizes=target_type_sizes,
             ),
             dict(
@@ -356,13 +408,13 @@ class Dataset(wds.Dataset):
                 target_name_id=target_name_id,
                 target_subtype_id=target_subtype_id,
                 target_mask=target_mask,
-                test_meta=[e.test_meta for e in examples]
+                test_meta=[e.test_meta for e in examples],
             ),
         )
-    
+
 
 if __name__ == "__main__":
-    config = json.loads(_jsonnet.evaluate_file('config.xfmr.jsonnet'))
+    config = json.loads(_jsonnet.evaluate_file("config.xfmr.jsonnet"))
     dataset = Dataset("data1/dev-*.tar", config["data"])
     dataloader = torch.utils.data.DataLoader(
         dataset, num_workers=8, batch_size=64, collate_fn=Dataset.collate_fn

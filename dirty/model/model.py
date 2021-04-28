@@ -34,14 +34,14 @@ class RenamingDecodeModule(pl.LightningModule):
             loss = F.cross_entropy(
                 variable_name_logits + mem_logits,
                 target_dict["target_name_id"][target_dict["target_mask"]],
-                reduction='none',
+                reduction="none",
             )
         else:
             loss = F.cross_entropy(
                 # cross_entropy requires num_classes at the second dimension
                 variable_name_logits.transpose(1, 2),
                 target_dict["target_name_id"],
-                reduction='none',
+                reduction="none",
             )
             loss = loss[target_dict["target_mask"]]
         return loss.mean()
@@ -55,29 +55,32 @@ class RenamingDecodeModule(pl.LightningModule):
             loss = F.cross_entropy(
                 variable_name_logits + mem_logits,
                 target_dict["target_name_id"][input_dict["target_mask"]],
-                reduction='none',
+                reduction="none",
             )
         else:
             loss = F.cross_entropy(
                 variable_name_logits.transpose(1, 2),
                 target_dict["target_name_id"],
-                reduction='none',
+                reduction="none",
             )
             loss = loss[input_dict["target_mask"]]
         targets = target_dict["target_name_id"][input_dict["target_mask"]]
-        preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
+        preds = self.decoder.predict(
+            context_encoding, input_dict, None, self.beam_size if test else 0
+        )
 
         return dict(
             rename_loss=loss.detach().cpu(),
             rename_preds=preds.detach().cpu(),
-            rename_targets=targets.detach().cpu()
+            rename_targets=targets.detach().cpu(),
         )
+
 
 class RetypingDecodeModule(pl.LightningModule):
     def __init__(self, config):
         super().__init__()
         self.decoder = Decoder.build({**config["decoder"]})
-        self.subtype = config["decoder"]["type"] in ['XfmrSubtypeDecoder']
+        self.subtype = config["decoder"]["type"] in ["XfmrSubtypeDecoder"]
         self.soft_mem_mask = config["decoder"]["mem_mask"] == "soft"
         if self.soft_mem_mask:
             self.mem_encoder = Encoder.build(config["mem_encoder"])
@@ -85,7 +88,7 @@ class RetypingDecodeModule(pl.LightningModule):
             self.decoder.mem_encoder = self.mem_encoder
             self.decoder.mem_decoder = self.mem_decoder
         self.beam_size = config["test"]["beam_size"]
-            
+
     def training_step(self, input_dict, context_encoding, target_dict):
         variable_type_logits = self.decoder(context_encoding, target_dict)
         if self.soft_mem_mask:
@@ -95,15 +98,21 @@ class RetypingDecodeModule(pl.LightningModule):
             loss = F.cross_entropy(
                 variable_type_logits + mem_type_logits,
                 target_dict["target_type_id"][target_dict["target_mask"]],
-                reduction='none',
+                reduction="none",
             )
         else:
             loss = F.cross_entropy(
                 variable_type_logits.transpose(1, 2),
-                target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
-                reduction='none',
+                target_dict["target_subtype_id"]
+                if self.subtype
+                else target_dict["target_type_id"],
+                reduction="none",
             )
-            loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
+            loss = loss[
+                target_dict["target_submask"]
+                if self.subtype
+                else target_dict["target_mask"]
+            ]
 
         return loss.mean()
 
@@ -117,18 +126,26 @@ class RetypingDecodeModule(pl.LightningModule):
                 # cross_entropy requires num_classes at the second dimension
                 variable_type_logits + mem_type_logits,
                 target_dict["target_type_id"][input_dict["target_mask"]],
-                reduction='none',
+                reduction="none",
             )
         else:
             loss = F.cross_entropy(
                 # cross_entropy requires num_classes at the second dimension
                 variable_type_logits.transpose(1, 2),
-                target_dict["target_subtype_id"] if self.subtype else target_dict["target_type_id"],
-                reduction='none',
+                target_dict["target_subtype_id"]
+                if self.subtype
+                else target_dict["target_type_id"],
+                reduction="none",
             )
-            loss = loss[target_dict["target_submask"] if self.subtype else target_dict["target_mask"]]
+            loss = loss[
+                target_dict["target_submask"]
+                if self.subtype
+                else target_dict["target_mask"]
+            ]
         targets = target_dict["target_type_id"][input_dict["target_mask"]]
-        preds = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
+        preds = self.decoder.predict(
+            context_encoding, input_dict, None, self.beam_size if test else 0
+        )
 
         return dict(
             retype_loss=loss.detach().cpu(),
@@ -148,9 +165,11 @@ class InterleaveDecodeModule(pl.LightningModule):
             self.mem_decoder = Decoder.build(config["mem_decoder"])
             self.decoder.mem_encoder = self.mem_encoder
             self.decoder.mem_decoder = self.mem_decoder
-            
+
     def training_step(self, input_dict, context_encoding, target_dict):
-        variable_type_logits, variable_name_logits = self.decoder(context_encoding, target_dict)
+        variable_type_logits, variable_name_logits = self.decoder(
+            context_encoding, target_dict
+        )
         # Retype
         if self.soft_mem_mask:
             variable_type_logits = variable_type_logits[target_dict["target_mask"]]
@@ -159,13 +178,13 @@ class InterleaveDecodeModule(pl.LightningModule):
             retype_loss = F.cross_entropy(
                 variable_type_logits + mem_type_logits,
                 target_dict["target_type_id"][target_dict["target_mask"]],
-                reduction='none',
+                reduction="none",
             )
         else:
             retype_loss = F.cross_entropy(
                 variable_type_logits.transpose(1, 2),
                 target_dict["target_type_id"],
-                reduction='none',
+                reduction="none",
             )
             retype_loss = retype_loss[target_dict["target_mask"]]
         retype_loss = retype_loss.mean()
@@ -174,14 +193,16 @@ class InterleaveDecodeModule(pl.LightningModule):
             # cross_entropy requires num_classes at the second dimension
             variable_name_logits.transpose(1, 2),
             target_dict["target_name_id"],
-            reduction='none',
+            reduction="none",
         )
         rename_loss = rename_loss[target_dict["target_mask"]].mean()
 
         return retype_loss, rename_loss
 
     def shared_eval_step(self, context_encoding, input_dict, target_dict, test=False):
-        variable_type_logits, variable_name_logits = self.decoder(context_encoding, target_dict)
+        variable_type_logits, variable_name_logits = self.decoder(
+            context_encoding, target_dict
+        )
         if self.soft_mem_mask:
             variable_type_logits = variable_type_logits[input_dict["target_mask"]]
             mem_encoding = self.mem_encoder(input_dict)
@@ -189,33 +210,40 @@ class InterleaveDecodeModule(pl.LightningModule):
             retype_loss = F.cross_entropy(
                 variable_type_logits + mem_type_logits,
                 target_dict["target_type_id"][input_dict["target_mask"]],
-                reduction='none',
+                reduction="none",
             )
         else:
             retype_loss = F.cross_entropy(
                 variable_type_logits.transpose(1, 2),
                 target_dict["target_type_id"],
-                reduction='none',
+                reduction="none",
             )
             retype_loss = retype_loss[target_dict["target_mask"]]
 
         rename_loss = F.cross_entropy(
             variable_name_logits.transpose(1, 2),
             target_dict["target_name_id"],
-            reduction='none',
+            reduction="none",
         )
         rename_loss = rename_loss[input_dict["target_mask"]]
-        ret = self.decoder.predict(context_encoding, input_dict, None, self.beam_size if test else 0)
+        ret = self.decoder.predict(
+            context_encoding, input_dict, None, self.beam_size if test else 0
+        )
         retype_preds, rename_preds = ret[0], ret[1]
 
         return dict(
             retype_loss=retype_loss.detach().cpu(),
-            retype_targets=target_dict["target_type_id"][input_dict["target_mask"]].detach().cpu(),
+            retype_targets=target_dict["target_type_id"][input_dict["target_mask"]]
+            .detach()
+            .cpu(),
             retype_preds=retype_preds.detach().cpu(),
             rename_loss=rename_loss.detach().cpu(),
-            rename_targets=target_dict["target_name_id"][input_dict["target_mask"]].detach().cpu(),
+            rename_targets=target_dict["target_name_id"][input_dict["target_mask"]]
+            .detach()
+            .cpu(),
             rename_preds=rename_preds.detach().cpu(),
         )
+
 
 class TypeReconstructionModel(pl.LightningModule):
     def __init__(self, config, config_load=None):
@@ -260,20 +288,26 @@ class TypeReconstructionModel(pl.LightningModule):
         total_loss = 0
         context_encoding = self.encoder(input_dict)
         if self.interleave:
-            retype_loss, rename_loss = self.interleave_module.training_step(input_dict, context_encoding, target_dict)
-            self.log('train_retype_loss', retype_loss)
-            self.log('train_rename_loss', rename_loss)
+            retype_loss, rename_loss = self.interleave_module.training_step(
+                input_dict, context_encoding, target_dict
+            )
+            self.log("train_retype_loss", retype_loss)
+            self.log("train_rename_loss", rename_loss)
             total_loss = retype_loss + rename_loss
         else:
             if self.retype:
-                loss = self.retyping_module.training_step(input_dict, context_encoding, target_dict)
-                self.log('train_retype_loss', loss)
+                loss = self.retyping_module.training_step(
+                    input_dict, context_encoding, target_dict
+                )
+                self.log("train_retype_loss", loss)
                 total_loss += loss
             if self.rename:
-                loss = self.renaming_module.training_step(input_dict, context_encoding, target_dict)
-                self.log('train_rename_loss', loss)
+                loss = self.renaming_module.training_step(
+                    input_dict, context_encoding, target_dict
+                )
+                self.log("train_rename_loss", loss)
                 total_loss += loss
-        self.log('train_loss', total_loss)
+        self.log("train_loss", total_loss)
         return total_loss
 
     def validation_step(self, batch, batch_idx):
@@ -292,13 +326,19 @@ class TypeReconstructionModel(pl.LightningModule):
         context_encoding = self.encoder(input_dict)
         ret_dict = {}
         if self.interleave:
-            ret_dict = self.interleave_module.shared_eval_step(context_encoding, input_dict, target_dict, test)
+            ret_dict = self.interleave_module.shared_eval_step(
+                context_encoding, input_dict, target_dict, test
+            )
         else:
             if self.retype:
-                ret = self.retyping_module.shared_eval_step(context_encoding, input_dict, target_dict, test)
+                ret = self.retyping_module.shared_eval_step(
+                    context_encoding, input_dict, target_dict, test
+                )
                 ret_dict = {**ret, **ret_dict}
             if self.rename:
-                ret = self.renaming_module.shared_eval_step(context_encoding, input_dict, target_dict, test)
+                ret = self.renaming_module.shared_eval_step(
+                    context_encoding, input_dict, target_dict, test
+                )
                 ret_dict = {**ret, **ret_dict}
 
         return dict(
@@ -306,7 +346,7 @@ class TypeReconstructionModel(pl.LightningModule):
             targets_nums=input_dict["target_mask"].sum(dim=1),
             test_meta=target_dict["test_meta"],
             index=input_dict["index"],
-            tgt_var_names=target_dict["tgt_var_names"]
+            tgt_var_names=target_dict["tgt_var_names"],
         )
 
     def validation_epoch_end(self, outputs):
@@ -316,8 +356,22 @@ class TypeReconstructionModel(pl.LightningModule):
         final_ret = self._shared_epoch_end(outputs, "test")
         if "pred_file" in self.config["test"]:
             results = {}
-            for (binary, func_name, decom_var_name), retype_pred, rename_pred in zip(final_ret["indexes"], final_ret["retype_preds"].tolist() if "retype_preds" in final_ret else [None] * len(final_ret["indexes"]), final_ret["rename_preds"].tolist() if "rename_preds" in final_ret else [None] * len(final_ret["indexes"])):
-                results.setdefault(binary, {}).setdefault(func_name, {})[decom_var_name[2:-2]] = self.vocab.types.id2word.get(retype_pred, ""), self.vocab.names.id2word.get(rename_pred, "")
+            for (binary, func_name, decom_var_name), retype_pred, rename_pred in zip(
+                final_ret["indexes"],
+                final_ret["retype_preds"].tolist()
+                if "retype_preds" in final_ret
+                else [None] * len(final_ret["indexes"]),
+                final_ret["rename_preds"].tolist()
+                if "rename_preds" in final_ret
+                else [None] * len(final_ret["indexes"]),
+            ):
+                results.setdefault(binary, {}).setdefault(func_name, {})[
+                    decom_var_name[2:-2]
+                ] = self.vocab.types.id2word.get(
+                    retype_pred, ""
+                ), self.vocab.names.id2word.get(
+                    rename_pred, ""
+                )
             pred_file = self.config["test"]["pred_file"]
             json.dump(results, open(pred_file, "w"))
 
@@ -336,7 +390,13 @@ class TypeReconstructionModel(pl.LightningModule):
             rename_preds = torch.cat([x[f"rename_preds"] for x in outputs])
             rename_targets = torch.cat([x[f"rename_targets"] for x in outputs])
             if (retype_preds == retype_targets).sum() > 0:
-                self.log(f"{prefix}_rename_on_correct_retype_acc", accuracy(rename_preds[retype_preds == retype_targets], rename_targets[retype_preds == retype_targets]))
+                self.log(
+                    f"{prefix}_rename_on_correct_retype_acc",
+                    accuracy(
+                        rename_preds[retype_preds == retype_targets],
+                        rename_targets[retype_preds == retype_targets],
+                    ),
+                )
 
         return final_ret
 
@@ -348,14 +408,24 @@ class TypeReconstructionModel(pl.LightningModule):
         loss = torch.cat([x[f"{task}_loss"] for x in outputs]).mean()
         self.log(f"{prefix}_{task}_loss", loss)
         self.log(f"{prefix}_{task}_acc", accuracy(preds, targets))
-        self.log(f"{prefix}_{task}_acc_macro", accuracy(preds, targets, num_classes=len(self.vocab.types), class_reduction='macro'))
+        self.log(
+            f"{prefix}_{task}_acc_macro",
+            accuracy(
+                preds,
+                targets,
+                num_classes=len(self.vocab.types),
+                class_reduction="macro",
+            ),
+        )
         # func acc
         num_correct, num_funcs, pos = 0, 0, 0
         body_in_train_mask = []
         name_in_train_mask = []
-        for target_num, test_metas in map(lambda x: (x["targets_nums"], x["test_meta"]), outputs):
+        for target_num, test_metas in map(
+            lambda x: (x["targets_nums"], x["test_meta"]), outputs
+        ):
             for num, test_meta in zip(target_num.tolist(), test_metas):
-                num_correct += all(preds[pos:pos + num] == targets[pos:pos + num])
+                num_correct += all(preds[pos : pos + num] == targets[pos : pos + num])
                 pos += num
                 body_in_train_mask += [test_meta["function_body_in_train"]] * num
                 name_in_train_mask += [test_meta["function_name_in_train"]] * num
@@ -366,10 +436,19 @@ class TypeReconstructionModel(pl.LightningModule):
             # HACK for data parallel
             body_in_train_mask = body_in_train_mask[:, 0]
             name_in_train_mask = name_in_train_mask[:, 0]
-        self.log(f"{prefix}_{task}_body_in_train_acc", accuracy(preds[body_in_train_mask], targets[body_in_train_mask]))
+        self.log(
+            f"{prefix}_{task}_body_in_train_acc",
+            accuracy(preds[body_in_train_mask], targets[body_in_train_mask]),
+        )
         if (~body_in_train_mask).sum() > 0:
-            self.log(f"{prefix}_{task}_body_not_in_train_acc", accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]))
-        assert pos == sum(x["targets_nums"].sum() for x in outputs), (pos, sum(x["targets_nums"].sum() for x in outputs))
+            self.log(
+                f"{prefix}_{task}_body_not_in_train_acc",
+                accuracy(preds[~body_in_train_mask], targets[~body_in_train_mask]),
+            )
+        assert pos == sum(x["targets_nums"].sum() for x in outputs), (
+            pos,
+            sum(x["targets_nums"].sum() for x in outputs),
+        )
         self.log(f"{prefix}_{task}_func_acc", num_correct / num_funcs)
 
         struc_mask = torch.zeros(len(targets), dtype=torch.bool)
@@ -378,13 +457,38 @@ class TypeReconstructionModel(pl.LightningModule):
                 struc_mask[idx] = 1
         task_str = "" if task == "retype" else f"_{task}"
         if struc_mask.sum() > 0:
-            self.log(f"{prefix}{task_str}_struc_acc", accuracy(preds[struc_mask], targets[struc_mask]))
+            self.log(
+                f"{prefix}{task_str}_struc_acc",
+                accuracy(preds[struc_mask], targets[struc_mask]),
+            )
             # adjust for the number of classes
-            self.log(f"{prefix}{task_str}_struc_acc_macro", accuracy(preds[struc_mask], targets[struc_mask], num_classes=len(self.vocab.types), class_reduction='macro') * len(self.vocab.types) / len(self.vocab.types.struct_set))
+            self.log(
+                f"{prefix}{task_str}_struc_acc_macro",
+                accuracy(
+                    preds[struc_mask],
+                    targets[struc_mask],
+                    num_classes=len(self.vocab.types),
+                    class_reduction="macro",
+                )
+                * len(self.vocab.types)
+                / len(self.vocab.types.struct_set),
+            )
         if (struc_mask & body_in_train_mask).sum() > 0:
-            self.log(f"{prefix}{task_str}_body_in_train_struc_acc", accuracy(preds[struc_mask & body_in_train_mask], targets[struc_mask & body_in_train_mask]))
+            self.log(
+                f"{prefix}{task_str}_body_in_train_struc_acc",
+                accuracy(
+                    preds[struc_mask & body_in_train_mask],
+                    targets[struc_mask & body_in_train_mask],
+                ),
+            )
         if (~body_in_train_mask & struc_mask).sum() > 0:
-            self.log(f"{prefix}{task_str}_body_not_in_train_struc_acc", accuracy(preds[~body_in_train_mask & struc_mask], targets[~body_in_train_mask & struc_mask]))
+            self.log(
+                f"{prefix}{task_str}_body_not_in_train_struc_acc",
+                accuracy(
+                    preds[~body_in_train_mask & struc_mask],
+                    targets[~body_in_train_mask & struc_mask],
+                ),
+            )
         return {
             "indexes": indexes,
             "tgt_var_names": tgt_var_names,

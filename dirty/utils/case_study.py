@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 from utils.evaluate import add_options, load_data
 
+
 def view(c, cc, dcc):
     for typ, cnt in c.most_common(10):
         print(typ)
@@ -19,6 +20,7 @@ def view(c, cc, dcc):
         # print()
         # print("-" * 30)
 
+
 def find_most_common(results, dataset):
     c = Counter()
     cc = defaultdict(Counter)
@@ -27,9 +29,19 @@ def find_most_common(results, dataset):
     scc = defaultdict(Counter)
     sdcc = defaultdict(Counter)
     for idx, example in tqdm(enumerate(dataset)):
-        for src_name, src_type, tgt_type in zip(example.src_var_names, example.src_var_types_str, example.tgt_var_types_str):
-            pred_type, _ = results.get(example.binary, {}).get(example.name, {}).get(src_name[2:-2], ("", ""))
-            if not example.test_meta["function_body_in_train"] and pred_type and pred_type != "<unk>":
+        for src_name, src_type, tgt_type in zip(
+            example.src_var_names, example.src_var_types_str, example.tgt_var_types_str
+        ):
+            pred_type, _ = (
+                results.get(example.binary, {})
+                .get(example.name, {})
+                .get(src_name[2:-2], ("", ""))
+            )
+            if (
+                not example.test_meta["function_body_in_train"]
+                and pred_type
+                and pred_type != "<unk>"
+            ):
                 c[tgt_type] += 1
                 cc[tgt_type][pred_type] += 1
                 dcc[tgt_type][src_type] += 1

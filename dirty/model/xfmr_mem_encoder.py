@@ -11,6 +11,7 @@ from utils.vocab import PAD_ID, Vocab
 
 from .encoder import Encoder
 
+
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000):
         super(PositionalEncoding, self).__init__()
@@ -57,7 +58,9 @@ class XfmrMemEncoder(Encoder):
 
         vocab = Vocab.load(config["vocab_file"])
         reg_pos_size = len(vocab.regs)
-        self.src_word_embed = nn.Embedding(1030 + reg_pos_size, config["source_embedding_size"])
+        self.src_word_embed = nn.Embedding(
+            1030 + reg_pos_size, config["source_embedding_size"]
+        )
 
         dropout = config["dropout"]
         self.encoder = TransformerModel(

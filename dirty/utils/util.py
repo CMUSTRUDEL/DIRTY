@@ -13,7 +13,7 @@ class cached_property(object):
     """
 
     def __init__(self, func):
-        self.__doc__ = getattr(func, '__doc__')
+        self.__doc__ = getattr(func, "__doc__")
         self.func = func
 
     def __get__(self, obj, cls):
@@ -26,7 +26,12 @@ class cached_property(object):
 def memReport():
     for obj in gc.get_objects():
         if torch.is_tensor(obj):
-            print(type(obj), obj.size(), obj.element_size() * obj.nelement() / 1024 / 1024, file=sys.stderr)
+            print(
+                type(obj),
+                obj.size(),
+                obj.element_size() * obj.nelement() / 1024 / 1024,
+                file=sys.stderr,
+            )
 
 
 def cpuStats():
@@ -35,8 +40,8 @@ def cpuStats():
     print(psutil.virtual_memory())  # physical memory usage
     pid = os.getpid()
     py = psutil.Process(pid)
-    memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
-    print('memory GB:', memoryUse, file=sys.stderr)
+    memoryUse = py.memory_info()[0] / 2.0 ** 30  # memory use in GB...I think
+    print("memory GB:", memoryUse, file=sys.stderr)
 
 
 def update(d, u):

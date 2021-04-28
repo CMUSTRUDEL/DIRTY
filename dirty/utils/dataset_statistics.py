@@ -20,6 +20,7 @@ def _file_iter_to_line_iter(jsonl_iter):
             json_line["binary"] = jsonl["__key__"]
             yield json_line
 
+
 if __name__ == "__main__":
     print(sys.argv[1])
     urls = sorted(glob.glob(sys.argv[1]))
@@ -29,12 +30,16 @@ if __name__ == "__main__":
     uniq_binary = set()
     token_len = []
     num_vars = []
+
     def tokenlen(example):
         return len(example["code_tokens"])
+
     def num_var(example):
         return len(example["source"])
+
     def name(example):
         return example["name"]
+
     # def num_var(example):
     #     return len(set([token for token in example["code_tokens"] if token.startswith("@@") and token.endswith("@@") and len(token) > 4]))
     # def name(example):
@@ -46,7 +51,7 @@ if __name__ == "__main__":
         uniq_code.add(name(example) + "".join(example["code_tokens"]))
         uniq_binary.add(example["binary"][:64])
         # body_in_train.append(example["test_meta"]["function_body_in_train"])
-    
+
     print(np.mean(token_len), np.median(token_len))
     print(np.mean(num_vars), np.median(num_vars))
     print(len(uniq_code))

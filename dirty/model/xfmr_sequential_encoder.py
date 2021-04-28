@@ -11,6 +11,7 @@ from utils.vocab import PAD_ID, Vocab
 
 from .encoder import Encoder
 
+
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000):
         super(PositionalEncoding, self).__init__()
@@ -92,9 +93,7 @@ class XfmrSequentialEncoder(Encoder):
 
         return cls(params)
 
-    def forward(
-        self, tensor_dict: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+    def forward(self, tensor_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Returns the contextualized encoding for code tokens and variables
 
         :param tensor_dict: [description]
@@ -126,7 +125,10 @@ class XfmrSequentialEncoder(Encoder):
             code_token_encoding * variable_mention_mask.unsqueeze(-1)
         )
         variable_encoding = torch.zeros(
-            tensor_dict["src_code_tokens"].size(0), variable_num, encoding_size, device=self.device
+            tensor_dict["src_code_tokens"].size(0),
+            variable_num,
+            encoding_size,
+            device=self.device,
         )
         variable_encoding.scatter_add_(
             1,
@@ -155,9 +157,7 @@ class XfmrSequentialEncoder(Encoder):
         # (batch_size, max_code_length)
         code_token_mask = torch.ne(code_sequence, PAD_ID)
 
-        hidden = self.encoder(
-            code_token_embedding.transpose(0, 1), ~code_token_mask
-        )
+        hidden = self.encoder(code_token_embedding.transpose(0, 1), ~code_token_mask)
         hidden = hidden.transpose(0, 1)
 
         # apply dropout to the last layer

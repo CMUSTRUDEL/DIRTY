@@ -12,7 +12,9 @@ class SimpleDecoder(nn.Module):
 
         self.vocab = vocab = Vocab.load(config["vocab_file"])
         self.output = nn.Linear(
-            config["hidden_size"], len(vocab.names) if config.get("rename", False) else len(vocab.types), bias=True
+            config["hidden_size"],
+            len(vocab.names) if config.get("rename", False) else len(vocab.types),
+            bias=True,
         )
         self.config: Dict = config
 
@@ -29,11 +31,18 @@ class SimpleDecoder(nn.Module):
         model = cls(params)
         return model
 
-    def forward(self, context_encoding: Dict[str, torch.Tensor], target_dict: Dict[str, torch.Tensor]):
+    def forward(
+        self,
+        context_encoding: Dict[str, torch.Tensor],
+        target_dict: Dict[str, torch.Tensor],
+    ):
         logits = self.output(context_encoding["variable_encoding"])
         return logits
 
     def predict(
-        self, context_encoding: Dict[str, torch.Tensor], target_dict: Dict[str, torch.Tensor], variable_type_logits: torch.Tensor,
+        self,
+        context_encoding: Dict[str, torch.Tensor],
+        target_dict: Dict[str, torch.Tensor],
+        variable_type_logits: torch.Tensor,
     ):
         return variable_type_logits[target_dict["target_mask"]].argmax(dim=1)

@@ -3,12 +3,18 @@ import argparse
 import numpy as np
 import torch
 from tqdm import tqdm
-from sklearn.metrics import normalized_mutual_info_score, mutual_info_score, adjusted_mutual_info_score
+from sklearn.metrics import (
+    normalized_mutual_info_score,
+    mutual_info_score,
+    adjusted_mutual_info_score,
+)
 
 from utils.evaluate import load_data
 
+
 def add_options(parser):
     parser.add_argument("--config-file", type=str, required=True)
+
 
 def compute_mi(dataset):
     name_dict = {}
@@ -28,6 +34,7 @@ def compute_mi(dataset):
             break
     np.random.shuffle(names)
     return adjusted_mutual_info_score(names, types)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

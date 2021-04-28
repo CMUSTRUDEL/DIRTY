@@ -47,7 +47,9 @@ def train(args):
 
     # dataloaders
     batch_size = config["train"]["batch_size"]
-    train_set = Dataset(config["data"]["train_file"], config["data"], percent=float(args["--percent"]))
+    train_set = Dataset(
+        config["data"]["train_file"], config["data"], percent=float(args["--percent"])
+    )
     dev_set = Dataset(config["data"]["dev_file"], config["data"])
     train_loader = DataLoader(
         train_set,
@@ -69,7 +71,9 @@ def train(args):
 
     wandb_logger = WandbLogger(name=args["--expname"], project="dire", log_model=True)
     wandb_logger.log_hyperparams(config)
-    resume_from_checkpoint = args["--eval-ckpt"] if args["--eval-ckpt"] else args["--resume"]
+    resume_from_checkpoint = (
+        args["--eval-ckpt"] if args["--eval-ckpt"] else args["--resume"]
+    )
     if resume_from_checkpoint == "":
         resume_from_checkpoint = None
     trainer = pl.Trainer(
@@ -78,11 +82,19 @@ def train(args):
         gpus=1 if args["--cuda"] else None,
         auto_select_gpus=True,
         gradient_clip_val=1,
-        callbacks=[EarlyStopping(monitor="val_retype_acc" if config["data"]["retype"] else "val_rename_acc", mode="max", patience=config["train"]["patience"])],
+        callbacks=[
+            EarlyStopping(
+                monitor="val_retype_acc"
+                if config["data"]["retype"]
+                else "val_rename_acc",
+                mode="max",
+                patience=config["train"]["patience"],
+            )
+        ],
         check_val_every_n_epoch=config["train"]["check_val_every_n_epoch"],
         progress_bar_refresh_rate=10,
         accumulate_grad_batches=config["train"]["grad_accum_step"],
-        resume_from_checkpoint=resume_from_checkpoint
+        resume_from_checkpoint=resume_from_checkpoint,
     )
     if args["--eval-ckpt"]:
         # HACK: necessary to make pl test work for IterableDataset

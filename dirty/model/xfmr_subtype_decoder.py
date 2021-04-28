@@ -69,7 +69,15 @@ class XfmrSubtypeDecoder(XfmrDecoder):
         # Shift 1 position to right
         tgt = torch.cat([torch.zeros_like(tgt[:, :1]), tgt[:, :-1]], dim=1)
         # Repeat variable encoding according to tgt_sizes
-        tgt = torch.cat([XfmrSubtypeDecoder.repeat_variable_encoding(tgt, context_encoding, target_dict), tgt], dim=-1)
+        tgt = torch.cat(
+            [
+                XfmrSubtypeDecoder.repeat_variable_encoding(
+                    tgt, context_encoding, target_dict
+                ),
+                tgt,
+            ],
+            dim=-1,
+        )
         tgt = self.target_transform(tgt)
         # mask out attention to subsequent inputs which include the ground truth for current step
         tgt_mask = XfmrDecoder.generate_square_subsequent_mask(tgt.shape[1], tgt.device)
@@ -93,7 +101,9 @@ class XfmrSubtypeDecoder(XfmrDecoder):
             idx = 0
             sizes = tgt_sizes[b][(tgt_sizes[b] > 0)].tolist()
             for vid in range(len(sizes)):
-                repeated_variable_encoding[b, idx: idx + sizes[vid]] = context_encoding["variable_encoding"][b, vid]
+                repeated_variable_encoding[
+                    b, idx : idx + sizes[vid]
+                ] = context_encoding["variable_encoding"][b, vid]
                 idx += sizes[vid]
         return repeated_variable_encoding
 
@@ -113,7 +123,9 @@ class XfmrSubtypeDecoder(XfmrDecoder):
         tgt = self.target_transform(
             torch.cat([context_encoding["variable_encoding"][:, :1], tgt], dim=-1)
         )
-        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(max_time_step, tgt.device)
+        tgt_mask = XfmrDecoder.generate_square_subsequent_mask(
+            max_time_step, tgt.device
+        )
         preds_list = []
         # Keep track of which variable is being decoded for each example in batch
         num_vars = (target_dict["target_type_sizes"] > 0).sum(dim=1).tolist()
@@ -135,7 +147,9 @@ class XfmrSubtypeDecoder(XfmrDecoder):
                 for b in range(batch_size):
                     if current_vars[b] == num_vars[b]:
                         # Already finished for this example
-                        preds_step.append(torch.zeros(1, dtype=torch.long, device=logits.device))
+                        preds_step.append(
+                            torch.zeros(1, dtype=torch.long, device=logits.device)
+                        )
                         continue
                     scores = logits[b, 0]
                     pred = scores.argmax(dim=0, keepdim=True)
@@ -148,7 +162,16 @@ class XfmrSubtypeDecoder(XfmrDecoder):
                 # Update tgt for next step with prediction at the current step
                 if sum(current_vars) < sum(num_vars):
                     tgt_step = torch.cat(
-                        [context_encoding["variable_encoding"][range(batch_size), [min(cur_var, num_var - 1) for cur_var, num_var in zip(current_vars, num_vars)]].unsqueeze(1), self.target_embedding(pred_step.unsqueeze(dim=1))],
+                        [
+                            context_encoding["variable_encoding"][
+                                range(batch_size),
+                                [
+                                    min(cur_var, num_var - 1)
+                                    for cur_var, num_var in zip(current_vars, num_vars)
+                                ],
+                            ].unsqueeze(1),
+                            self.target_embedding(pred_step.unsqueeze(dim=1)),
+                        ],
                         dim=-1,
                     )
                     tgt_step = self.target_transform(tgt_step)
@@ -157,6 +180,7 @@ class XfmrSubtypeDecoder(XfmrDecoder):
                     break
         except Exception:
             import pdb
+
             pdb.set_trace()
         preds = torch.stack(preds_list).transpose(0, 1)
         return list(preds)

@@ -44,7 +44,9 @@ def example_generator(json_str_list):
         except ValueError:
             continue
         cf = CollectedFunction.from_json(json_dict)
-        example = Example.from_cf(cf, binary_file=meta, max_stack_length=1024, max_type_size=1024)
+        example = Example.from_cf(
+            cf, binary_file=meta, max_stack_length=1024, max_type_size=1024
+        )
 
         if example.is_valid_example:
             canonical_code = canonicalize_code(example.raw_code)
@@ -73,6 +75,7 @@ def json_line_reader(args):
 
     return func_json_list
 
+
 def type_dumper(args):
     tgt_folder, fname = args
     typelib = TypeLib()
@@ -82,9 +85,12 @@ def type_dumper(args):
             for var in e.target.values():
                 typelib.add(var.typ)
     typelib.sort()
-    with open(os.path.join(tgt_folder, "types", fname.split("/")[-1]), "w") as type_lib_file:
+    with open(
+        os.path.join(tgt_folder, "types", fname.split("/")[-1]), "w"
+    ) as type_lib_file:
         encoded = TypeLibCodec.encode(typelib)
         type_lib_file.write(encoded)
+
 
 def main(args):
     np.random.seed(1234)
@@ -127,7 +133,8 @@ def main(args):
         example_iter = pool.imap(example_generator, json_iter, chunksize=64)
 
         for examples in tqdm(example_iter):
-            if not examples: continue
+            if not examples:
+                continue
             json_file_name = examples[0].binary_file["file_name"].split("/")[-1]
             with open(os.path.join(tgt_folder, "files/", json_file_name), "w") as f:
                 for example in examples:
@@ -187,7 +194,7 @@ def main(args):
     typelib = TypeLib()
     for fname in tqdm(train_files):
         fname = os.path.basename(fname)
-        fname = fname[:fname.index(".")] + ".jsonl"
+        fname = fname[: fname.index(".")] + ".jsonl"
         typelib.add_json_file(os.path.join(tgt_folder, "types", fname))
     typelib.prune(5)
     typelib.sort()
