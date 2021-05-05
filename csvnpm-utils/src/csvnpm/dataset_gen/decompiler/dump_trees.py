@@ -1,19 +1,15 @@
 import gzip
 import os
 import pickle
-
 from typing import Dict, List
 
 import jsonlines  # type: ignore
-
-from csvnpm.binary.ida_ast import AST
 from csvnpm.binary.dire_types import TypeLib
 from csvnpm.binary.function import CollectedFunction, Function
-from csvnpm.binary.variable import Location, Stack, Register, Variable
-
+from csvnpm.binary.ida_ast import AST
+from csvnpm.ida import ida_lines
 from csvnpm.ida import idaapi as ida
 from csvnpm.ida import idautils
-from csvnpm.ida import ida_lines
 
 from .collect import Collector
 
@@ -31,13 +27,13 @@ class CollectDecompiler(Collector):
         print("Done")
         self.functions: List[CollectedFunction] = list()
         self.output_file_name = os.path.join(
-            os.environ['OUTPUT_DIR'],
+            os.environ["OUTPUT_DIR"],
             "bins",
-            os.environ['PREFIX'] + ".jsonl.gz",
+            os.environ["PREFIX"] + ".jsonl.gz",
         )
 
     def write_info(self) -> None:
-        with gzip.open(self.output_file_name, 'wt') as output_file:
+        with gzip.open(self.output_file_name, "wt") as output_file:
             with jsonlines.Writer(output_file, compact=True) as writer:
                 for cf in self.functions:
                     writer.write(cf.to_json())

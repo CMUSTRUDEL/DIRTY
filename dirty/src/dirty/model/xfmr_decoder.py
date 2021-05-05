@@ -1,12 +1,13 @@
-from typing import Dict, List, Tuple
+from typing import Dict
 
 import torch
 import torch.nn as nn
-from torch.nn import TransformerDecoder, TransformerDecoderLayer, LayerNorm
-from torch.nn.modules import activation
+from csvnpm.binary.dire_types import TypeLibCodec
+from torch.nn import LayerNorm, TransformerDecoder, TransformerDecoderLayer
+
 from dirty.utils import util
 from dirty.utils.vocab import Vocab
-from csvnpm.binary.dire_types import TypeLibCodec
+
 from .beam import Beam
 
 
@@ -99,7 +100,8 @@ class XfmrDecoder(nn.Module):
         tgt = torch.cat([torch.zeros_like(tgt[:, :1]), tgt[:, :-1]], dim=1)
         tgt = torch.cat([context_encoding["variable_encoding"], tgt], dim=-1)
         tgt = self.target_transform(tgt)
-        # mask out attention to subsequent inputs which include the ground truth for current step
+        # mask out attention to subsequent inputs which include the ground
+        # truth for current step
         tgt_mask = XfmrDecoder.generate_square_subsequent_mask(tgt.shape[1], tgt.device)
         # TransformerModels have batch_first=False
         hidden = self.decoder(
@@ -317,7 +319,9 @@ class XfmrDecoder(nn.Module):
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int, device: torch.device) -> torch.Tensor:
-        r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
+        r"""
+        Generate a square mask for the sequence. The masked positions are filled with
+          float('-inf').
         Unmasked positions are filled with float(0.0).
         """
         mask = (torch.triu(torch.ones(sz, sz, device=device)) == 1).transpose(0, 1)
@@ -340,7 +344,8 @@ class XfmrInterleaveDecoder(XfmrDecoder):
         retype_vocab_size = len(self.vocab.types)
         rename_vocab_size = len(self.vocab.names)
         self.target_embedding = nn.Embedding(
-            retype_vocab_size + rename_vocab_size, config["target_embedding_size"]
+            retype_vocab_size + rename_vocab_size,
+            config["target_embedding_size"],
         )
         self.target_transform = nn.Linear(
             config["target_embedding_size"] + config["hidden_size"],
@@ -408,14 +413,16 @@ class XfmrInterleaveDecoder(XfmrDecoder):
         # interleave variable encoding
         # (B, NUM_VAR, H) -> (B, NUM_VAR * 2, H)
         variable_encoding = XfmrInterleaveDecoder.interleave_3d(
-            context_encoding["variable_encoding"], context_encoding["variable_encoding"]
+            context_encoding["variable_encoding"],
+            context_encoding["variable_encoding"],
         )
 
         # Shift 1 position to right
         tgt = torch.cat([torch.zeros_like(tgt[:, :1]), tgt[:, :-1]], dim=1)
         tgt = torch.cat([variable_encoding, tgt], dim=-1)
         tgt = self.target_transform(tgt)
-        # mask out attention to subsequent inputs which include the ground truth for current step
+        # mask out attention to subsequent inputs which include the ground
+        # truth for current step
         tgt_mask = XfmrDecoder.generate_square_subsequent_mask(tgt.shape[1], tgt.device)
         # TransformerModels have batch_first=False
         tgt_padding_mask = XfmrInterleaveDecoder.interleave_2d(
@@ -460,7 +467,8 @@ class XfmrInterleaveDecoder(XfmrDecoder):
         """Greedy decoding"""
 
         variable_encoding = XfmrInterleaveDecoder.interleave_3d(
-            context_encoding["variable_encoding"], context_encoding["variable_encoding"]
+            context_encoding["variable_encoding"],
+            context_encoding["variable_encoding"],
         )
         tgt_padding_mask = XfmrInterleaveDecoder.interleave_2d(
             input_dict["target_mask"], input_dict["target_mask"]
@@ -564,7 +572,8 @@ class XfmrInterleaveDecoder(XfmrDecoder):
         """Beam search decoding"""
 
         variable_encoding = XfmrInterleaveDecoder.interleave_3d(
-            context_encoding["variable_encoding"], context_encoding["variable_encoding"]
+            context_encoding["variable_encoding"],
+            context_encoding["variable_encoding"],
         )
         tgt_padding_mask = XfmrInterleaveDecoder.interleave_2d(
             input_dict["target_mask"], input_dict["target_mask"]

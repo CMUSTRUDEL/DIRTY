@@ -1,8 +1,6 @@
 import math
-from typing import Dict, List, Union
+from typing import Dict
 
-import numpy as np
-import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
@@ -118,7 +116,7 @@ class XfmrSequentialEncoder(Encoder):
         variable_mention_num = tensor_dict["variable_mention_num"]
 
         # (batch_size, max_variable_mention_num, encoding_size)
-        max_time_step = variable_mention_to_variable_id.size(1)
+        max_time_step = variable_mention_to_variable_id.size(1)  # noqa: F841
         variable_num = variable_mention_num.size(1)
         encoding_size = code_token_encoding.size(-1)
 

@@ -6,17 +6,12 @@ ctype_t, which is just an integer. This is stored in "meta"
 
 
 import typing as t
+from json import dumps
 
-from collections import defaultdict
-from json import loads, dumps
+from csvnpm.binary.dire_types import TypeInfo, TypeLib, TypeLibCodec
+from csvnpm.ida import idaapi as ida
 
-from csvnpm.binary.dire_types import TypeLib, TypeLibCodec, TypeInfo
-from csvnpm.binary.variable import Variable
-
-from csvnpm.ida import idaapi as ida  # type: ignore
-
-
-#################### AST Nodes ####################
+# =================== AST Nodes ===================#
 
 
 class Statement:
@@ -59,7 +54,9 @@ class Expression(Statement):
 
 class Empty(Expression):
     """An empty expression"""
+
     meta = ida.cot_empty
+
 
 class UnaryExpression(Expression):
     """A unary expression. Has one operand stored in x"""
@@ -82,7 +79,7 @@ class UnaryExpression(Expression):
         return cls(node_id=d["id"], x=x)
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "UnaryExpression":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "UnaryExpression":  # type: ignore # noqa: E501
         node_id = ast.next_id()
         x = parse_hexrays_expression(item.x, ast)
         return cls(node_id=node_id, x=x)
@@ -116,7 +113,7 @@ class BinaryExpression(Expression):
         return cls(node_id=d["id"], x=x, y=y)
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "BinaryExpression":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "BinaryExpression":  # type: ignore # noqa: E501
         node_id = ast.next_id()
         x = parse_hexrays_expression(item.x, ast)
         y = parse_hexrays_expression(item.y, ast)
@@ -241,7 +238,7 @@ class Tern(Expression):
         return cls(node_id=d["id"], x=x, y=y, z=z)
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Tern":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Tern":  # type: ignore
         node_id = ast.next_id()
         x = parse_hexrays_expression(item.x, ast)
         y = parse_hexrays_expression(item.y, ast)
@@ -481,7 +478,7 @@ class Ptr(Expression):
         return cls(node_id=d["id"], x=x, ptrsize=d["p"])
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Ptr":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Ptr":  # type: ignore
         node_id = ast.next_id()
         x = parse_hexrays_expression(item.x, ast)
         return cls(node_id=node_id, x=x, ptrsize=item.ptrsize)
@@ -563,14 +560,14 @@ class Call(Expression):
             )
 
         @classmethod
-        def from_item(cls, item: ida.carg_t, ast: "AST") -> "Call.Arg":
+        def from_item(cls, item: ida.carg_t, ast: "AST") -> "Call.Arg":  # type: ignore
             node_id = ast.next_id()
             is_vararg = item.is_vararg
             idx = None
             name = None
             if item.v:
                 idx = item.v.idx
-                assert(ast.function is not None)
+                assert ast.function is not None
                 name = ast.function.lvars[idx].name
             formal_type = TypeLib.parse_ida_type(item.formal_type)
             return cls(
@@ -608,7 +605,7 @@ class Call(Expression):
         return cls(node_id=d["id"], x=x, a=a)
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Call":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Call":  # type: ignore
         node_id = ast.next_id()
         x = parse_hexrays_expression(item.x, ast)
         a = [Call.Arg.from_item(i, ast) for i in item.a]
@@ -649,7 +646,7 @@ class Memref(Expression):
         return cls(node_id=d["id"], x=x, m=d["m"])
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Memref":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Memref":  # type: ignore
         node_id = ast.next_id()
         x = parse_hexrays_expression(item.x, ast)
         return cls(node_id=node_id, x=x, m=item.m)
@@ -685,7 +682,7 @@ class Memptr(Expression):
         return cls(node_id=d["id"], x=x, m=d["m"], ptrsize=d["p"])
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Memptr":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Memptr":  # type: ignore
         node_id = ast.next_id()
         x = parse_hexrays_expression(item.x, ast)
         return cls(node_id=node_id, x=x, m=item.m, ptrsize=item.ptrsize)
@@ -715,9 +712,9 @@ class Num(Expression):
         return cls(node_id=d["id"], n=d["n"])
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Num":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Num":  # type: ignore
         node_id = ast.next_id()
-        return cls(node_id=node_id, n=item.n._value)
+        return cls(node_id=node_id, n=item.n._value)  # type: ignore
 
     def __repr__(self):
         return f"Num ({self.n})"
@@ -750,7 +747,7 @@ class Str(Expression):
         return cls(node_id=d["id"], string=d["s"])
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Str":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Str":  # type: ignore
         node_id = ast.next_id()
         return cls(node_id=node_id, string=item.string)
 
@@ -785,7 +782,7 @@ class Obj(Expression):
         return cls(node_id=d["id"], obj_ea=d["e"], func_name=d["n"])
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Obj":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Obj":  # type: ignore
         node_id = ast.next_id()
         func_name = ida.get_func_name(item.obj_ea)
         return cls(node_id=node_id, obj_ea=item.obj_ea, func_name=func_name)
@@ -821,10 +818,10 @@ class Var(Expression):
         return cls(node_id=d["id"], idx=d["i"], name=d["n"])
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Var":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Var":  # type: ignore
         node_id = ast.next_id()
         idx = item.v.idx
-        assert(ast.function is not None)
+        assert ast.function is not None
         name = ast.function.lvars[idx].name
         return cls(node_id=node_id, idx=idx, name=name)
 
@@ -874,7 +871,7 @@ class Type(Expression):
         return cls(node_id=d["id"], typ=typ)
 
     @classmethod
-    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Type":
+    def from_item(cls, item: ida.cexpr_t, ast: "AST") -> "Type":  # type: ignore
         node_id = ast.next_id()
         return cls(node_id=node_id, typ=TypeLib.parse_ida_type(item.type))
 
@@ -882,7 +879,7 @@ class Type(Expression):
         return f"Type ({self.typ})"
 
 
-########## Statements ##########
+# ========= Statements =========#
 
 
 class Block(Statement):
@@ -1103,7 +1100,14 @@ class For(Loop):
         return cls(node_id=node_id, body=body, expr=expr, init=init, step=step)
 
     def __repr__(self):
-        return f"For (expr: {self.expr}, init: {self.init}, step: {self.step}, body: {self.body})"
+        return ", ".join(
+            [
+                f"For (expr: {self.expr}",
+                f"init: {self.init}",
+                f"step: {self.step}",
+                f"body: {self.body})",
+            ]
+        )
 
 
 class Switch(ExprStatement):
@@ -1267,7 +1271,7 @@ class Continue(Statement):
     meta = ida.cit_continue
 
 
-#################### Utilities ####################
+# =================== Utilities ===================#
 
 
 def _get_all_classes(cls) -> set:
@@ -1302,19 +1306,22 @@ def decode_json(d) -> "Expression":
     meta = d["M"]
     return expressions_and_statements[meta].from_json(d)
 
+
 def decode_json_statement(d) -> t.Union[Statement, Expression]:
     retval = decode_json(d)
     if retval:
-        assert(isinstance(retval, Statement))
+        assert isinstance(retval, Statement)
     return retval
+
 
 def decode_json_expression(d) -> Expression:
     retval = decode_json(d)
     if retval:
-        assert(isinstance(retval, Expression))
+        assert isinstance(retval, Expression)
     return retval
 
-#################### AST ####################
+
+# =================== AST ===================#
 class AST:
     def __init__(
         self,

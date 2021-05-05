@@ -7,10 +7,10 @@
 #   reference shadowed global variables. We throw away this operator.
 
 from enum import Enum, auto
-from pygments import lex
-from pygments.token import Token
-from pygments.token import is_token_subtype
-from pygments.lexers.c_cpp import CLexer, inherit
+
+from pygments import lex  # type: ignore
+from pygments.lexers.c_cpp import CLexer, inherit  # type: ignore
+from pygments.token import Token, is_token_subtype  # type: ignore
 
 Token.Placeholder = Token.Token.Placeholder
 
@@ -109,5 +109,5 @@ class HexRaysLexer(CLexer):
 
 
 if __name__ == "__main__":
-    code = '__int64 (__fastcall **)(unsigned __int64, signed __int64, __int64, _QWORD, __int64, signed __int64) {int a = "asdfsdf"; int b =123; a = asd::safd() sadf=12 /*asdf*/}'
+    code = '__int64 (__fastcall **)(unsigned __int64, signed __int64, __int64, _QWORD, __int64, signed __int64) {int a = "asdfsdf"; int b =123; a = asd::safd() sadf=12 /*asdf*/}'  # noqa
     print([str(token[0]) for token in Lexer(code).get_tokens()])

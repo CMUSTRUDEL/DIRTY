@@ -2,12 +2,10 @@ import argparse
 
 import numpy as np
 import torch
+from sklearn.metrics import mutual_info_score  # noqa: F401
+from sklearn.metrics import normalized_mutual_info_score  # noqa: F401
+from sklearn.metrics import adjusted_mutual_info_score
 from tqdm import tqdm
-from sklearn.metrics import (
-    normalized_mutual_info_score,
-    mutual_info_score,
-    adjusted_mutual_info_score,
-)
 
 from dirty.utils.evaluate import load_data
 

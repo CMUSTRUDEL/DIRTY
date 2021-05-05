@@ -5,12 +5,26 @@ Encodes information about C types, and provides functions to serialize types.
 The JSON that is output prioritizes compactness over readability.
 Note that all sizes are in 8-bit bytes
 """
-from collections import defaultdict
-from json import JSONEncoder, dumps, loads
-
 import gzip
 import os
-import typing as t
+from collections import defaultdict
+from json import JSONEncoder, dumps, loads
+from typing import (
+    Any,
+    DefaultDict,
+    Dict,
+    ItemsView,
+    Iterable,
+    KeysView,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+)
+from typing import Union as tUnion
+from typing import ValuesView
 
 from csvnpm.ida import ida_typeinf
 
@@ -24,13 +38,13 @@ class TypeLib:
     dictionary-like access to TypeInfo.
     """
 
-    class Entry(t.NamedTuple):
+    class Entry(NamedTuple):
         """A single entry in the TypeLib"""
 
         frequency: int
         typeinfo: "TypeInfo"
 
-        def __eq__(self, other: t.Any) -> bool:
+        def __eq__(self, other) -> bool:
             if isinstance(other, TypeLib.Entry):
                 return other.typeinfo == self.typeinfo
             return False
@@ -43,11 +57,10 @@ class TypeLib:
         frequency.
         """
 
-        def __init__(self, data: t.List["TypeLib.Entry"] = []) -> None:
+        def __init__(self, data: List["TypeLib.Entry"] = []) -> None:
             self._data = data
-            self._typeinfo_to_idx: t.Dict[TypeInfo, int] = {
-                entry.typeinfo: idx
-                for idx, entry in enumerate(self._data)
+            self._typeinfo_to_idx: Dict[TypeInfo, int] = {
+                entry.typeinfo: idx for idx, entry in enumerate(self._data)
             }
 
         @property
@@ -59,7 +72,7 @@ class TypeLib:
             """Add n items, increasing frequency if it already exists.
             Returns True if the item already existed.
             """
-            update_idx: t.Optional[int] = None
+            update_idx: Optional[int] = None
             frequency: int
             typeinfo: "TypeInfo"
             if item in self._typeinfo_to_idx:
@@ -73,7 +86,8 @@ class TypeLib:
             if update_idx is not None:
                 old_entry = self._data[update_idx]
                 self._data[update_idx] = TypeLib.Entry(
-                    frequency=old_entry.frequency + n, typeinfo=old_entry.typeinfo
+                    frequency=old_entry.frequency + n,
+                    typeinfo=old_entry.typeinfo,
                 )
                 # self._sort()
                 return True
@@ -98,7 +112,7 @@ class TypeLib:
             for entry in other:
                 self.add_entry(entry)
 
-        def get_freq(self, item: "TypeInfo") -> t.Optional[int]:
+        def get_freq(self, item: "TypeInfo") -> Optional[int]:
             """Get the frequency of an item, None if it does not exist"""
             for entry in self:
                 if entry.typeinfo == item:
@@ -109,14 +123,13 @@ class TypeLib:
             """Sorts the internal list by frequency"""
             self._data.sort(reverse=True, key=lambda entry: entry.frequency)
             self._typeinfo_to_idx = {
-                entry.typeinfo: idx
-                for idx, entry in enumerate(self._data)
+                entry.typeinfo: idx for idx, entry in enumerate(self._data)
             }
 
         def sort(self):
             return self._sort()
 
-        def _to_json(self) -> t.List["TypeLib.Entry"]:
+        def _to_json(self) -> List["TypeLib.Entry"]:
             return self._data
 
         def __iter__(self):
@@ -125,23 +138,21 @@ class TypeLib:
         def __len__(self) -> int:
             return len(self._data)
 
-        def __getitem__(self, i: t.Any) -> t.Any:
+        def __getitem__(self, i: Any) -> Any:
             return self._data[i]
 
-        def __setitem__(self, i: t.Any, v: t.Any) -> None:
+        def __setitem__(self, i: Any, v: Any) -> None:
             self._data[i] = v
 
         def __repr__(self) -> str:
             return f"{[(entry) for entry in self._data]}"
-        
+
         def prune(self, freq) -> None:
             self._data = [entry for entry in self._data if entry[0] >= freq]
 
-    def __init__(
-        self, data: t.Optional[t.DefaultDict[int, "TypeLib.EntryList"]] = None
-    ):
+    def __init__(self, data: Optional[DefaultDict[int, "TypeLib.EntryList"]] = None):
         if data is None:
-            self._data: t.DefaultDict[int, "TypeLib.EntryList"] = defaultdict(
+            self._data: DefaultDict[int, "TypeLib.EntryList"] = defaultdict(
                 TypeLib.EntryList
             )
         else:
@@ -190,7 +201,9 @@ class TypeLib:
                     type_name = member.type.dstr()
                     members.append(
                         UDT.Field(
-                            name=member.name, size=member.size, type_name=type_name
+                            name=member.name,
+                            size=member.size,
+                            type_name=type_name,
                         )
                     )
                 end_padding = size - (largest_size // 8)
@@ -203,7 +216,7 @@ class TypeLib:
                 )
             else:
                 # UDT is a struct
-                layout: t.List[t.Union[UDT.Member, "Struct", "Union"]] = []
+                layout: List[tUnion[UDT.Member, "Struct", "Union"]] = []
                 next_offset = 0
                 for n in range(nmembers):
                     member = ida_typeinf.udt_member_t()
@@ -217,7 +230,9 @@ class TypeLib:
                     type_name = member.type.dstr()
                     layout.append(
                         UDT.Field(
-                            name=member.name, size=member.size, type_name=type_name
+                            name=member.name,
+                            size=member.size,
+                            type_name=type_name,
                         )
                     )
                 # Check for padding at the end
@@ -228,7 +243,9 @@ class TypeLib:
         return TypeInfo(name=typ.dstr(), size=typ.get_size())
 
     def add_ida_type(
-        self, typ: "ida_typeinf.tinfo_t", worklist: t.Optional[t.Set[str]] = None
+        self,
+        typ: "ida_typeinf.tinfo_t",
+        worklist: Optional[Set[str]] = None,
     ) -> None:
         """Adds an element to the TypeLib by parsing an IDA tinfo_t object"""
         if worklist is None:
@@ -246,8 +263,8 @@ class TypeLib:
             elif typ.is_udt():
                 udt_info = ida_typeinf.udt_type_data_t()
                 typ.get_udt_details(udt_info)
-                name = typ.dstr()
-                size = udt_info.total_size
+                name = typ.dstr()  # noqa: F841
+                size = udt_info.total_size  # noqa: F841
                 nmembers = typ.get_udt_nmembers()
                 for n in range(nmembers):
                     member = ida_typeinf.udt_member_t()
@@ -263,7 +280,7 @@ class TypeLib:
             self[size].add_all(entries)
         else:
             self[size] = entries
-    
+
     def add(self, typ):
         entry = TypeLib.EntryList()
         entry.add(typ)
@@ -271,13 +288,13 @@ class TypeLib:
 
     def add_json_file(self, json_file: str, *, threads: int = 1) -> None:
         """Adds the info in a serialized (gzipped) JSON file to this TypeLib"""
-        other: t.Optional[t.Any] = None
+        other: Optional[Any] = None
         with open(json_file, "r") as other_file:
             other = TypeLibCodec.decode(other_file.read())
         if other is not None and isinstance(other, TypeLib):
             for size, entries in other.items():
                 self.add_entry_list(size, entries)
-    
+
     def sort(self) -> None:
         for size, entries in self.items():
             entries.sort()
@@ -316,9 +333,13 @@ class TypeLib:
     def make_cached_replacement_dict(self):
         self.cached_replacement_dict = defaultdict(set)
         for size in self.keys():
-            if size > 1024: continue
+            if size > 1024:
+                continue
             for entry in self[size]:
-                self.cached_replacement_dict[entry.typeinfo.accessible_offsets(), entry.typeinfo.start_offsets()].add(entry.typeinfo)
+                self.cached_replacement_dict[
+                    entry.typeinfo.accessible_offsets(),
+                    entry.typeinfo.start_offsets(),
+                ].add(entry.typeinfo)
 
     def valid_layout_for_types(self, rest_a, rest_s, typs):
         for typ in typs:
@@ -336,14 +357,14 @@ class TypeLib:
         return True
 
     def get_replacements(
-        self, types: t.Tuple["TypeInfo", ...]
-    ) -> t.Iterable[t.Tuple["TypeInfo", ...]]:
+        self, types: Tuple["TypeInfo", ...]
+    ) -> Iterable[Tuple["TypeInfo", ...]]:
         """Given a list of types, get all possible lists of replacements"""
         raise NotImplementedError
 
     def get_next_replacements(
-        self, accessible: t.Tuple[int, ...], start_offsets: t.Tuple[int, ...]
-    ) -> t.List[t.Tuple[t.Set["TypeInfo"], t.Tuple[int, ...], t.Tuple[int, ...]]]:
+        self, accessible: Tuple[int, ...], start_offsets: Tuple[int, ...]
+    ) -> List[Tuple[Set["TypeInfo"], Tuple[int, ...], Tuple[int, ...]]]:
         """Given a memory layout, get a list of next possible legal types.
 
         accessible: accessible (i.e., non-padding) addresses in memory
@@ -358,7 +379,7 @@ class TypeLib:
         - The first start offset and accessible offset should be the same
         - The list returned is sorted by decreasing frequency in the library
         """
-        if not hasattr(self, 'cached_replacement_dict'):
+        if not hasattr(self, "cached_replacement_dict"):
             self.make_cached_replacement_dict()
         start = accessible[0]
         if start != start_offsets[0]:
@@ -371,29 +392,39 @@ class TypeLib:
         # Filter out types that are too long or of size zero
         for size in filter(lambda s: s <= length and s != 0, self.keys()):
             # Compute the memory layout of the remainder
-            rest_accessible: t.Tuple[int, ...] = tuple(s for s in accessible if s >= (size + start))
-            rest_start: t.Tuple[int, ...] = tuple(s for s in start_offsets if s >= (size + start))
+            rest_accessible: Tuple[int, ...] = tuple(
+                s for s in accessible if s >= (size + start)
+            )
+            rest_start: Tuple[int, ...] = tuple(
+                s for s in start_offsets if s >= (size + start)
+            )
             # If the remainder of the start offsets is not either an empty tuple
             # or if the first element of the new start offsets is not the same
-            # as the first member of the new accessible, this is not a legal size.
-            if len(rest_start) != 0 and (len(rest_accessible) == 0 or rest_start[0] != rest_accessible[0]):
+            # as the first member of the new accessible, this is not a legal
+            # size.
+            if len(rest_start) != 0 and (
+                len(rest_accessible) == 0 or rest_start[0] != rest_accessible[0]
+            ):
                 continue
             # If there are no more start offsets, but there are still accessible
             # offsets, this is not a legal replacement.
             if len(rest_start) == 0 and len(rest_accessible) != 0:
                 continue
-            shifted_cur_accessible = tuple(s - start for s in accessible if s < (size + start))
-            shifted_cur_start = tuple(s - start for s in start_offsets if s < (size + start))
-            typs: t.Set["TypeInfo"] = self.cached_replacement_dict[shifted_cur_accessible, shifted_cur_start]
+            shifted_cur_accessible = tuple(
+                s - start for s in accessible if s < (size + start)
+            )
+            shifted_cur_start = tuple(
+                s - start for s in start_offsets if s < (size + start)
+            )
+            typs: Set["TypeInfo"] = self.cached_replacement_dict[
+                shifted_cur_accessible, shifted_cur_start
+            ]
             replacements.append((typs, rest_accessible, rest_start))
         return replacements
-        {
-            typ.typeinfo: (a, s)
-            for (typ, a, s) in replacements
-        }
+        {typ.typeinfo: (a, s) for (typ, a, s) in replacements}
 
     @staticmethod
-    def accessible_of_types(types: t.Iterable["TypeInfo"]) -> t.List[int]:
+    def accessible_of_types(types: Iterable["TypeInfo"]) -> List[int]:
         """Given a list of types, get the list of accessible offsets.
         This is suitable for use with get_next_replacement.
         """
@@ -405,7 +436,7 @@ class TypeLib:
         return accessible
 
     @staticmethod
-    def start_offsets_of_types(types: t.Iterable["TypeInfo"]) -> t.List[int]:
+    def start_offsets_of_types(types: Iterable["TypeInfo"]) -> List[int]:
         """Given a list of types, get the list of accessible offsets.
         This is suitable for use with get_next_replacement.
         """
@@ -416,13 +447,13 @@ class TypeLib:
             offset += t.size
         return start_offsets
 
-    def items(self) -> t.ItemsView[int, "TypeLib.EntryList"]:
+    def items(self) -> ItemsView[int, "TypeLib.EntryList"]:
         return self._data.items()
 
-    def keys(self) -> t.KeysView[int]:
+    def keys(self) -> KeysView[int]:
         return self._data.keys()
 
-    def values(self) -> t.ValuesView["TypeLib.EntryList"]:
+    def values(self) -> ValuesView["TypeLib.EntryList"]:
         return self._data.values()
 
     @classmethod
@@ -442,8 +473,8 @@ class TypeLib:
         return new_lib
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.Any]) -> "TypeLib":
-        data: t.DefaultDict[int, "TypeLib.EntryList"] = defaultdict(TypeLib.EntryList)
+    def _from_json(cls, d: Dict[str, Any]) -> "TypeLib":
+        data: DefaultDict[int, "TypeLib.EntryList"] = defaultdict(TypeLib.EntryList)
         # Convert lists of types into sets
         for key, lib_entry in d.items():
             if key == "T":
@@ -454,7 +485,7 @@ class TypeLib:
             data[int(key)] = TypeLib.EntryList(entry_list)
         return cls(data)
 
-    def _to_json(self) -> t.Dict[t.Any, t.Any]:
+    def _to_json(self) -> Dict[Any, Any]:
         """Encodes as JSON
 
         The 'T' field encodes which TypeInfo class is represented by this JSON:
@@ -480,7 +511,7 @@ class TypeLib:
             7: Void
             8: Function Pointer
         """
-        encoded: t.Dict[t.Any, t.Any] = {
+        encoded: Dict[Any, Any] = {
             str(key): val._to_json() for key, val in self._data.items()
         }
         encoded["T"] = 0
@@ -489,7 +520,7 @@ class TypeLib:
     def __contains__(self, key: int) -> bool:
         return key in self._data
 
-    def __iter__(self) -> t.Iterable[int]:
+    def __iter__(self) -> Iterable[int]:
         for k in self._data.keys():
             yield k
 
@@ -517,33 +548,33 @@ class TypeLib:
 class TypeInfo:
     """Stores information about a type"""
 
-    def __init__(self, *, name: t.Optional[str], size: int):
+    def __init__(self, *, name: Optional[str], size: int):
         self.name = name
         self.size = size
 
-    def accessible_offsets(self) -> t.Tuple[int, ...]:
+    def accessible_offsets(self) -> Tuple[int, ...]:
         """Offsets accessible in this type"""
         return tuple(range(self.size))
 
-    def inaccessible_offsets(self) -> t.Tuple[int, ...]:
+    def inaccessible_offsets(self) -> Tuple[int, ...]:
         """Inaccessible offsets in this type (e.g., padding in a Struct)"""
         return tuple()
 
-    def start_offsets(self) -> t.Tuple[int, ...]:
+    def start_offsets(self) -> Tuple[int, ...]:
         """Start offsets of elements in this type"""
         return (0,)
 
-    def replacable_with(self, others: t.Tuple["TypeInfo", ...]) -> bool:
+    def replacable_with(self, others: Tuple["TypeInfo", ...]) -> bool:
         """Check if this type can be replaced with others"""
         if self.size != sum(other.size for other in others):
             return False
         cur_offset = 0
-        other_start: t.Tuple[int, ...] = tuple()
-        other_accessible: t.Tuple[int, ...] = tuple()
-        other_inaccessible: t.Tuple[int, ...] = tuple()
+        other_start: Tuple[int, ...] = tuple()
+        other_accessible: Tuple[int, ...] = tuple()
+        other_inaccessible: Tuple[int, ...] = tuple()
         for other in others:
 
-            def displace(offsets: t.Tuple[int, ...]) -> t.Tuple[int, ...]:
+            def displace(offsets: Tuple[int, ...]) -> Tuple[int, ...]:
                 return tuple(off + cur_offset for off in offsets)
 
             other_start += displace(other.start_offsets())
@@ -556,14 +587,14 @@ class TypeInfo:
         )
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.Any]) -> "TypeInfo":
+    def _from_json(cls, d: Dict[str, Any]) -> "TypeInfo":
         """Decodes from a dictionary"""
         return cls(name=d["n"], size=d["s"])
 
-    def _to_json(self) -> t.Dict[str, t.Any]:
+    def _to_json(self) -> Dict[str, Any]:
         return {"T": 1, "n": self.name, "s": self.size}
 
-    def __eq__(self, other: t.Any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         if isinstance(other, TypeInfo):
             return self.name == other.name and self.size == other.size
         return False
@@ -574,14 +605,14 @@ class TypeInfo:
     def __str__(self) -> str:
         return f"{self.name}"
 
-    def tokenize(self) -> t.List[str]:
-        return [str(self), '<eot>']
+    def tokenize(self) -> List[str]:
+        return [str(self), "<eot>"]
 
     @classmethod
-    def detokenize(cls, subtypes: t.List[str]) -> t.List[str]:
+    def detokenize(cls, subtypes: List[str]) -> List[str]:
         """A list of concatenated subtypes separated by <eot>"""
-        ret: t.List[str] = []
-        current: t.List[str] = []
+        ret: List[str] = []
+        current: List[str] = []
         for subtype in subtypes:
             if subtype == "<eot>":
                 ret.append(cls.parse_subtype(current))
@@ -589,13 +620,13 @@ class TypeInfo:
             else:
                 current.append(subtype)
         return ret
-    
+
     @classmethod
-    def parse_subtype(cls, subtypes: t.List[str]) -> str:
+    def parse_subtype(cls, subtypes: List[str]) -> str:
         if len(subtypes) == 0:
             return ""
         if subtypes[0] == "<struct>":
-            ret = f"struct"
+            ret = "struct"
             if len(subtypes) == 1:
                 return ret
             ret += f" {subtypes[1]} {{ "
@@ -625,7 +656,7 @@ class Array(TypeInfo):
         self.nelements = nelements
         self.size = element_size * nelements
 
-    def start_offsets(self) -> t.Tuple[int, ...]:
+    def start_offsets(self) -> Tuple[int, ...]:
         """Returns the start offsets elements in this array
 
         For example, the type int[4] has start offsets [0, 4, 8, 12] (for 4-byte ints).
@@ -633,10 +664,10 @@ class Array(TypeInfo):
         return tuple(range(self.size)[:: self.element_size])
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Array":
+    def _from_json(cls, d: Dict[str, Any]) -> "Array":
         return cls(nelements=d["n"], element_size=d["s"], element_type=d["t"])
 
-    def _to_json(self) -> t.Dict[str, t.Any]:
+    def _to_json(self) -> Dict[str, Any]:
         return {
             "T": 2,
             "n": self.nelements,
@@ -644,7 +675,7 @@ class Array(TypeInfo):
             "t": self.element_type,
         }
 
-    def __eq__(self, other: t.Any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         if isinstance(other, Array):
             return (
                 self.nelements == other.nelements
@@ -661,8 +692,13 @@ class Array(TypeInfo):
             return f"{self.element_type}[]"
         return f"{self.element_type}[{self.nelements}]"
 
-    def tokenize(self) -> t.List[str]:
-        return ["<array>", f"{self.element_type}", f"[{self.nelements}]", "<eot>"]
+    def tokenize(self) -> List[str]:
+        return [
+            "<array>",
+            f"{self.element_type}",
+            f"[{self.nelements}]",
+            "<eot>",
+        ]
 
 
 class Pointer(TypeInfo):
@@ -678,13 +714,13 @@ class Pointer(TypeInfo):
         self.target_type_name = target_type_name
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Pointer":
+    def _from_json(cls, d: Dict[str, Any]) -> "Pointer":
         return cls(d["t"])
 
-    def _to_json(self) -> t.Dict[str, t.Any]:
+    def _to_json(self) -> Dict[str, Any]:
         return {"T": 3, "t": self.target_type_name}
 
-    def __eq__(self, other: t.Any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         if isinstance(other, Pointer):
             return self.target_type_name == other.target_type_name
         return False
@@ -695,8 +731,9 @@ class Pointer(TypeInfo):
     def __str__(self) -> str:
         return f"{self.target_type_name} *"
 
-    def tokenize(self) -> t.List[str]:
+    def tokenize(self) -> List[str]:
         return ["<ptr>", self.target_type_name, "<eot>"]
+
 
 class UDT(TypeInfo):
     """An object representing struct or union types"""
@@ -713,10 +750,10 @@ class UDT(TypeInfo):
             raise NotImplementedError
 
         @classmethod
-        def _from_json(cls, d: t.Dict[str, t.Any]) -> "UDT.Member":
+        def _from_json(cls, d: Dict[str, Any]) -> "UDT.Member":
             raise NotImplementedError
 
-        def _to_json(self) -> t.Dict[str, t.Any]:
+        def _to_json(self) -> Dict[str, Any]:
             raise NotImplementedError
 
     class Field(Member):
@@ -728,13 +765,18 @@ class UDT(TypeInfo):
             self.size = size
 
         @classmethod
-        def _from_json(cls, d: t.Dict[str, t.Any]) -> "UDT.Field":
+        def _from_json(cls, d: Dict[str, Any]) -> "UDT.Field":
             return cls(name=d["n"], type_name=d["t"], size=d["s"])
 
-        def _to_json(self) -> t.Dict[str, t.Any]:
-            return {"T": 4, "n": self.name, "t": self.type_name, "s": self.size}
+        def _to_json(self) -> Dict[str, Any]:
+            return {
+                "T": 4,
+                "n": self.name,
+                "t": self.type_name,
+                "s": self.size,
+            }
 
-        def __eq__(self, other: t.Any) -> bool:
+        def __eq__(self, other: Any) -> bool:
             if isinstance(other, UDT.Field):
                 return self.name == other.name and self.type_name == other.type_name
             return False
@@ -752,13 +794,13 @@ class UDT(TypeInfo):
             self.size = size
 
         @classmethod
-        def _from_json(cls, d: t.Dict[str, int]) -> "UDT.Padding":
+        def _from_json(cls, d: Dict[str, int]) -> "UDT.Padding":
             return cls(size=d["s"])
 
-        def _to_json(self) -> t.Dict[str, int]:
+        def _to_json(self) -> Dict[str, int]:
             return {"T": 5, "s": self.size}
 
-        def __eq__(self, other: t.Any) -> bool:
+        def __eq__(self, other: Any) -> bool:
             if isinstance(other, UDT.Padding):
                 return self.size == other.size
             return False
@@ -776,22 +818,20 @@ class Struct(UDT):
     def __init__(
         self,
         *,
-        name: t.Optional[str] = None,
-        layout: t.Iterable[t.Union[UDT.Member, "Struct", "Union"]],
+        name: Optional[str] = None,
+        layout: Iterable[tUnion[UDT.Member, "Struct", "Union"]],
     ):
         self.name = name
         self.layout = tuple(layout)
-        self.size = 0
-        for l in layout:
-            self.size += l.size
+        self.size = sum(lay.size for lay in layout)
 
     def has_padding(self) -> bool:
         """True if the Struct has padding"""
         return any((isinstance(m, UDT.Padding) for m in self.layout))
 
-    def accessible_offsets(self) -> t.Tuple[int, ...]:
+    def accessible_offsets(self) -> Tuple[int, ...]:
         """Offsets accessible in this struct"""
-        accessible: t.Tuple[int, ...] = tuple()
+        accessible: Tuple[int, ...] = tuple()
         current_offset = 0
         for m in self.layout:
             next_offset = current_offset + m.size
@@ -801,11 +841,11 @@ class Struct(UDT):
             current_offset = next_offset
         return accessible
 
-    def inaccessible_offsets(self) -> t.Tuple[int, ...]:
+    def inaccessible_offsets(self) -> Tuple[int, ...]:
         """Offsets inaccessible in this struct"""
         if not self.has_padding():
             return tuple()
-        inaccessible: t.Tuple[int, ...] = tuple()
+        inaccessible: Tuple[int, ...] = tuple()
         current_offset = 0
         for m in self.layout:
             next_offset = current_offset + m.size
@@ -815,7 +855,7 @@ class Struct(UDT):
             current_offset = next_offset
         return inaccessible
 
-    def start_offsets(self) -> t.Tuple[int, ...]:
+    def start_offsets(self) -> Tuple[int, ...]:
         """Returns the start offsets of fields in this struct
 
         For example, if int is 4-bytes, char is 1-byte, and long is 8-bytes,
@@ -823,7 +863,7 @@ class Struct(UDT):
         [int, char, padding(3), long, long]
         has offsets [0, 4, 8, 16].
         """
-        starts: t.Tuple[int, ...] = tuple()
+        starts: Tuple[int, ...] = tuple()
         current_offset = 0
         for m in self.layout:
             if isinstance(m, UDT.Field):
@@ -832,17 +872,17 @@ class Struct(UDT):
         return starts
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Struct":
+    def _from_json(cls, d: Dict[str, Any]) -> "Struct":
         return cls(name=d["n"], layout=d["l"])
 
-    def _to_json(self) -> t.Dict[str, t.Any]:
+    def _to_json(self) -> Dict[str, Any]:
         return {
             "T": 6,
             "n": self.name,
-            "l": [l._to_json() for l in self.layout],
+            "l": [lay._to_json() for lay in self.layout],
         }
 
-    def __eq__(self, other: t.Any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         if isinstance(other, Struct):
             return self.name == other.name and self.layout == other.layout
         return False
@@ -852,16 +892,20 @@ class Struct(UDT):
 
     def __str__(self) -> str:
         if self.name is None:
-            ret = f"struct {{ "
+            ret = "struct {{ "
         else:
             ret = f"struct {self.name} {{ "
-        for l in self.layout:
-            ret += f"{str(l)}; "
+        for lay in self.layout:
+            ret += f"{str(lay)}; "
         ret += "}"
         return ret
 
-    def tokenize(self) -> t.List[str]:
-        return ["<struct>", self.name if self.name is not None else ""] + [str(l) for l in self.layout] + ["<eot>"]
+    def tokenize(self) -> List[str]:
+        return (
+            ["<struct>", self.name if self.name is not None else ""]
+            + [str(lay) for lay in self.layout]
+            + ["<eot>"]
+        )
 
 
 class Union(UDT):
@@ -870,9 +914,9 @@ class Union(UDT):
     def __init__(
         self,
         *,
-        name: t.Optional[str] = None,
-        members: t.Iterable[t.Union[UDT.Field, "Struct", "Union"]],
-        padding: t.Optional[UDT.Padding] = None,
+        name: Optional[str] = None,
+        members: Iterable[tUnion[UDT.Field, "Struct", "Union"]],
+        padding: Optional[UDT.Padding] = None,
     ):
         self.name = name
         self.members = tuple(members)
@@ -889,25 +933,25 @@ class Union(UDT):
         """Returns True if this Union has padding"""
         return self.padding is not None
 
-    def accessible_offsets(self) -> t.Tuple[int, ...]:
+    def accessible_offsets(self) -> Tuple[int, ...]:
         """Offsets accessible in this Union"""
         return tuple(range(max(m.size for m in self.members)))
 
-    def inaccessible_offsets(self) -> t.Tuple[int, ...]:
+    def inaccessible_offsets(self) -> Tuple[int, ...]:
         """Offsets inaccessible in this Union"""
         if not self.has_padding():
             return tuple()
         return tuple(range(max(m.size for m in self.members), self.size))
 
-    def start_offsets(self) -> t.Tuple[int, ...]:
+    def start_offsets(self) -> Tuple[int, ...]:
         """Returns the start offsets elements in this Union"""
         return (0,)
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Union":
+    def _from_json(cls, d: Dict[str, Any]) -> "Union":
         return cls(name=d["n"], members=d["m"], padding=d["p"])
 
-    def _to_json(self) -> t.Dict[str, t.Any]:
+    def _to_json(self) -> Dict[str, Any]:
         return {
             "T": 8,
             "n": self.name,
@@ -915,7 +959,7 @@ class Union(UDT):
             "p": self.padding,
         }
 
-    def __eq__(self, other: t.Any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         if isinstance(other, Union):
             return (
                 self.name == other.name
@@ -929,7 +973,7 @@ class Union(UDT):
 
     def __str__(self) -> str:
         if self.name is None:
-            ret = f"union {{ "
+            ret = "union {{ "
         else:
             ret = f"union {self.name} {{ "
         for m in self.members:
@@ -939,9 +983,9 @@ class Union(UDT):
         ret += "}"
         return ret
 
-    def tokenize(self) -> t.List[str]:
+    def tokenize(self) -> List[str]:
         raise NotImplementedError
-        
+
 
 class Void(TypeInfo):
     size = 0
@@ -950,13 +994,13 @@ class Void(TypeInfo):
         pass
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Void":
+    def _from_json(cls, d: Dict[str, Any]) -> "Void":
         return cls()
 
-    def _to_json(self) -> t.Dict[str, int]:
+    def _to_json(self) -> Dict[str, int]:
         return {"T": 8}
 
-    def __eq__(self, other: t.Any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         return isinstance(other, Void)
 
     def __hash__(self) -> int:
@@ -965,21 +1009,23 @@ class Void(TypeInfo):
     def __str__(self) -> str:
         return "void"
 
+
 class Disappear(TypeInfo):
     """Target type for variables that don't appear in the ground truth function"""
+
     size = 0
 
     def __init__(self) -> None:
         pass
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, t.Any]) -> "Disappear":
+    def _from_json(cls, d: Dict[str, Any]) -> "Disappear":
         return cls()
 
-    def _to_json(self) -> t.Dict[str, int]:
+    def _to_json(self) -> Dict[str, int]:
         return {"T": 10}
 
-    def __eq__(self, other: t.Any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         return isinstance(other, Disappear)
 
     def __hash__(self) -> int:
@@ -987,6 +1033,7 @@ class Disappear(TypeInfo):
 
     def __str__(self) -> str:
         return "disappear"
+
 
 class FunctionPointer(TypeInfo):
     """Stores information about a function pointer."""
@@ -996,18 +1043,18 @@ class FunctionPointer(TypeInfo):
     def __init__(self, name: str):
         self.name = name
 
-    def replacable_with(self, other: t.Tuple["TypeInfo", ...]) -> bool:
+    def replacable_with(self, other: Tuple["TypeInfo", ...]) -> bool:
         # No function pointers are replacable for now
         return False
 
     @classmethod
-    def _from_json(cls, d: t.Dict[str, str]) -> "FunctionPointer":
-        return cls(d["n"])
+    def _from_json(cls, d: Dict[str, tUnion[str, int, None]]) -> "FunctionPointer":
+        return cls(d["n"])  # type: ignore
 
-    def _to_json(self) -> t.Dict[str, t.Union[t.Optional[str], int]]:
+    def _to_json(self) -> Dict[str, Any]:
         return {"T": 9, "n": self.name}
 
-    def __eq__(self, other: t.Any) -> bool:
+    def __eq__(self, other: Any) -> bool:
         if isinstance(other, FunctionPointer):
             return self.name == other.name
         return False
@@ -1022,7 +1069,7 @@ class FunctionPointer(TypeInfo):
 class TypeLibCodec:
     """Encoder/Decoder functions"""
 
-    CodecTypes = t.Union["TypeLib", "TypeLib.EntryList", "TypeInfo", "UDT.Member"]
+    CodecTypes = tUnion["TypeLib", "TypeLib.EntryList", "TypeInfo", "UDT.Member"]
 
     @staticmethod
     def decode(encoded: str) -> CodecTypes:
@@ -1031,14 +1078,14 @@ class TypeLibCodec:
         return loads(encoded, object_hook=TypeLibCodec.read_metadata)
 
     @staticmethod
-    def read_metadata(d: t.Dict[str, t.Any]) -> "TypeLibCodec.CodecTypes":
-        classes: t.Dict[
-            t.Union[int, str],
-            t.Union[
-                t.Type["TypeLib"],
-                t.Type["TypeLib.EntryList"],
-                t.Type["TypeInfo"],
-                t.Type["UDT.Member"],
+    def read_metadata(d: Dict[str, Any]) -> "TypeLibCodec.CodecTypes":
+        classes: Dict[
+            tUnion[int, str],
+            tUnion[
+                Type["TypeLib"],
+                Type["TypeLib.EntryList"],
+                Type["TypeInfo"],
+                Type["UDT.Member"],
             ],
         ] = {
             "E": TypeLib.EntryList,
@@ -1057,7 +1104,7 @@ class TypeLibCodec:
         return classes[d["T"]]._from_json(d)  # type: ignore
 
     class _Encoder(JSONEncoder):
-        def default(self, obj: t.Any) -> t.Any:
+        def default(self, obj: Any) -> Any:
             if hasattr(obj, "_to_json"):
                 return obj._to_json()
             if isinstance(obj, set):

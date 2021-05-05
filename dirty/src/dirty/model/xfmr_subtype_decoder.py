@@ -1,16 +1,13 @@
-from typing import Dict, List, Tuple
+from typing import Dict
 
 import torch
 import torch.nn as nn
-from torch.nn import TransformerDecoder, TransformerDecoderLayer, LayerNorm
-from torch.nn.modules import activation
-
 from csvnpm.binary.dire_types import TypeLibCodec
+from torch.nn import LayerNorm, TransformerDecoder, TransformerDecoderLayer
 
+from dirty.model.xfmr_decoder import XfmrDecoder
 from dirty.utils import util
 from dirty.utils.vocab import Vocab
-from dirty.model.xfmr_decoder import XfmrDecoder
-
 
 
 class XfmrSubtypeDecoder(XfmrDecoder):
@@ -82,7 +79,8 @@ class XfmrSubtypeDecoder(XfmrDecoder):
             dim=-1,
         )
         tgt = self.target_transform(tgt)
-        # mask out attention to subsequent inputs which include the ground truth for current step
+        # mask out attention to subsequent inputs which include the ground
+        # truth for current step
         tgt_mask = XfmrDecoder.generate_square_subsequent_mask(tgt.shape[1], tgt.device)
         # TransformerModels have batch_first=False
         hidden = self.decoder(
@@ -130,7 +128,8 @@ class XfmrSubtypeDecoder(XfmrDecoder):
             max_time_step, tgt.device
         )
         preds_list = []
-        # Keep track of which variable is being decoded for each example in batch
+        # Keep track of which variable is being decoded for each example in
+        # batch
         num_vars = (target_dict["target_type_sizes"] > 0).sum(dim=1).tolist()
         current_vars = [0] * batch_size
         ans = [[] for _ in range(batch_size)]
@@ -190,7 +189,9 @@ class XfmrSubtypeDecoder(XfmrDecoder):
 
     @staticmethod
     def generate_square_subsequent_mask(sz: int, device: torch.device) -> torch.Tensor:
-        r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
+        r"""
+        Generate a square mask for the sequence. The masked positions are filled with
+          float('-inf').
         Unmasked positions are filled with float(0.0).
         """
         mask = (torch.triu(torch.ones(sz, sz, device=device)) == 1).transpose(0, 1)

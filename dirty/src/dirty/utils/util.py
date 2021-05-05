@@ -1,5 +1,9 @@
-import psutil, gc, sys, os
 import collections
+import gc
+import os
+import sys
+
+import psutil
 import torch
 
 
@@ -10,7 +14,7 @@ class cached_property(object):
     property.
 
     Source: https://github.com/bottlepy/bottle/commit/fa7733e075da0d790d809aa3d2f53071897e6f76
-    """
+    """  # noqa
 
     def __init__(self, func):
         self.__doc__ = getattr(func, "__doc__")

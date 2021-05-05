@@ -1,9 +1,9 @@
 import os
 import pickle
+from typing import Dict
 
 from csvnpm.binary.dire_types import TypeLib
 from csvnpm.binary.function import Function
-
 from csvnpm.ida import idaapi as ida  # type: ignore
 from csvnpm.ida import idautils
 
@@ -63,6 +63,7 @@ class CollectDebug(Collector):
         self.write_type_lib()
         self.write_functions()
         return 1
+
 
 def main():
     ida.auto_wait()

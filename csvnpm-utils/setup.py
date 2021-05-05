@@ -1,6 +1,4 @@
-import os
 from setuptools import find_namespace_packages, setup
-
 
 with open("README.md", "r") as f:
     README = f.read()
@@ -16,11 +14,8 @@ setup(
     packages=find_namespace_packages("src"),
     package_dir={"": "src"},  # the root package '' corresponds to the src dir
     # include_package_data=True,
-    install_requires=[
-        "pygments~=2.9.0",
-        "tqdm~=4.60.0",
-        "jsonlines~=2.0.0"
-    ],
+    zip_safe=False,
+    install_requires=["pygments~=2.9.0", "tqdm~=4.60.0", "jsonlines~=2.0.0"],
     extras_require={
         "test": [
             "pytest-cov~=2.8.1",
@@ -33,6 +28,9 @@ setup(
         ]
     },
     entry_points={
-        "console_scripts": ["run_decompiler = csvnpm.dataset_gen.generate:main"]
+        "console_scripts": [
+            "csvnpm-decompiler = csvnpm.dataset_gen.generate:main",
+            "csvnpm-download = csvnpm.download:main",
+        ]
     },
 )

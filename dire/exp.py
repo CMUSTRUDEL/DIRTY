@@ -69,7 +69,7 @@ def train(args):
     model = RenamingModel.build(config)
     config = model.config
     model.train()
-    
+
     wandb.init(name=work_dir, project="dire", config=config)
 
     if args['--cuda']:
@@ -93,7 +93,7 @@ def train(args):
     log_every = config['train']['log_every']
     evaluate_every_nepoch = config['train']['evaluate_every_nepoch']
     max_epoch = config['train']['max_epoch']
-    
+
     max_patience = config['train']['patience']
     cum_loss = 0.
     patience = 0.

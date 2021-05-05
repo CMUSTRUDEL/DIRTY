@@ -1,18 +1,20 @@
 import glob
 import json
-from collections import defaultdict
 from typing import Dict, List, Mapping, Optional, Set, Tuple, Union
 
 import _jsonnet
-import numpy as np
 import torch
 import webdataset as wds
+from csvnpm.binary.dire_types import Disappear, TypeLibCodec
+from csvnpm.binary.function import CollectedFunction
+from csvnpm.binary.variable import (
+    Location,
+    Register,
+    Stack,
+    Variable,
+    location_from_json_key,
+)
 from torch.nn.utils.rnn import pad_sequence
-from tqdm import tqdm
-
-from csvnpm.binary.function import CollectedFunction, Function
-from csvnpm.binary.variable import Location, Variable, location_from_json_key, Register, Stack
-from csvnpm.binary.dire_types import Struct, TypeLibCodec, TypeLib, UDT, TypeInfo, Disappear
 
 from dirty.utils.code_processing import tokenize_raw_code
 
@@ -22,8 +24,8 @@ class Example:
         self,
         name: str,
         code_tokens: str,
-        source: Mapping[Location, Set[Variable]],
-        target: Mapping[Location, Set[Variable]],
+        source: Mapping[Location, Variable],
+        target: Mapping[Location, Variable],
         binary_file: str = "",
         valid: bool = True,
         raw_code: str = "",
@@ -77,23 +79,32 @@ class Example:
         raw_code = cf.decompiler.raw_code
         code_tokens = tokenize_raw_code(raw_code)
 
-        source = {**cf.decompiler.local_vars, **cf.decompiler.arguments}
-        target = {**cf.debug.local_vars, **cf.debug.arguments}
+        source: Dict[Location, Set[Variable]] = {
+            **cf.decompiler.local_vars,
+            **cf.decompiler.arguments,
+        }
+        target: Dict[Location, Set[Variable]] = {
+            **cf.debug.local_vars,
+            **cf.debug.arguments,
+        }
 
-        # Remove variables that overlap on memory or don't appear in the code tokens
+        # Remove variables that overlap on memory or don't appear in the code
+        # tokens
         source_code_tokens_set = set(code_tokens)
         target_code_tokens_set = set(tokenize_raw_code(cf.debug.raw_code))
 
-        source = Example.filter(source, source_code_tokens_set)
-        target = Example.filter(target, target_code_tokens_set, set(source.keys()))
+        filtered_source = Example.filter(source, source_code_tokens_set)
+        filtered_target = Example.filter(
+            target, target_code_tokens_set, set(source.keys())
+        )
 
         # Assign type "Disappear" to variables not existing in the ground truth
         varnames = set()
-        for loc in source.keys():
-            if loc not in target.keys():
-                target[loc] = Variable(Disappear(), "", False)
+        for loc in filtered_source.keys():
+            if loc not in filtered_target.keys():
+                filtered_target[loc] = Variable(Disappear(), "", False)
         # Add special tokens to variables  to prevnt being sub-tokenized in BPE
-        for var in source.values():
+        for var in filtered_source.values():
             varname = var.name
             varnames.add(varname)
         for idx in range(len(code_tokens)):
@@ -103,33 +114,33 @@ class Example:
         return cls(
             name,
             code_tokens,
-            source,
-            target,
+            filtered_source,
+            filtered_target,
             kwargs["binary_file"],
-            valid=name == cf.debug.name and source,
+            valid=(name == cf.debug.name and bool(filtered_source)),
             raw_code=raw_code,
         )
 
     @staticmethod
     def filter(
-        mapping: Mapping[Location, Set[Variable]],
+        mapping: Dict[Location, Set[Variable]],
         code_tokens: Optional[Set[str]] = None,
         locations: Optional[Set[Location]] = None,
-    ) -> Mapping[Location, Variable]:
+    ) -> Dict[Location, Variable]:
         """Discard and leave these for future work:
 
         Multiple variables sharing a memory location (no way to determine ground truth);
         Variables not appearing in code (no way to get representation);
         Target variables not appearing in source (useless ground truth);
         """
-        ret: Mapping[Location, Set[Variable]] = {}
+        ret: Dict[Location, Variable] = {}
         for location, variable_set in mapping.items():
             if len(variable_set) > 1:
                 continue
             var = list(variable_set)[0]
-            if code_tokens is not None and not var.name in code_tokens:
+            if code_tokens is not None and var.name not in code_tokens:
                 continue
-            if locations is not None and not location in locations:
+            if locations is not None and location not in locations:
                 continue
             ret[location] = var
         return ret
@@ -160,7 +171,7 @@ class Dataset(wds.Dataset):
         super().__init__(urls)
         if config:
             # annotate example for training
-            from utils.vocab import Vocab
+            from dirty.utils.vocab import Vocab
 
             self.vocab = Vocab.load(config["vocab_file"])
             with open(config["typelib_file"]) as type_f:
@@ -274,12 +285,13 @@ class Dataset(wds.Dataset):
             #   for stack: relative position to the first variable
             # 1: size of the type
             # 2, 3, ...: start offset of fields in the type
+
             def var_loc_in_func(loc):
                 # TODO: fix the magic number for computing vocabulary idx
                 if isinstance(loc, Register):
                     return 1030 + self.vocab.regs[loc.name]
                 else:
-                    from utils.vocab import VocabEntry
+                    from dirty.utils.vocab import VocabEntry
 
                     return (
                         3 + stack_start_pos - loc.offset
@@ -317,7 +329,8 @@ class Dataset(wds.Dataset):
     def collate_fn(
         examples: List[Example],
     ) -> Tuple[
-        Dict[str, Union[torch.Tensor, int]], Dict[str, Union[torch.Tensor, List]]
+        Dict[str, Union[torch.Tensor, int]],
+        Dict[str, Union[torch.Tensor, List]],
     ]:
         token_ids = [torch.tensor(e.sub_token_ids) for e in examples]
         input = pad_sequence(token_ids, batch_first=True)

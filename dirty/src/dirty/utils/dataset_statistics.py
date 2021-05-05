@@ -1,8 +1,6 @@
-from contextlib import ContextDecorator
 import glob
 import json
 import sys
-from collections import Counter
 
 import numpy as np
 import torch
@@ -41,10 +39,22 @@ if __name__ == "__main__":
         return example["name"]
 
     # def num_var(example):
-    #     return len(set([token for token in example["code_tokens"] if token.startswith("@@") and token.endswith("@@") and len(token) > 4]))
+    #     return len(
+    #         set(
+    #             [
+    #                 token
+    #                 for token in example["code_tokens"]
+    #                 if token.startswith("@@")
+    #                 and token.endswith("@@")
+    #                 and len(token) > 4
+    #             ]
+    #         )
+    #     )
+
     # def name(example):
     #     return example["function"]
-    body_in_train = []
+
+    # body_in_train = []
     for example in tqdm(dataset):
         token_len.append(tokenlen(example))
         num_vars.append(num_var(example))

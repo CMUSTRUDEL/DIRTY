@@ -1,4 +1,5 @@
 from typing import Dict, Union
+
 import torch
 import torch.nn as nn
 
@@ -11,8 +12,8 @@ class Encoder(nn.Module):
 
     @staticmethod
     def build(config):
-        from .xfmr_sequential_encoder import XfmrSequentialEncoder
         from .xfmr_mem_encoder import XfmrMemEncoder
+        from .xfmr_sequential_encoder import XfmrSequentialEncoder
 
         return {
             "XfmrSequentialEncoder": XfmrSequentialEncoder,

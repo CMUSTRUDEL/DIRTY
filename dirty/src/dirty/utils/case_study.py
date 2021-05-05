@@ -1,6 +1,6 @@
 import argparse
 import json
-from collections import defaultdict, Counter
+from collections import Counter, defaultdict
 
 import torch
 from tqdm import tqdm
@@ -30,7 +30,9 @@ def find_most_common(results, dataset):
     sdcc = defaultdict(Counter)
     for idx, example in tqdm(enumerate(dataset)):
         for src_name, src_type, tgt_type in zip(
-            example.src_var_names, example.src_var_types_str, example.tgt_var_types_str
+            example.src_var_names,
+            example.src_var_types_str,
+            example.tgt_var_types_str,
         ):
             pred_type, _ = (
                 results.get(example.binary, {})

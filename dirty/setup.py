@@ -1,6 +1,4 @@
-import os
 from setuptools import find_namespace_packages, setup
-
 
 with open("README.md", "r") as f:
     README = f.read()
@@ -16,6 +14,7 @@ setup(
     packages=find_namespace_packages("src"),
     package_dir={"": "src"},  # the root package '' corresponds to the src dir
     # include_package_data=True,
+    zip_safe=False,
     install_requires=[
         "jsonnet~=0.17.0",
         "numpy~=1.19.5",
@@ -25,8 +24,9 @@ setup(
         "ujson~=4.0.2",
         "wandb~=0.10.29",
         "webdataset~=0.1.6",
-        "docopt~=0.6.2",,
-        "scikit-learn~=0.24.2"
+        "docopt~=0.6.2",
+        "scikit-learn~=0.24.2",
+        "csvnpm-utils~=0.0.0",
     ],
     extras_require={
         "test": [
@@ -40,5 +40,9 @@ setup(
         ]
     },
     entry_points={
+        "console_scripts": [
+            "dirty-exp = dirty.exp:main",
+            "dirty-evaluate = dirty.utils.evaluate:main",
+        ]
     },
 )
