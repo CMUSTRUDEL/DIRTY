@@ -54,6 +54,6 @@
   "test": {
     "pred_file": "pred_retype_base.json",
     "batch_size": 64,
-    "beam_size": 5,
+    "beam_size": 0,
   }
 }
