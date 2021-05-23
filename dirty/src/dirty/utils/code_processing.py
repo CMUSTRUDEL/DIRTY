@@ -1,15 +1,13 @@
 import re
-from typing import List, Set
 
-from dirty.utils.lexer import *
-
+from dirty.utils.lexer import Lexer, Token
 
 VARIABLE_ANNOTATION = re.compile(r"@@\w+@@(\w+)@@\w+")
 
 
 def canonicalize_code(code):
     code = re.sub("//.*?\\n|/\\*.*?\\*/", "\\n", code, flags=re.S)
-    lines = [l.rstrip() for l in code.split("\\n")]
+    lines = [line.rstrip() for line in code.split("\\n")]
     code = "\\n".join(lines)
     code = re.sub("@@\\w+@@(\\w+)@@\\w+", "\\g<1>", code)
 

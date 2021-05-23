@@ -1,6 +1,4 @@
 import argparse
-import datetime
-import importlib
 import os
 import shutil
 import time
@@ -36,7 +34,10 @@ def download(url, path, fname, redownload=False):
         with requests.Session() as session:
             try:
                 header = (
-                    {"Range": "bytes=%d-" % resume_pos, "Accept-Encoding": "identity"}
+                    {
+                        "Range": "bytes=%d-" % resume_pos,
+                        "Accept-Encoding": "identity",
+                    }
                     if resume
                     else {}
                 )
@@ -149,19 +150,25 @@ def make_dir(path):
         os.makedirs(path, exist_ok=True)
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", type=str)
-    parser.add_argument("--path", type=str)
-    parser.add_argument("--fname", type=str)
+    parser.add_argument("url", type=str)
+    parser.add_argument("path", type=str)
+    parser.add_argument("fname", type=str)
+
     args = parser.parse_args()
 
     make_dir(args.path)
     if "drive.google.com" in args.url:
         download_from_google_drive(
-            args.url[args.url.index("id=") + 3 :], os.path.join(args.path, args.fname)
+            args.url[args.url.index("id=") + 3 :],
+            os.path.join(args.path, args.fname),
         )
     else:
         download(args.url, args.path, args.fname)
     if "tar.gz" in args.fname:
         untar(args.path, args.fname)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,36 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.4.0
+    hooks:
+      - id: check-docstring-first
+      - id: check-executables-have-shebangs
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+      - id: check-added-large-files  # default is 500kB
+  - repo: https://github.com/psf/black
+    rev: 21.5b0
+    hooks:
+      - id: black
+        language_version: python3.6
+        exclude: (^dire|tests)
+  - repo: https://github.com/timothycrosley/isort
+    rev: 5.8.0
+    hooks:
+      - id: isort
+        exclude: (^dire|tests)
+  - repo: https://gitlab.com/devopshq/gitlab-ci-linter
+    rev: v1.0.3
+    hooks:
+      - id: gitlab-ci-linter
+        args:
+          - --server=https://git.grammatech.com
+          - --filename=.ci/gitlab-ci.yml
+  - repo: https://gitlab.com/pycqa/flake8
+    rev: 3.9.1
+    hooks:
+    - id: flake8
+      exclude: (^dire|tests)

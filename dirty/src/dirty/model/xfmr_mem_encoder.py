@@ -1,8 +1,6 @@
 import math
-from typing import Dict, List, Union
+from typing import Dict, Union
 
-import numpy as np
-import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer

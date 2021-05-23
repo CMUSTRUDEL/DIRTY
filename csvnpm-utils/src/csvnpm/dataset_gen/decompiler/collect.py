@@ -1,13 +1,11 @@
-from collections import defaultdict
 import gzip
 import os
-import pickle
-from typing import DefaultDict, Dict, Iterable, Optional, Set
+from collections import defaultdict
+from typing import DefaultDict, Iterable, Optional, Set
 
-
-from csvnpm.ida import idaapi as ida
 from csvnpm.binary.dire_types import TypeInfo, TypeLib, TypeLibCodec
-from csvnpm.binary.variable import Location, Stack, Register, Variable
+from csvnpm.binary.variable import Location, Register, Stack, Variable
+from csvnpm.ida import idaapi as ida
 
 
 class Collector(ida.action_handler_t):
@@ -39,7 +37,10 @@ class Collector(ida.action_handler_t):
             type_lib_file.flush()
 
     def collect_variables(
-        self, frsize: int, stkoff_delta: int, variables: Iterable[ida.lvar_t],
+        self,
+        frsize: int,
+        stkoff_delta: int,
+        variables: Iterable[ida.lvar_t],
     ) -> DefaultDict[Location, Set[Variable]]:
         """Collects Variables from a list of tinfo_ts and adds their types to the type
         library."""

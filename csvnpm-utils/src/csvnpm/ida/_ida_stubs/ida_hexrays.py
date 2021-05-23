@@ -3,15 +3,28 @@ from typing import Any, List
 
 from .ida_typeinf import tinfo_t
 
+
 class DecompilationFailure(Exception):
     pass
 
+
 # This is technically cfuncptr_t, but that is just a reference-counted
 # version of cfunc_t
-def decompile(*args) -> "cfunc_t": ...
-def get_hexrays_version() -> str: ...
-def init_hexrays_plugin() -> bool: ...
-def load_plugin(name: str) -> None: ...
+def decompile(*args) -> "cfunc_t":
+    ...
+
+
+def get_hexrays_version() -> str:
+    ...
+
+
+def init_hexrays_plugin() -> bool:
+    ...
+
+
+def load_plugin(name: str) -> None:
+    ...
+
 
 class ctype_t(IntEnum):
     cot_empty = 0
@@ -185,6 +198,7 @@ cit_return = ctype_t.cit_return
 cit_goto = ctype_t.cit_goto
 cit_asm = ctype_t.cit_asm
 
+
 class citem_t:
     ea: int
     obj_id: int
@@ -219,86 +233,128 @@ class cinsn_t(citem_t):
     cgoto: "cgoto_t"
     casm: "casm_t"
 
+
 class ceinsn_t:
     obj_id: int
     expr: "cexpr_t"
+
 
 class var_ref_t:
     mba: Any
     idx: int
 
+
 class fnumber_t:
     fnum: int
     nbytes: int
+
 
 class qlist_cinsn_t(list):
     # list is technically a lie
     pass
 
+
 class cblock_t(qlist_cinsn_t):
     obj_id: int
+
 
 class cif_t(ceinsn_t):
     ithen: "cinsn_t"
     ielse: "cinsn_t"
 
+
 class cloop_t(ceinsn_t):
     body: "cinsn_t"
 
+
 class cdo_t(cloop_t):
     pass
+
 
 class cfor_t(cloop_t):
     init: "cexpr_t"
     step: "cexpr_t"
 
+
 class cwhile_t(cloop_t):
     pass
 
+
 class cnumber_t:
-    def value(self, typ: tinfo_t) -> int: ...
+    def value(self, typ: tinfo_t) -> int:
+        ...
+
 
 class ccase_t(cinsn_t):
     values: List[int]
-    def size(self) -> int: ...
-    def value(self, i: int) -> int: ...
+
+    def size(self) -> int:
+        ...
+
+    def value(self, i: int) -> int:
+        ...
+
 
 class cswitch_t(ceinsn_t):
     mvnf: "cnumber_t"
     cases: List["ccase_t"]
 
+
 class creturn_t(ceinsn_t):
     pass
+
 
 class cgoto_t:
     obj_id: int
     label_num: int
 
+
 class casm_t:
     obj_id: int
+
 
 class carg_t(cexpr_t):
     is_vararg: bool
     formal_type: tinfo_t
 
+
 class lvar_locator_t:
-    def get_stkoff(self) -> int: ...
-    def get_reg1(self) -> int: ...
-    def get_reg2(self) -> int: ...
-    def is_reg1(self) -> bool: ...
-    def is_reg2(self) -> bool: ...
-    def is_reg_var(self) -> bool: ...
-    def is_stk_var(self) -> bool: ...
+    def get_stkoff(self) -> int:
+        ...
+
+    def get_reg1(self) -> int:
+        ...
+
+    def get_reg2(self) -> int:
+        ...
+
+    def is_reg1(self) -> bool:
+        ...
+
+    def is_reg2(self) -> bool:
+        ...
+
+    def is_reg_var(self) -> bool:
+        ...
+
+    def is_stk_var(self) -> bool:
+        ...
+
 
 class lvar_t(lvar_locator_t):
     name: str
 
     @property
-    def is_arg_var(self) -> bool: ...
+    def is_arg_var(self) -> bool:
+        ...
 
     @property
-    def has_user_name(self) -> bool: ...
-    def type(self) -> "tinfo_t": ...
+    def has_user_name(self) -> bool:
+        ...
+
+    def type(self) -> "tinfo_t":
+        ...
+
 
 class cfunc_t:
     arguments: List["lvar_t"]
@@ -306,14 +362,26 @@ class cfunc_t:
     body: "cblock_t"
     type: tinfo_t
 
-    def get_lvars(self) -> List["lvar_t"]: ...
-    def get_stkoff_delta(self) -> int: ...
+    def get_lvars(self) -> List["lvar_t"]:
+        ...
+
+    def get_stkoff_delta(self) -> int:
+        ...
+
 
 class ctree_visitor_t:
-    def leave_insn(self, *args) -> int: ...
-    def leave_expr(self, *args) -> int: ...
-    def parent_insn(self, *args) -> "cinsn_t": ...
-    def parent_expr(self, *args) -> "cexpr_t": ...
+    def leave_insn(self, *args) -> int:
+        ...
+
+    def leave_expr(self, *args) -> int:
+        ...
+
+    def parent_insn(self, *args) -> "cinsn_t":
+        ...
+
+    def parent_expr(self, *args) -> "cexpr_t":
+        ...
+
 
 class ctree_parentee_t(ctree_visitor_t):
     pass

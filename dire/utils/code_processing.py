@@ -100,4 +100,3 @@ def tokenize_raw_code(raw_code):
         tokens.append(token)
 
     return tokens
-

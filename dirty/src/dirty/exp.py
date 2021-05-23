@@ -15,26 +15,24 @@ Options:
     --resume=<str>                              load checkpoint for resume training [default: ]
     --extra-config=<str>                        extra config [default: {}]
     --percent=<float>                           percent of training data used [default: 1.0]
-"""
+"""  # noqa
 import json
 import os
 import random
 import sys
-from typing import Dict, Iterable, List, Tuple
 
-import _jsonnet
+import _jsonnet  # type: ignore
 import numpy as np
 import pytorch_lightning as pl
 import torch
-import wandb
 from docopt import docopt
-from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from torch.utils.data import DataLoader
+from pytorch_lightning.loggers import WandbLogger
+from torch.utils.data import DataLoader  # type: ignore
 
-from model.model import TypeReconstructionModel
-from utils import util
-from utils.dataset import Dataset
+from dirty.model.model import TypeReconstructionModel  # type: ignore
+from dirty.utils import util  # type: ignore
+from dirty.utils.dataset import Dataset  # type: ignore
 
 
 def train(args):
@@ -48,7 +46,9 @@ def train(args):
     # dataloaders
     batch_size = config["train"]["batch_size"]
     train_set = Dataset(
-        config["data"]["train_file"], config["data"], percent=float(args["--percent"])
+        config["data"]["train_file"],
+        config["data"],
+        percent=float(args["--percent"]),
     )
     dev_set = Dataset(config["data"]["dev_file"], config["data"])
     train_loader = DataLoader(
@@ -112,7 +112,7 @@ def train(args):
         trainer.fit(model, train_loader, val_loader)
 
 
-if __name__ == "__main__":
+def main():
     cmd_args = docopt(__doc__)
     print(f"Main process id {os.getpid()}", file=sys.stderr)
 
@@ -129,3 +129,7 @@ if __name__ == "__main__":
 
     if cmd_args["train"]:
         train(cmd_args)
+
+
+if __name__ == "__main__":
+    main()

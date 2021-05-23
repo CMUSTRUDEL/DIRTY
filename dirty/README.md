@@ -20,6 +20,7 @@ We also release a large real-world dataset **DIRT** for this task, which consist
 - [DIRTY: Augmenting Decompiler Output with Learned Variable Names and Types](#dirty-augmenting-decompiler-output-with-learned-variable-names-and-types)
   - [Installation](#installation)
     - [Requirements](#requirements)
+    - [Development](#development)
   - [Quick Start](#quick-start)
     - [Training](#training)
       - [Download DIRT](#download-dirt)
@@ -47,7 +48,27 @@ We also release a large real-world dataset **DIRT** for this task, which consist
 
 - Linux with Python ≥ 3.6
 - [PyTorch ≥ 1.5.1](https://pytorch.org/)
-- `pip install -r requirements.txt`
+- In order to run tests
+
+```
+$ pip install tox
+$ tox
+$ source .tox/pytest/bin/activate # if you would like to use the installed environment directly
+(pytest) $
+```
+
+- In order to run locally without testing
+
+```
+$ python -m env env
+$ source env/bin/activate
+(pytest) $ pip install -r local_requirements.txt
+```
+
+### Development
+
+If you are a contributor, you can enable commit hooks with github by installing `pre-commit` and running `pre-commit init` at the root directory
+
 
 ## Quick Start
 
@@ -59,8 +80,8 @@ The first step to train DIRTY is to download the preprocessed DIRT dataset.
 If you wish to obtain the original unpreprocessed dataset, please open an issue.
 
 ```bash
-cd dirty/
-python ../scripts/download.py --url https://drive.google.com/open?id=1JWRkIlzdBPhpeSHe1KsJNuRid7KWmggk --path . --fname dirt.tar.gz
+$ cd dirty/
+$ csvnpm-download https://drive.google.com/open?id=1JWRkIlzdBPhpeSHe1KsJNuRid7KWmggk . dirt.tar.gz
 ```
 
 The command would automatically download and decompress the dataset from Google Drive.
@@ -83,7 +104,7 @@ Suppose we want to reproduce the Multi-task model in Table~7 in the paper:
 
 ```bash
 cd dirty/
-python exp.py train --cuda --expname=dirty_mt multitask.xfmr.jsonnet
+dirty-exp train --cuda --expname=dirty_mt multitask.xfmr.jsonnet
 ```
 
 Then, please watch for the line `wandb: Run data is saved locally in ...` in the output.
@@ -101,15 +122,28 @@ As an alternative to train the model by yourself, you can download our trained D
 ```bash
 cd dirty/
 mkdir exp_runs/
-python ../scripts/download.py --url https://drive.google.com/open?id=1iDxlF9nsU4fgy2DRDbGg0WLosABspdHg --path . --fname exp_runs/dirty_mt.ckpt
+csvnpm-download https://drive.google.com/open?id=1iDxlF9nsU4fgy2DRDbGg0WLosABspdHg . exp_runs/dirty_mt.ckpt
 ```
 
 #### Test DIRTY
 
-First, run your trained/downloaded model to produce predictions on the DIRE test set.
+Althought there are not many tests, we currently have some automated tests
+
+- `mypy` type checker
+- `safety` secirity vulnerabililty database
+- `pipdeptree` conflicting versions of installed packages
+- `pytest`
+
+To execute the tests please run the command
 
 ```
-python exp.py train --cuda --expname=eval_dirty_mt multitask.xfmr.jsonnet --eval-ckpt <ckpt_path>
+$ tox
+```
+
+Beyond the automated tests, run your trained/downloaded model to produce predictions on the DIRTY test set.
+
+```
+dirty-exp train --cuda --expname=eval_dirty_mt multitask.xfmr.jsonnet --eval-ckpt <ckpt_path>
 ```
 
 `<ckpt_path>` is either `exp_runs/dirty_mt.ckpt` if you download our trained model,
@@ -135,7 +169,7 @@ You can inspect the prediction results, which is in the following format.
 Finally, use our standalone benchmark script:
 
 ```
-python -m utils.evaluate --pred-file pred_mt.json --config-file multitask.xfmr.jsonnet
+dirty-evaluate --pred-file pred_mt.json --config-file multitask.xfmr.jsonnet
 ```
 
 ## Common Issues
@@ -190,22 +224,18 @@ This folder contains neural models consisting of the DIRTY model.
 This folder contains code for the DIRT dataset, data preprocessing, evaluation, helper functions, and demos in the paper.
 
 ```
-├── dirty
-│   └── utils
-│       ├── case_study.py           # Generate results for Table 3 and Table 6 in the paper
-│       ├── code_processing.py      # Code canonicalization such as converting literals
-│       ├── compute_mi.py           # Compute the mutual information between variables and types as a proof-of-concept for MT
-│       ├── dataset.py              # A parallelized data loading class for preparing batched samples from DIRT for DIRTY
-│       ├── dataset_statistics.py   # Compute dataset statistics
-│       ├── dire_types.py -> ../../binary/dire_types.py
-│       ├── evaluate.py             # Evaluate final scores from json files saved from different methods for fair comparison
-│       ├── function.py -> ../../binary/function.py
-│       ├── ida_ast.py -> ../../binary/ida_ast.py
-│       ├── lexer.py
-│       ├── preprocess.py           # Preprocess data produced from `dataset-gen/` into the DIRT dataset
-│       ├── util.py
-│       ├── variable.py -> ../../binary/variable.py
-│       └── vocab.py
+dirty/utils
+|-- case_study.py                       # Generate results for Table 3 and Table 6 in the paper
+|-- code_processing.py                  # Code canonicalization such as converting literals
+|-- compute_mi.py                       # Compute the mutual information between variables and types as a proof-of-concept for MT
+|-- dataset.py                          # A parallelized data loading class for preparing batched samples from DIRT for DIRTY
+|-- dataset_statistics.py               # Compute dataset statistics
+|-- evaluate.py                         # Evaluate final scores from json files saved from different methods for fair comparison
+|-- __init__.py
+|-- lexer.py
+|-- preprocess.py                       # Preprocess data produced from `dataset-gen/` into the DIRT dataset
+|-- util.py
+`-- vocab.py
 ```
 
 #### `dirty/baselines`
@@ -227,12 +257,12 @@ Results are saved to corresponding json files and can be evaluated with `python 
 The `binary/` folder contains definitions for classes, including types, variables, and functions, constructed from decompiler outputs from binaries.
 
 ```
-├── binary
-│   ├── __init__.py     
-│   ├── dire_types.py   # constructing types and a type library
-│   ├── function.py     # definition and serialization for function instances
-│   ├── ida_ast.py      # constructing ASTs from IDA-Pro outputs
-│   └── variable.py     # definition and serialization for variable instances
+csvnpm/binary/
+|-- dire_types.py   # constructing types and a type library
+|-- function.py     # definition and serialization for function instances
+|-- ida_ast.py      # constructing ASTs from IDA-Pro outputs
+|-- __init__.py
+`-- variable.py     # definition and serialization for variable instances
 ```
 
 ### `idastubs/`

@@ -17,22 +17,18 @@ import multiprocessing
 import os
 import random
 import shutil
-import sys
 import tarfile
 from json import dumps
-from multiprocessing import Process
-from typing import Tuple
 
 import numpy as np
 import ujson as json
+from csvnpm.binary.dire_types import TypeLib, TypeLibCodec
+from csvnpm.binary.function import CollectedFunction
 from docopt import docopt
 from tqdm import tqdm
 
-from csvnpm.binary.dire_types import TypeInfo, TypeLib, TypeLibCodec
-from csvnpm.binary.function import CollectedFunction
-
-from dirty.utils.dataset import Example
 from dirty.utils.code_processing import canonicalize_code
+from dirty.utils.dataset import Example
 
 all_functions = dict()  # indexed by binaries
 
@@ -67,7 +63,10 @@ def json_line_reader(args):
                 json_str = line.strip()
                 if json_str:
                     func_json_list.append(
-                        (json_str, dict(file_name=fname[:-3], line_num=line_no))
+                        (
+                            json_str,
+                            dict(file_name=fname[:-3], line_num=line_no),
+                        )
                     )
     except (gzip.BadGzipFile, EOFError):
         print(f"Bad Gzip file {bin_file_name}")
@@ -212,7 +211,10 @@ def main(args):
             train_functions.setdefault(func_name, set()).add(func)
 
     print(
-        f"number training: {len(train_files)}, number dev: {len(dev_files)}, number test: {len(test_files)}"
+        f"number training: {len(train_files)}",
+        f"number dev: {len(dev_files)}",
+        f"number test: {len(test_files)}",
+        sep=", ",
     )
     print("dump training files")
     shards = [

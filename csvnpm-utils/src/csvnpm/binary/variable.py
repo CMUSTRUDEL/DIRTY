@@ -1,13 +1,13 @@
 """Information about variables in a function"""
 
 from json import dumps
-from typing import Any, Optional
 
-from csvnpm.binary.dire_types import TypeLib, TypeInfo
+from csvnpm.binary.dire_types import TypeInfo, TypeLibCodec
 
 
 class Location:
     """A variable location"""
+
     def json_key(self):
         """Returns a string suitable as a key in a JSON dict"""
         pass
@@ -25,7 +25,7 @@ class Register(Location):
     def json_key(self):
         return f"r{self.name}"
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other) -> bool:
         return isinstance(other, Register) and self.name == other.name
 
     def __hash__(self) -> int:
@@ -47,7 +47,7 @@ class Stack(Location):
     def json_key(self):
         return f"s{self.offset}"
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other) -> bool:
         return isinstance(other, Stack) and self.offset == other.offset
 
     def __hash__(self) -> int:
@@ -57,12 +57,10 @@ class Stack(Location):
         return f"Stk 0x{self.offset:x}"
 
 
-def location_from_json_key(key: str) -> "Location":
+def location_from_json_key(key: str) -> Location:
     """Hacky way to return a location from a JSON key"""
-    if key.startswith("s"):
-        return Stack(int(key[1:]))
-    else:
-        return Register(int(key[1:]))
+    return Stack(int(key[1:])) if key.startswith("s") else Register(int(key[1:]))
+
 
 class Variable:
     """A variable
@@ -89,7 +87,7 @@ class Variable:
         typ = TypeLibCodec.decode(dumps(d["t"]))
         return cls(typ=typ, name=d["n"], user=d["u"])
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other) -> bool:
         return (
             isinstance(other, Variable)
             and self.name == other.name

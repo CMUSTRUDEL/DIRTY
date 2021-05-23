@@ -1,10 +1,9 @@
 from collections import defaultdict
-
 from json import dumps
 from typing import DefaultDict, Mapping, Optional, Set, Tuple
 
+from csvnpm.binary.dire_types import TypeInfo, TypeLibCodec
 from csvnpm.binary.ida_ast import AST
-from csvnpm.binary.dire_types import TypeLibCodec, TypeInfo
 from csvnpm.binary.variable import Location, Stack, Variable, location_from_json_key
 
 
@@ -57,12 +56,14 @@ class Function:
         return_type = TypeLibCodec.decode(dumps(d["r"]))
         arguments = dict()
         for key, args in d["a"].items():
-            arguments[location_from_json_key(key)] = \
-                { Variable.from_json(arg) for arg in args }
+            arguments[location_from_json_key(key)] = {
+                Variable.from_json(arg) for arg in args
+            }
         local_vars = dict()
         for key, locs in d["l"].items():
-            local_vars[location_from_json_key(key)] = \
-                { Variable.from_json(loc) for loc in locs }
+            local_vars[location_from_json_key(key)] = {
+                Variable.from_json(loc) for loc in locs
+            }
         return cls(
             ast=ast,
             name=d["n"],
@@ -127,9 +128,13 @@ class Function:
             if isinstance(loc, Stack):
                 for v in vars[loc]:
                     accessible += [
-                        loc.offset - v.typ.size + acc for acc in v.typ.accessible_offsets()
+                        loc.offset - v.typ.size + acc
+                        for acc in v.typ.accessible_offsets()
                     ]
-                    starts += [loc.offset - v.typ.size + start for start in v.typ.start_offsets()]
+                    starts += [
+                        loc.offset - v.typ.size + start
+                        for start in v.typ.start_offsets()
+                    ]
         return (
             tuple(sorted(set(accessible))),
             tuple(sorted(set(starts))),

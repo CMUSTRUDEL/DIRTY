@@ -1,19 +1,15 @@
 import json
-import os
 from typing import Dict, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
+from csvnpm.binary.dire_types import TypeLibCodec
 from pytorch_lightning.metrics.functional import accuracy
 
-
-from csvnpm.binary.dire_types import TypeInfo, TypeLibCodec
-
-from dirty.utils.vocab import Vocab
-
-from dirty.model.encoder import Encoder
 from dirty.model.decoder import Decoder
+from dirty.model.encoder import Encoder
+from dirty.utils.vocab import Vocab
 
 
 class RenamingDecodeModule(pl.LightningModule):
@@ -346,7 +342,7 @@ class TypeReconstructionModel(pl.LightningModule):
 
         return dict(
             **ret_dict,
-            targets_nums=input_dict["target_mask"].sum(dim=1),
+            targets_nums=input_dict["target_mask"].sum(dim=1),  # type: ignore  # need typed_dict  # noqa: E501
             test_meta=target_dict["test_meta"],
             index=input_dict["index"],
             tgt_var_names=target_dict["tgt_var_names"],
@@ -359,7 +355,7 @@ class TypeReconstructionModel(pl.LightningModule):
         final_ret = self._shared_epoch_end(outputs, "test")
         if "pred_file" in self.config["test"]:
             results = {}
-            for (binary, func_name, decom_var_name), retype_pred, rename_pred in zip(
+            for ((binary, func_name, decom_var_name), retype_pred, rename_pred,) in zip(
                 final_ret["indexes"],
                 final_ret["retype_preds"].tolist()
                 if "retype_preds" in final_ret
@@ -388,10 +384,10 @@ class TypeReconstructionModel(pl.LightningModule):
             final_ret = {**final_ret, **ret}
         if self.retype and self.rename:
             # Evaluate rename accuracy on correctedly retyped samples
-            retype_preds = torch.cat([x[f"retype_preds"] for x in outputs])
-            retype_targets = torch.cat([x[f"retype_targets"] for x in outputs])
-            rename_preds = torch.cat([x[f"rename_preds"] for x in outputs])
-            rename_targets = torch.cat([x[f"rename_targets"] for x in outputs])
+            retype_preds = torch.cat([x["retype_preds"] for x in outputs])
+            retype_targets = torch.cat([x["retype_targets"] for x in outputs])
+            rename_preds = torch.cat([x["rename_preds"] for x in outputs])
+            rename_targets = torch.cat([x["rename_targets"] for x in outputs])
             if (retype_preds == retype_targets).sum() > 0:
                 self.log(
                     f"{prefix}_rename_on_correct_retype_acc",

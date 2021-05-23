@@ -40,7 +40,7 @@ All scripts are documented using [`docopt`](http://docopt.org/), please refer to
 
 ```bash
 python -m utils.preprocess \
-    --no-filtering \                                # optional: do not perform filtering 
+    --no-filtering \                                # optional: do not perform filtering
     --test-file=path/to/predefined/test_file.tar \
     "path/to/binary/dataset/*.tar.gz" \
     data/preprocessed_data
@@ -56,7 +56,7 @@ python -m utils.vocab \
     data/vocab.bpe10000
 ```
 
-Again, please refer to the script file's docstring for its complete usage. 
+Again, please refer to the script file's docstring for its complete usage.
 
 ## Running DIRE
 
@@ -75,8 +75,8 @@ python exp.py \
 
 `DIRE` uses [`json.net`]() for programmable configuration. Extra configs could be specified using the `--extra-config` argument.
 
-To evaluate a saved or pretrained model, run the following command. 
- 
+To evaluate a saved or pretrained model, run the following command.
+
  ```bash
 python exp.py \
     test \

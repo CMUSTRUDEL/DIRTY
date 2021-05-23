@@ -10,19 +10,17 @@ Options:
     --freq-cutoff=<int>        frequency cutoff [default: 5]
 """
 
+import json
 from collections import Counter
 from itertools import chain
 
-import torch
-import pickle
-from docopt import docopt
-import json
-import sentencepiece as spm
-from tqdm import tqdm
-
+import sentencepiece as spm  # type: ignore
 from csvnpm.binary.dire_types import TypeLibCodec
 from csvnpm.binary.variable import Register
+from docopt import docopt  # type: ignore
+from tqdm import tqdm  # type: ignore
 
+from dirty.utils.dataset import Dataset
 
 SAME_VARIABLE_TOKEN = "<IDENTITY>"
 END_OF_VARIABLE_TOKEN = "</s>"
@@ -223,7 +221,6 @@ class Vocab(object):
 
 
 if __name__ == "__main__":
-    from utils.dataset import Dataset
 
     args = docopt(__doc__)
     vocab_size = int(args["--size"])
@@ -246,7 +243,9 @@ if __name__ == "__main__":
     print(f"{len(subtype_counter)} subtypes in typelib")
 
     type_vocab_entry = VocabEntry.from_counter(
-        type_counter, size=len(type_counter), freq_cutoff=int(args["--freq-cutoff"])
+        type_counter,
+        size=len(type_counter),
+        freq_cutoff=int(args["--freq-cutoff"]),
     )
     subtype_vocab_entry = VocabEntry.from_counter(
         subtype_counter,
@@ -265,7 +264,10 @@ if __name__ == "__main__":
             reg_counter.update(
                 map(
                     lambda x: x.name,
-                    filter(lambda x: isinstance(x, Register), example.target.keys()),
+                    filter(
+                        lambda x: isinstance(x, Register),
+                        example.target.keys(),
+                    ),
                 )
             )
             name_counter.update(map(lambda x: x.name, example.target.values()))
@@ -274,10 +276,14 @@ if __name__ == "__main__":
                     preserved_tokens.add(token)
             f_src_token.write(" ".join(code_tokens) + "\n")
     name_vocab_entry = VocabEntry.from_counter(
-        name_counter, size=len(name_counter), freq_cutoff=int(args["--freq-cutoff"])
+        name_counter,
+        size=len(name_counter),
+        freq_cutoff=int(args["--freq-cutoff"]),
     )
     reg_vocab_entry = VocabEntry.from_counter(
-        reg_counter, size=len(reg_counter), freq_cutoff=int(args["--freq-cutoff"])
+        reg_counter,
+        size=len(reg_counter),
+        freq_cutoff=int(args["--freq-cutoff"]),
     )
 
     assert args["--use-bpe"]

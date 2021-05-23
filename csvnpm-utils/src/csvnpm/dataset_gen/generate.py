@@ -8,10 +8,10 @@
 import argparse
 import errno
 import hashlib
-from multiprocessing import Pool
 import os
 import subprocess
 import tempfile as tf
+from multiprocessing import Pool
 from typing import Iterable, Tuple
 
 from tqdm import tqdm  # type: ignore
@@ -166,18 +166,20 @@ class Runner:
         # additional files that we can't clean up from here
         with Pool(self.num_threads) as pool:
             for p in tqdm(
-                    pool.imap_unordered(self.run_one, self.binaries),
-                    total=self.num_files,
-                    leave=True,
-                    dynamic_ncols=True,
-                    unit="bin",
-                    smoothing=0.1,
+                pool.imap_unordered(self.run_one, self.binaries),
+                total=self.num_files,
+                leave=True,
+                dynamic_ncols=True,
+                unit="bin",
+                smoothing=0.1,
             ):
                 pass
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the decompiler to generate a corpus.")
+    parser = argparse.ArgumentParser(
+        description="Run the decompiler to generate a corpus."
+    )
     parser.add_argument(
         "--ida",
         metavar="IDA",
@@ -208,14 +210,17 @@ def main():
         required=True,
     )
     parser.add_argument(
-        "-o", "--output_dir", metavar="OUTPUT_DIR", help="output directory", required=True,
+        "-o",
+        "--output_dir",
+        metavar="OUTPUT_DIR",
+        help="output directory",
+        required=True,
     )
     parser.add_argument("--verbose", "-v", action="store_true")
-
 
     args = parser.parse_args()
     Runner(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
