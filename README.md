@@ -10,7 +10,7 @@
 
 # DIRTY: Augmenting Decompiler Output with Learned Variable Names and Types
 
-[**Code**](https://github.com/CMUSTRUDEL/DIRTY) | [**arXiv**](#common-issues) | [**Demo**](https://dirtdirty.github.io/explorer.html)
+[**Code**](https://github.com/CMUSTRUDEL/DIRTY) | [**arXiv**](https://arxiv.org/abs/2108.06363) | [**Demo**](https://dirtdirty.github.io/explorer.html)
 
 Original implementation for paper [Augmenting Decompiler Output with Learned Variable Names and Types](#common-issues).
 
