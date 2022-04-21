@@ -62,7 +62,8 @@ $ source .tox/pytest/bin/activate # if you would like to use the installed envir
 ```
 $ python -m venv env
 $ source env/bin/activate
-(pytest) $ pip install -r local_requirements.txt
+(env) $ pip install --upgrade pip setuptools # may be needed for old pip versions
+(env) $ pip install -r local_requirements.txt
 ```
 
 ### Development
