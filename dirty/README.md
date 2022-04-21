@@ -123,7 +123,7 @@ As an alternative to train the model by yourself, you can download our trained D
 ```bash
 cd dirty/
 mkdir exp_runs/
-csvnpm-download https://drive.google.com/open?id=1iDxlF9nsU4fgy2DRDbGg0WLosABspdHg . exp_runs/dirty_mt.ckpt
+csvnpm-download 'https://docs.google.com/uc?export=download&id=1iDxlF9nsU4fgy2DRDbGg0WLosABspdHg&confirm=t' . exp_runs/dirty_mt.ckpt
 ```
 
 #### Test DIRTY
