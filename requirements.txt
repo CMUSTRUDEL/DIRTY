@@ -7,3 +7,4 @@ sentencepiece==0.1.91
 ujson==3.2.0
 wandb==0.10.12
 webdataset==0.1.40
+gdown==4.4.0
