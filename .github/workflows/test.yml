@@ -39,6 +39,7 @@ jobs:
           wandb offline
       - name: Infer and evaluate
         working-directory: ./dirty
+        run: |
           python exp.py train --expname=eval_dirty_mt multitask_test_ci.xfmr.jsonnet --eval-ckpt exp_runs/dirty_mt.ckpt
           ls wandb/offline*/files/
           cat wandb/offline*/files/wandb-summary.json
