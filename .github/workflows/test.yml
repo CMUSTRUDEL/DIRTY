@@ -38,8 +38,8 @@ jobs:
           gdown https://drive.google.com/uc?id=1iDxlF9nsU4fgy2DRDbGg0WLosABspdHg -O exp_runs/dirty_mt.ckpt
           wandb offline
           python exp.py train --expname=eval_dirty_mt multitask_test_ci.xfmr.jsonnet --eval-ckpt exp_runs/dirty_mt.ckpt
-          cat wandb/run-20220421_115850-1hs8x46i/files/wandb-summary.json
-          cat wandb/run-20220421_115850-1hs8x46i/files/wandb-summary.json | jq ".test_retype_acc"
-          cat wandb/run-20220421_115850-1hs8x46i/files/wandb-summary.json | jq ".test_rename_acc"
-          cat wandb/run-20220421_115850-1hs8x46i/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.7) exit 1}'
-          cat wandb/run-20220421_115850-1hs8x46i/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.999) exit 1}'
+          cat wandb/latest-run/files/wandb-summary.json
+          cat wandb/latest-run/files/wandb-summary.json | jq ".test_retype_acc"
+          cat wandb/latest-run/files/wandb-summary.json | jq ".test_rename_acc"
+          cat wandb/latest-run/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.7) exit 1}'
+          cat wandb/latest-run/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.999) exit 1}'
