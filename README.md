@@ -60,12 +60,12 @@ If you wish to obtain the original unpreprocessed dataset, please open an issue.
 
 ```bash
 cd dirty/
-gdown https://drive.google.com/uc?id=1JWRkIlzdBPhpeSHe1KsJNuRid7KWmggk -O dirt.tar.gz
+wget cmu-itl.s3.amazonaws.com/dirty/dirt.tar.gz -O dirt.tar.gz
 tar -xzf dirt.tar.gz
 ```
 
-The command would automatically download and decompress the dataset from Google Drive.
-If your machine does not have access to Google, please manually download from the above link and untar it to `data1/`.
+The command would automatically download and decompress the dataset from Amazon S3.
+If your machine does not have access to AWS, please manually download from the above link and untar it to `data1/`.
 
 #### Train DIRTY
 
@@ -102,7 +102,7 @@ As an alternative to train the model by yourself, you can download our trained D
 ```bash
 cd dirty/
 mkdir exp_runs/
-gdown https://drive.google.com/uc?id=1iDxlF9nsU4fgy2DRDbGg0WLosABspdHg -O exp_runs/dirty_mt.ckpt
+wget cmu-itl.s3.amazonaws.com/dirty/dirty_mt.ckpt -O exp_runs/dirty_mt.ckpt
 ```
 
 #### Test DIRTY
