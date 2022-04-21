@@ -108,7 +108,8 @@ def train(args):
             num_workers=8,
             pin_memory=True,
         )
-        trainer.test(model, test_dataloaders=test_loader, ckpt_path=args["--eval-ckpt"])
+        ret = trainer.test(model, test_dataloaders=test_loader, ckpt_path=args["--eval-ckpt"])
+        json.dump(ret[0], open("test_result.json", "w"))
     else:
         trainer.fit(model, train_loader, val_loader)
 

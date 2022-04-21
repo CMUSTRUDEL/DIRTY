@@ -41,9 +41,8 @@ jobs:
         working-directory: ./dirty
         run: |
           python exp.py train --expname=eval_dirty_mt multitask_test_ci.xfmr.jsonnet --eval-ckpt exp_runs/dirty_mt.ckpt
-          ls wandb/offline*/files/
-          cat wandb/offline*/files/wandb-summary.json
-          cat wandb/offline*/files/wandb-summary.json | jq ".test_retype_acc"
-          cat wandb/offline*/files/wandb-summary.json | jq ".test_rename_acc"
-          cat wandb/offline*/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.7) exit 1}'
-          cat wandb/offline*/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.999) exit 1}'
+          cat test_result.json
+          cat test_result.json | jq ".test_retype_acc"
+          cat test_result.json | jq ".test_rename_acc"
+          cat test_result.json | jq ".test_retype_acc" | awk '{if ($1 < 0.999) exit 1}'
+          cat test_result.json | jq ".test_rename_acc" | awk '{if ($1 < 0.999) exit 1}'
