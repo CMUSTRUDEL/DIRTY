@@ -2,6 +2,8 @@
   <img src="fig.png" width="800">
   <br />
   <br />
+  <a href="https://github.com/CMUSTRUDEL/DIRTY/actions/workflows/test.yml"><img alt="GitHub stars" src="https://img.shields.io/github/workflow/status/CMUSTRUDEL/DIRTY/Test" /></a>
+  <a href="https://github.com/CMUSTRUDEL/DIRTY/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/CMUSTRUDEL/DIRTY" /></a>
   <a href="https://github.com/CMUSTRUDEL/DIRTY/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/github/license/CMUSTRUDEL/DIRTY" /></a>
   <a href="https://github.com/ambv/black"><img alt="Code Style" src="https://img.shields.io/badge/code%20style-black-000000.svg" /></a>
 </p>

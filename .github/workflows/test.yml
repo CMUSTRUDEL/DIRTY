@@ -32,10 +32,10 @@ jobs:
       - name: Download data and model
         working-directory: ./dirty
         run: |
-          wget cmu-itl.s3.amazonaws.com/dirty/dirt.tar.gz -O dirt.tar.gz
+          wget -q cmu-itl.s3.amazonaws.com/dirty/dirt.tar.gz -O dirt.tar.gz
           tar -xzf dirt.tar.gz
           mkdir exp_runs/
-          wget cmu-itl.s3.amazonaws.com/dirty/dirty_mt.ckpt -O exp_runs/dirty_mt.ckpt
+          wget -q cmu-itl.s3.amazonaws.com/dirty/dirty_mt.ckpt -O exp_runs/dirty_mt.ckpt
           wandb offline
       - name: Infer and evaluate
         working-directory: ./dirty
