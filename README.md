@@ -60,7 +60,7 @@ If you wish to obtain the original unpreprocessed dataset, please open an issue.
 
 ```bash
 cd dirty/
-gdown https://drive.google.com/open?id=1JWRkIlzdBPhpeSHe1KsJNuRid7KWmggk -O dirt.tar.gz
+gdown https://drive.google.com/uc?id=1JWRkIlzdBPhpeSHe1KsJNuRid7KWmggk -O dirt.tar.gz
 tar -xzf dirt.tar.gz
 ```
 
@@ -252,6 +252,25 @@ Legacy code for the DIRE paper.
 
 If you use DIRTY/DIRT in your research or wish to refer to the baseline results, please use the following BibTeX.
 
-```
-Not available yet.
+```bibtex
+@inproceedings {chen2021augmenting,
+  title = {Augmenting Decompiler Output with Learned Variable Names and Types},
+  booktitle = {31st USENIX Security Symposium (USENIX Security 22)},
+  year = {2022},
+  address = {Boston, MA},
+  url = {https://www.usenix.org/conference/usenixsecurity22/presentation/chen-qibin},
+  publisher = {USENIX Association},
+  month = aug,
+}
+
+@inproceedings {lacomis2019dire,
+  author={Lacomis, Jeremy and Yin, Pengcheng and Schwartz, Edward and Allamanis, Miltiadis and Le Goues, Claire and Neubig, Graham and Vasilescu, Bogdan},
+  booktitle={2019 34th IEEE/ACM International Conference on Automated Software Engineering (ASE)},
+  title={DIRE: A Neural Approach to Decompiled Identifier Naming},
+  year={2019},
+  volume={},
+  number={},
+  pages={628-639},
+  doi={10.1109/ASE.2019.00064}
+}
 ```
