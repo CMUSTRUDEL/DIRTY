@@ -60,7 +60,7 @@ $ source .tox/pytest/bin/activate # if you would like to use the installed envir
 - In order to run locally without testing
 
 ```
-$ python -m env env
+$ python -m venv env
 $ source env/bin/activate
 (pytest) $ pip install -r local_requirements.txt
 ```
