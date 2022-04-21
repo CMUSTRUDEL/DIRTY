@@ -45,7 +45,7 @@ We also release a large real-world dataset **DIRT** for this task, which consist
 
 ### Requirements
 
-- Linux with Python ≥ 3.6
+- Linux with Python 3.6/3.7/3.8
 - [PyTorch ≥ 1.5.1](https://pytorch.org/)
 - `pip install -r requirements.txt`
 
