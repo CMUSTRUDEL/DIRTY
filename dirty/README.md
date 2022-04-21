@@ -82,7 +82,7 @@ If you wish to obtain the original unpreprocessed dataset, please open an issue.
 
 ```bash
 $ cd dirty/
-$ csvnpm-download https://drive.google.com/open?id=1JWRkIlzdBPhpeSHe1KsJNuRid7KWmggk . dirt.tar.gz
+$ csvnpm-download 'https://docs.google.com/uc?export=download&id=1JWRkIlzdBPhpeSHe1KsJNuRid7KWmggk&confirm=t' . dirt.tar.gz
 ```
 
 The command would automatically download and decompress the dataset from Google Drive.
