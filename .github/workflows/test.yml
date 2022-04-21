@@ -37,9 +37,12 @@ jobs:
           mkdir exp_runs/
           gdown https://drive.google.com/uc?id=1iDxlF9nsU4fgy2DRDbGg0WLosABspdHg -O exp_runs/dirty_mt.ckpt
           wandb offline
+      - name: Infer and evaluate
+        working-directory: ./dirty
           python exp.py train --expname=eval_dirty_mt multitask_test_ci.xfmr.jsonnet --eval-ckpt exp_runs/dirty_mt.ckpt
-          cat wandb/latest-run/files/wandb-summary.json
-          cat wandb/latest-run/files/wandb-summary.json | jq ".test_retype_acc"
-          cat wandb/latest-run/files/wandb-summary.json | jq ".test_rename_acc"
-          cat wandb/latest-run/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.7) exit 1}'
-          cat wandb/latest-run/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.999) exit 1}'
+          ls wandb/offline*/files/
+          cat wandb/offline*/files/wandb-summary.json
+          cat wandb/offline*/files/wandb-summary.json | jq ".test_retype_acc"
+          cat wandb/offline*/files/wandb-summary.json | jq ".test_rename_acc"
+          cat wandb/offline*/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.7) exit 1}'
+          cat wandb/offline*/files/wandb-summary.json | jq ".test_retype_acc" | awk '{if ($1 < 0.999) exit 1}'
