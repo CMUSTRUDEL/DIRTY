@@ -12,7 +12,7 @@
 
 # DIRTY: Augmenting Decompiler Output with Learned Variable Names and Types
 
-[**Code**](https://github.com/CMUSTRUDEL/DIRTY) | [**arXiv**](#common-issues) | [**Demo**](https://dirtdirty.github.io/explorer.html)
+[**Code**](https://github.com/CMUSTRUDEL/DIRTY) | [**Paper PDF**](https://cmustrudel.github.io/papers/ChenDIRTY2022.pdf) | [**Demo**](https://dirtdirty.github.io/explorer.html)
 
 Original implementation for paper [Augmenting Decompiler Output with Learned Variable Names and Types](#common-issues).
 
@@ -148,7 +148,7 @@ python -m utils.evaluate --pred-file pred_mt.json --config-file multitask.xfmr.j
 Where do I find the DIRTY paper?
 </summary>
 <br/>
-We apologize for the inconvenience. It is currently under peer review.
+[PDF](https://cmustrudel.github.io/papers/ChenDIRTY2022.pdf) on our group website. The paper "Augmenting Decompiler Output with Learned Variable Names and Types" (Chen, Q., Lacomis, J., Schwartz, E.J., Le Goues, C., Neubig, G., and Vasilescu, B.) appeared at USENIX Security Symposium, Oakland ’22, USENIX Association (2022).
 </details>
 
 ## Structure
