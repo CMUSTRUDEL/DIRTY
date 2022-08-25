@@ -29,7 +29,6 @@ We also release a large real-world dataset **DIRT** for this task, which consist
     - [Inference](#inference)
       - [Download Trained Model](#download-trained-model)
       - [Test DIRTY](#test-dirty)
-  - [Common Issues](#common-issues)
   - [Structure](#structure)
     - [`dirty/`](#dirty)
       - [`dirty/exp.py`](#dirtyexppy)
@@ -140,16 +139,6 @@ Finally, use our standalone benchmark script:
 ```
 python -m utils.evaluate --pred-file pred_mt.json --config-file multitask.xfmr.jsonnet
 ```
-
-## Common Issues
-
-<details>
-<summary>
-Where do I find the DIRTY paper?
-</summary>
-<br/>
-[PDF](https://cmustrudel.github.io/papers/ChenDIRTY2022.pdf) on our group website. The paper "Augmenting Decompiler Output with Learned Variable Names and Types" (Chen, Q., Lacomis, J., Schwartz, E.J., Le Goues, C., Neubig, G., and Vasilescu, B.) appeared at USENIX Security Symposium, Oakland ’22, USENIX Association (2022).
-</details>
 
 ## Structure
 
