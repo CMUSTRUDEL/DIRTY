@@ -246,22 +246,20 @@ If you use DIRTY/DIRT in your research or wish to refer to the baseline results,
 ```bibtex
 @inproceedings {chen2021augmenting,
   title = {Augmenting Decompiler Output with Learned Variable Names and Types},
-  booktitle = {31st USENIX Security Symposium (USENIX Security 22)},
+  author = {Chen, Qibin and Lacomis, Jeremy and Schwartz, Edward J. and {Le~Goues}, Claire and Neubig, Graham and Vasilescu, Bogdan},
+  booktitle = {31st USENIX Security Symposium},
   year = {2022},
   address = {Boston, MA},
   url = {https://www.usenix.org/conference/usenixsecurity22/presentation/chen-qibin},
-  publisher = {USENIX Association},
   month = aug,
 }
 
 @inproceedings {lacomis2019dire,
-  author={Lacomis, Jeremy and Yin, Pengcheng and Schwartz, Edward and Allamanis, Miltiadis and Le Goues, Claire and Neubig, Graham and Vasilescu, Bogdan},
-  booktitle={2019 34th IEEE/ACM International Conference on Automated Software Engineering (ASE)},
-  title={DIRE: A Neural Approach to Decompiled Identifier Naming},
-  year={2019},
-  volume={},
-  number={},
-  pages={628-639},
-  doi={10.1109/ASE.2019.00064}
+  title = {DIRE: A Neural Approach to Decompiled Identifier Naming},
+  author = {Lacomis, Jeremy and Yin, Pengcheng and Schwartz, Edward J. and Allamanis, Miltiadis and {Le~Goues}, Claire and Neubig, Graham and Vasilescu, Bogdan},
+  booktitle = {34th IEEE/ACM International Conference on Automated Software Engineering},
+  year = {2019},
+  address = {San Diego, CA},
+  pages = {628--639},
 }
 ```
