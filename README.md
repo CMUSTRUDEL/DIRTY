@@ -57,7 +57,7 @@ We also release a large real-world dataset **DIRT** for this task, which consist
 #### Download DIRT
 
 The first step to train DIRTY is to download the preprocessed DIRT dataset.
-If you wish to obtain the original unpreprocessed dataset, please open an issue.
+If you would like the full, unpreprocessed dataset, it is available at https://doi.org/10.1184/R1/20732656.v1
 
 ```bash
 cd dirty/
