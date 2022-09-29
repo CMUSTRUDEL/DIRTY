@@ -917,7 +917,7 @@ class Union(UDT):
 
     def _to_json(self) -> t.Dict[str, t.Any]:
         return {
-            "T": 8,
+            "T": 7,
             "n": self.name,
             "m": [m._to_json() for m in self.members],
             "p": self.padding,
