@@ -10,6 +10,7 @@ Options:
     --test-file=<file>         test file
     --no-filtering             do not filter files
     --num-workers=<int>        number of workers [default: 16]
+    --chunksize=<int>          chunksize for multiprocessing [default: 64]
     --preprocess               only preprocess
 """
 
@@ -115,6 +116,7 @@ def main(args):
     os.system(f"mkdir -p {tgt_folder}/files")
     os.system(f"mkdir -p {tgt_folder}/types")
     num_workers = int(args["--num-workers"])
+    chunksize = int(args["--chunksize"])
 
     valid_example_count = 0
 
@@ -126,10 +128,10 @@ def main(args):
                 (max_files, bin_number, bin_path)
                 for bin_number, bin_path in enumerate(bins)
             ),
-            chunksize=64,
+            chunksize=chunksize,
         )
 
-        example_iter = pool.imap(example_generator, json_iter, chunksize=64)
+        example_iter = pool.imap(example_generator, json_iter, chunksize=chunksize)
 
         for examples in tqdm(
             example_iter, smoothing=0, unit="examples", unit_scale=True
@@ -189,7 +191,9 @@ def main(args):
     # Create types from filtered training set
     with multiprocessing.Pool(num_workers) as pool:
         pool.map(
-            type_dumper, ((tgt_folder, fname) for fname in train_files), chunksize=64,
+            type_dumper,
+            ((tgt_folder, fname) for fname in train_files),
+            chunksize=chunksize,
         )
     print("reading typelib")
     typelib = TypeLib()
