@@ -134,7 +134,7 @@ def main(args):
         example_iter = pool.imap(example_generator, json_iter, chunksize=chunksize)
 
         for examples in tqdm(
-            example_iter, smoothing=0, unit="examples", unit_scale=True
+            example_iter, smoothing=0, unit=" examples", unit_scale=True
         ):
             if not examples:
                 continue
