@@ -114,7 +114,7 @@ def main(args):
     os.system(f"mkdir -p {tgt_folder}")
     os.system(f"mkdir -p {tgt_folder}/files")
     os.system(f"mkdir -p {tgt_folder}/types")
-    num_workers = args["--num-workers"]
+    num_workers = int(args["--num-workers"])
 
     valid_example_count = 0
 
