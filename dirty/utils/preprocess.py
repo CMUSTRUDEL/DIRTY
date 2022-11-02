@@ -9,7 +9,7 @@ Options:
     --shard-size=<int>         shard size [default: 5000]
     --test-file=<file>         test file
     --no-filtering             do not filter files
-    --num-workers              number of workers [default: 16]
+    --num-workers=<int>        number of workers [default: 16]
     --preprocess               only preprocess
 """
 
