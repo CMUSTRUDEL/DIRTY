@@ -9,6 +9,7 @@ Options:
     --shard-size=<int>         shard size [default: 5000]
     --test-file=<file>         test file
     --no-filtering             do not filter files
+    --num-workers              number of workers [default: 16]
     --preprocess               only preprocess
 """
 
@@ -113,7 +114,7 @@ def main(args):
     os.system(f"mkdir -p {tgt_folder}")
     os.system(f"mkdir -p {tgt_folder}/files")
     os.system(f"mkdir -p {tgt_folder}/types")
-    num_workers = 16
+    num_workers = args["--num-workers"]
 
     valid_example_count = 0
 
