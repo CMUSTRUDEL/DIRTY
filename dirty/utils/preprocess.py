@@ -130,7 +130,9 @@ def main(args):
 
         example_iter = pool.imap(example_generator, json_iter, chunksize=64)
 
-        for examples in tqdm(example_iter):
+        for examples in tqdm(
+            example_iter, smoothing=0, unit="examples", unit_scale=True
+        ):
             if not examples:
                 continue
             json_file_name = examples[0].binary_file["file_name"].split("/")[-1]
