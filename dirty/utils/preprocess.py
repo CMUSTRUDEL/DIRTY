@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Usage:
-    preprocess.py [options] INPUT_FOLDER INPUT_FNAMES TARGET_FOLDER
+    preprocess.py [options] INPUT_FOLDER TARGET_FOLDER
 
 Options:
     -h --help                  Show this screen.
@@ -9,6 +9,7 @@ Options:
     --shard-size=<int>         shard size [default: 5000]
     --test-file=<file>         test file
     --no-filtering             do not filter files
+    --preprocess               only preprocess
 """
 
 import glob
@@ -57,21 +58,21 @@ def example_generator(json_str_list):
 
 
 def json_line_reader(args):
-    fdir, fname = args
-    bin_file_name = os.path.join(fdir, "bins", fname)
+    max_files, bin_number, bin_path = args
     func_json_list = []
     try:
-        with gzip.open(bin_file_name, "rt") as bin_file:
+        with gzip.open(bin_path, "rt") as bin_file:
             for line_no, line in enumerate(bin_file):
                 json_str = line.strip()
+                fname = os.path.basename(bin_path)[:-3]
                 if json_str:
                     func_json_list.append(
-                        (json_str, dict(file_name=fname[:-3], line_num=line_no))
+                        (json_str, dict(file_name=fname, line_num=line_no))
                     )
     except (gzip.BadGzipFile, EOFError):
-        print(f"Bad Gzip file {bin_file_name}")
-    except Exception:
-        print(f"Bad Gzip file {bin_file_name} unknown error")
+        print(f"Bad Gzip file {bin_path}")
+    except Exception as e:
+        print(f"Bad Gzip file {bin_path}, {e}")
 
     return func_json_list
 
@@ -98,16 +99,10 @@ def main(args):
 
     tgt_folder = args["TARGET_FOLDER"]
     input_folder = args["INPUT_FOLDER"]
-    input_fnames_file = args["INPUT_FNAMES"]
-    input_fnames = []
+
+    bins_dir_path = os.path.join(input_folder, "bins")
+    bins = (f.path for f in os.scandir(bins_dir_path) if f.is_file())
     max_files = int(args["--max"])
-    with open(input_fnames_file) as f:
-        for s in f:
-            s = s.strip()
-            if s.endswith(".gz"):
-                input_fnames.append(s)
-            if len(input_fnames) >= max_files:
-                break
     shard_size = int(args["--shard-size"])
 
     if os.path.exists(tgt_folder):
@@ -126,7 +121,10 @@ def main(args):
     with multiprocessing.Pool(num_workers) as pool:
         json_iter = pool.imap(
             json_line_reader,
-            ((input_folder, fname) for fname in input_fnames),
+            (
+                (max_files, bin_number, bin_path)
+                for bin_number, bin_path in enumerate(bins)
+            ),
             chunksize=64,
         )
 
@@ -146,6 +144,8 @@ def main(args):
             valid_example_count += len(examples)
 
     print("valid examples: ", valid_example_count)
+    if args["--preprocess"]:
+        return
 
     cur_dir = os.getcwd()
     all_files = glob.glob(os.path.join(tgt_folder, "files/*.jsonl"))
@@ -186,9 +186,7 @@ def main(args):
     # Create types from filtered training set
     with multiprocessing.Pool(num_workers) as pool:
         pool.map(
-            type_dumper,
-            ((tgt_folder, fname) for fname in train_files),
-            chunksize=64,
+            type_dumper, ((tgt_folder, fname) for fname in train_files), chunksize=64,
         )
     print("reading typelib")
     typelib = TypeLib()
