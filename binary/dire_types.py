@@ -916,12 +916,14 @@ class Union(UDT):
         return cls(name=d["n"], members=d["m"], padding=d["p"])
 
     def _to_json(self) -> t.Dict[str, t.Any]:
-        return {
+        encoded = {
             "T": 7,
             "n": self.name,
             "m": [m._to_json() for m in self.members],
-            "p": self.padding,
         }
+        if self.has_padding():
+            encoded["p"] = self.padding._to_json()
+        return encoded
 
     def __eq__(self, other: t.Any) -> bool:
         if isinstance(other, Union):
