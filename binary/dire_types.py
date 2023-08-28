@@ -913,7 +913,7 @@ class Union(UDT):
 
     @classmethod
     def _from_json(cls, d: t.Dict[str, t.Any]) -> "Union":
-        return cls(name=d["n"], members=d["m"], padding=d["p"])
+        return cls(name=d["n"], members=d["m"], padding=d["p"] if "p" in d else None)
 
     def _to_json(self) -> t.Dict[str, t.Any]:
         encoded = {
