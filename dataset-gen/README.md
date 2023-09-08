@@ -21,10 +21,8 @@ A copy of Hex-Rays (and, implicitly, IDA Pro) is also required.
 Use
 ===
 
-Use is fairly simple, given a directory of binaries and an existing output
-directory, just run the [run_decompiler.py](run_decompiler.py) script with
-Python 3:
-`python3 run_decompiler.py --ida /path/to/idat64 BINARIES_DIR OUTPUT_DIR`
+To use run the [generate.py](generate.py) script with Python 3:
+`python3 generate.py --ida /path/to/idat64 -b BINARIES_DIR -o OUTPUT_DIR`
 
 This generates a `.jsonl` file for each binary in `BINARIES_DIR`. The file is in
 the [JSON Lines](http://jsonlines.org) format, and each entry corresponds to a
